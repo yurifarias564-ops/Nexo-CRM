@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, CheckCheck, Clock, FileText, Lock, MapPin, MessageCircle, Paperclip, Search, Send, UserRound, X, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, Check, CheckCheck, Clock, FileText, Lock, MapPin, MessageCircle, Paperclip, Search, Send, UserRound, X, Zap, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, Empty, Spinner, TagPill } from "@/components/ui/misc";
 import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-replies";
 import { TemplateModal } from "./template-modal";
+import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { cn, formatPhone } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time-ago";
 import { useLatest } from "@/lib/hooks";
@@ -188,6 +189,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const [now, setNow] = useState(() => Date.now());
   const [file, setFile] = useState<File | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
+  const [schedOpen, setSchedOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -416,6 +418,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
             <p className="min-w-0 flex-1 text-sm text-amber-100">
               Janela de 24h encerrada. Pela regra da API oficial, só é possível enviar um <b>modelo aprovado</b> até o cliente responder.
             </p>
+            <Button size="sm" variant="outline" onClick={() => setSchedOpen(true)}><CalendarClock className="h-3.5 w-3.5" /> Agendar</Button>
             <Button size="sm" onClick={() => setTplOpen(true)}><FileText className="h-3.5 w-3.5" /> Enviar modelo</Button>
           </div>
         ) : (
@@ -441,6 +444,9 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
               <button onClick={() => fileInput.current?.click()} className="mb-0.5 rounded-lg p-2.5 text-slate-400 transition hover:bg-ink-800 hover:text-brand-200" title="Anexar foto, vídeo, áudio ou documento" aria-label="Anexar arquivo">
                 <Paperclip className="h-5 w-5" />
               </button>
+              <button onClick={() => setSchedOpen(true)} className="mb-0.5 rounded-lg p-2.5 text-slate-400 transition hover:bg-ink-800 hover:text-brand-200" title="Agendar mensagem para depois" aria-label="Agendar mensagem">
+                <CalendarClock className="h-5 w-5" />
+              </button>
               <input ref={fileInput} type="file" className="hidden"
                 accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
                 onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
@@ -462,6 +468,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
           </div>
         )}
       </footer>
+      <ScheduleMessageModal open={schedOpen} onClose={() => setSchedOpen(false)} conversationId={conv.id} leadId={conv.lead_id} contactName={name} />
       <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ conversationId: conv.id }} channelId={conv.channel_id}
         defaultFirstParam={(conv.leads?.name ?? conv.contact_name ?? "").split(" ")[0]} />
     </div>

@@ -36,6 +36,7 @@ await db.exec(`
 `);
 
 for (const f of readdirSync(MIG).filter((f) => f.endsWith(".sql")).sort()) {
+  if (readFileSync(`${MIG}/${f}`, "utf8").startsWith("-- @supabase-only")) { console.log("migration (só Supabase, pulada):", f); continue; }
   try { await db.exec(readFileSync(`${MIG}/${f}`, "utf8")); console.log("migration ok:", f); }
   catch (e) { console.log("MIGRATION FAILED:", f, e.message); process.exit(1); }
 }
@@ -168,6 +169,30 @@ await expectError("agendamento não pode apontar lead de outra empresa", async (
 }, "42501");
 await expectError("A não agenda em nome de outro usuário", () => as(A, "insert into public.appointments (organization_id, lead_id, user_id, title, starts_at, ends_at) values ($1,$2,$3,'X', now(), now()+interval '1 hour')", [orgA, leadA, C]), "42501");
 await expectError("fim antes do início é recusado", () => as(A, "insert into public.appointments (organization_id, lead_id, user_id, title, starts_at, ends_at) values ($1,$2,$3,'X', now()+interval '2 hour', now())", [orgA, leadA, A]), "23514");
+
+console.log("\n# Mensagens agendadas");
+const sch = (await as(A, "insert into public.scheduled_messages (organization_id, lead_id, created_by, body, send_at) values ($1,$2,$3,'E aí, tudo certo?', now() - interval '1 minute') returning id", [orgA, leadA, A]))[0].id;
+await as(A, "insert into public.scheduled_messages (organization_id, lead_id, created_by, body, send_at) values ($1,$2,$3,'Futura', now() + interval '1 day')", [orgA, leadA, A]);
+ok("A agenda mensagem para lead da empresa", Boolean(sch));
+ok("B não vê mensagens agendadas de A", (await as(B, "select * from public.scheduled_messages")).length === 0);
+ok("B não cancela mensagem de A", (await as(B, "update public.scheduled_messages set status='canceled' where id=$1 returning 1", [sch])).length === 0);
+await expectError("usuário não marca mensagem como enviada", () => as(A, "update public.scheduled_messages set status='sent' where id=$1", [sch]), "42501");
+await expectError("usuário não altera tentativas", () => as(A, "update public.scheduled_messages set attempts=0 where id=$1", [sch]), "42501");
+await expectError("usuário não chama o disparador", () => as(A, "select * from public.claim_scheduled_messages(10)"), "42501");
+await expectError("agendar para lead de outra empresa é recusado", async () => {
+  const lb = (await su("select id from public.leads where organization_id=$1 limit 1", [orgB]))[0].id;
+  await as(A, "insert into public.scheduled_messages (organization_id, lead_id, created_by, body, send_at) values ($1,$2,$3,'x', now())", [orgA, lb, A]);
+}, "42501");
+await expectError("mensagem sem texto nem modelo é recusada", () => as(A, "insert into public.scheduled_messages (organization_id, lead_id, created_by, send_at) values ($1,$2,$3, now())", [orgA, leadA, A]), "23514");
+const c1 = await as("service", "select id from public.claim_scheduled_messages(10)");
+const c2 = await as("service", "select id from public.claim_scheduled_messages(10)");
+ok("disparador pega só as vencidas (1 de 2)", c1.length === 1 && c1[0].id === sch, JSON.stringify(c1));
+ok("segunda execução não pega a mesma mensagem (sem duplicar)", c2.length === 0);
+ok("mensagem reservada fica 'enviando' com 1 tentativa", (await su("select status, attempts from public.scheduled_messages where id=$1", [sch]))[0].attempts === 1);
+await su("update public.scheduled_messages set claimed_at = now() - interval '11 minutes' where id=$1", [sch]);
+await as("service", "select id from public.claim_scheduled_messages(10)");
+ok("travada há >10 min vira 'falhou' (não reenvia às cegas)", (await su("select status from public.scheduled_messages where id=$1", [sch]))[0].status === "failed");
+ok("usuário pode reagendar uma que falhou", (await as(A, "update public.scheduled_messages set status='pending', send_at=now()+interval '1 hour' where id=$1 returning 1", [sch])).length === 1);
 
 console.log("\n# Limite de uso");
 await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");

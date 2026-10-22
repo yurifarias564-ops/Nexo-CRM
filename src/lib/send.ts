@@ -35,24 +35,24 @@ export async function resolveTarget(sb: SupabaseClient, orgId: string, t: SendTa
   let conversationId: string | null = null;
 
   if (t.conversationId) {
-    const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id").eq("id", t.conversationId).maybeSingle();
+    const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id").eq("id", t.conversationId).eq("organization_id", orgId).maybeSingle();
     if (!conv) throw new HttpError(404, "Conversa não encontrada");
     channelId = conv.channel_id;
     waId = conv.wa_id;
     conversationId = conv.id;
   } else if (t.leadId) {
-    const { data: lead } = await sb.from("leads").select("id, name, phone").eq("id", t.leadId).maybeSingle();
+    const { data: lead } = await sb.from("leads").select("id, name, phone").eq("id", t.leadId).eq("organization_id", orgId).maybeSingle();
     if (!lead) throw new HttpError(404, "Lead não encontrado");
     if (!lead.phone) throw new HttpError(422, `O lead "${lead.name}" não tem telefone`);
     // Prefere o canal da conversa que já existe com esse lead
     const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id")
-      .eq("lead_id", lead.id).order("last_message_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+      .eq("lead_id", lead.id).eq("organization_id", orgId).order("last_message_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
     if (conv && (!t.channelId || conv.channel_id === t.channelId)) {
       channelId = conv.channel_id;
       waId = conv.wa_id;
       conversationId = conv.id;
     } else {
-      let q = sb.from("whatsapp_channels").select("id").eq("status", "connected").order("created_at").limit(1);
+      let q = sb.from("whatsapp_channels").select("id").eq("organization_id", orgId).eq("status", "connected").order("created_at").limit(1);
       if (t.channelId) q = q.eq("id", t.channelId);
       const { data: chs } = await q;
       if (!chs?.length) throw new HttpError(409, "Nenhum WhatsApp conectado. Conecte um número em Configurações.");
@@ -79,7 +79,7 @@ export async function isWindowOpen(r: Resolved): Promise<boolean> {
   return Boolean(data && Date.now() - new Date(data.sent_at).getTime() < 24 * 3600 * 1000);
 }
 
-async function record(r: Resolved, externalId: string, type: MsgType, body: string | null, mediaRef: string | null, mime: string | null, userId: string) {
+async function record(r: Resolved, externalId: string, type: MsgType, body: string | null, mediaRef: string | null, mime: string | null, userId: string | null) {
   const { data, error } = await supabaseAdmin().rpc("ingest_message", {
     p_channel: r.channel.id, p_wa_id: r.waId, p_contact_name: r.contactName, p_external_id: externalId,
     p_direction: "out", p_type: type, p_body: body, p_media_ref: mediaRef, p_media_mime: mime,
@@ -103,7 +103,7 @@ function metaAuth(r: Resolved) {
   return { auth, pid };
 }
 
-export async function sendText(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, text: string) {
+export async function sendText(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, text: string) {
   const r = await resolveTarget(sb, orgId, t);
   if (!(await isWindowOpen(r))) throw new WindowClosedError();
   const externalId = await sendTextVia(r.channel, r.waId, text);
@@ -145,7 +145,23 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
   return { id, externalId };
 }
 
-export async function sendTemplateMessage(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, name: string, language: string, params: string[]) {
+/** Qual canal/provedor seria usado para este alvo (para avisos ao agendar). */
+export async function previewTarget(sb: SupabaseClient, orgId: string, t: SendTarget): Promise<{ provider: "meta" | "evolution"; channelId: string; windowOpenUntil: string | null } | null> {
+  try {
+    const r = await resolveTarget(sb, orgId, t);
+    let until: string | null = null;
+    if (r.channel.provider === "meta" && r.conversationId) {
+      const { data } = await supabaseAdmin().from("messages").select("sent_at")
+        .eq("conversation_id", r.conversationId).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
+      if (data) until = new Date(new Date(data.sent_at).getTime() + 24 * 3600 * 1000).toISOString();
+    }
+    return { provider: r.channel.provider, channelId: r.channel.id, windowOpenUntil: until };
+  } catch {
+    return null;
+  }
+}
+
+export async function sendTemplateMessage(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, name: string, language: string, params: string[]) {
   const r = await resolveTarget(sb, orgId, t);
   if (r.channel.provider !== "meta") throw new HttpError(422, "Modelos só existem na API oficial");
   const { auth, pid } = metaAuth(r);

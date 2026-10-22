@@ -19,6 +19,11 @@ export const ResolvedAction = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("send_message"), ...Lead, text: z.string().trim().min(1).max(4096) }),
   z.object({
+    kind: z.literal("schedule_message"), ...Lead,
+    sendAt: z.string().datetime(), timeZone: z.string().min(1).max(64), text: z.string().trim().min(1).max(4096),
+    provider: z.enum(["meta", "evolution"]).nullable(),
+  }),
+  z.object({
     kind: z.literal("schedule_meeting"), ...Lead,
     start: z.string().datetime(), end: z.string().datetime(), timeZone: z.string().min(1).max(64),
     title: z.string().trim().min(1).max(200), moveToStage: z.string().nullable(), google: z.boolean(),
@@ -44,6 +49,8 @@ export function describe(a: ResolvedAction): string {
       return `Atualizar ${a.leadName}: ${parts.join(", ")}`;
     }
     case "send_message": return `Enviar WhatsApp para ${a.leadName}: "${a.text}"`;
+    case "schedule_message":
+      return `Enviar WhatsApp para ${a.leadName} em ${formatWhen(a.sendAt, a.timeZone)}: "${a.text}"`;
     case "schedule_meeting": {
       const mins = Math.round((new Date(a.end).getTime() - new Date(a.start).getTime()) / 60000);
       return `Agendar "${a.title}" — ${formatWhen(a.start, a.timeZone)} (${mins} min)${a.moveToStage ? ` e mover ${a.leadName} para "${a.moveToStage}"` : ""}${a.google ? " · Google Agenda" : " · só no CRM (Google Agenda não conectado)"}`;

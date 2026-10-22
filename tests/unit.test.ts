@@ -215,3 +215,22 @@ test("voz: agendamento descreve horário, etapa e Google Agenda", () => {
   assert.equal(describeAction(a), 'Agendar "Reunião com Yuri" — sex., 23/10 às 10:00 (60 min) e mover Yuri para "Agendamento" · Google Agenda');
   assert.throws(() => ResolvedAction.parse({ ...a, start: "amanhã" }));
 });
+
+test("mensagem agendada: voz descreve envio e falhas são classificadas", async () => {
+  const a = ResolvedAction.parse({
+    kind: "schedule_message", leadId: "00000000-0000-4000-8000-000000000001", leadName: "Yuri", leadCandidates: [],
+    sendAt: "2026-10-31T12:00:00.000Z", timeZone: "America/Fortaleza",
+    text: "E aí, meu patrão, tudo certo? Vamos dar continuidade no nosso atendimento.", provider: "evolution",
+  });
+  assert.equal(describeAction(a), 'Enviar WhatsApp para Yuri em sáb., 31/10 às 09:00: "E aí, meu patrão, tudo certo? Vamos dar continuidade no nosso atendimento."');
+
+  const { isPermanent, friendly } = await import("@/lib/scheduled");
+  const { HttpError } = await import("@/lib/http");
+  const { WindowClosedError } = await import("@/lib/send");
+  assert.equal(isPermanent(new WindowClosedError()), true, "janela de 24h: não adianta tentar de novo");
+  assert.match(friendly(new WindowClosedError()), /modelo/);
+  assert.equal(isPermanent(new HttpError(422, "sem telefone")), true);
+  assert.equal(isPermanent(new HttpError(502, "WhatsApp fora do ar")), false, "erro do provedor: tenta de novo");
+  assert.equal(isPermanent(new HttpError(429, "limite")), false);
+  assert.equal(isPermanent(new Error("timeout")), false);
+});

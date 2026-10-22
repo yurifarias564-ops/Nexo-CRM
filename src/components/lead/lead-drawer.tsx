@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarPlus, CalendarX, Clock, ExternalLink, MessageCircle, Plus, Send, StickyNote, Trash2, X } from "lucide-react";
+import { ArrowRight, CalendarClock, CalendarPlus, CalendarX, Clock, ExternalLink, MessageCircle, Plus, Send, StickyNote, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -11,6 +11,8 @@ import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
 import { useLatest } from "@/lib/hooks";
 import { TemplateModal } from "@/components/inbox/template-modal";
 import { ScheduleModal } from "./schedule-modal";
+import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
+import { ScheduledList } from "@/components/scheduled/scheduled-list";
 import { formatWhen } from "@/lib/time";
 import type { Lead } from "@/lib/types";
 
@@ -41,6 +43,8 @@ export function LeadDrawer({
   const [appts, setAppts] = useState<Appointment[]>([]);
   const [scheduling, setScheduling] = useState(false);
   const [now] = useState(() => Date.now());
+  const [schedMsgOpen, setSchedMsgOpen] = useState(false);
+  const [schedKey, setSchedKey] = useState(0);
   const closeRef = useLatest(onClose);
 
   useEffect(() => {
@@ -199,6 +203,9 @@ export function LeadDrawer({
     if (a.type === "lead_created") return <>{who} criou o lead</>;
     if (a.type === "appointment_created") return <>{who} agendou <b className="text-slate-300">{String(a.payload.title ?? "")}</b> para {formatWhen(String(a.payload.starts_at), Intl.DateTimeFormat().resolvedOptions().timeZone)}</>;
     if (a.type === "appointment_canceled") return <>{who} cancelou <b className="text-slate-300">{String(a.payload.title ?? "")}</b></>;
+    if (a.type === "message_scheduled") return <>{who} agendou mensagem para {formatWhen(String(a.payload.send_at), Intl.DateTimeFormat().resolvedOptions().timeZone)}: <span className="text-slate-300">“{String(a.payload.preview ?? "")}”</span></>;
+    if (a.type === "scheduled_sent") return <>Mensagem agendada enviada automaticamente</>;
+    if (a.type === "scheduled_failed") return <span className="text-amber-300">Mensagem agendada não foi enviada: {String(a.payload.error ?? "")}</span>;
     if (a.type === "note") return <><span className="text-slate-300">{String(a.payload.text ?? "")}</span> <span className="text-slate-600">— {who}{a.payload.via === "voz" ? " (voz)" : ""}</span></>;
     return a.type;
   };
@@ -314,6 +321,14 @@ export function LeadDrawer({
               </div>
 
               <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="label mb-0">Mensagens agendadas</span>
+                  <Button size="sm" variant="outline" onClick={() => setSchedMsgOpen(true)}><CalendarClock className="h-3.5 w-3.5" /> Agendar mensagem</Button>
+                </div>
+                <ScheduledList leadId={lead.id} statuses={["pending", "sending", "failed", "sent"]} compact refreshKey={schedKey} emptyText="Nenhuma mensagem agendada." />
+              </div>
+
+              <div>
                 <span className="label">Histórico</span>
                 <div className="mb-3 flex gap-2">
                   <input className="field" placeholder="Adicionar anotação…" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNote()} maxLength={2000} />
@@ -334,6 +349,10 @@ export function LeadDrawer({
           </>
         )}
       </aside>
+      {lead && (
+        <ScheduleMessageModal open={schedMsgOpen} onClose={() => setSchedMsgOpen(false)} leadId={lead.id} conversationId={conversationId} contactName={lead.name}
+          onDone={() => { setSchedKey((k) => k + 1); void reloadSide(); }} />
+      )}
       {lead && (
         <ScheduleModal open={scheduling} onClose={() => setScheduling(false)} leadId={lead.id} leadName={lead.name} moveToScheduleStage onDone={() => void reloadSide()} />
       )}

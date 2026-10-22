@@ -6,6 +6,7 @@ import type { ResolvedAction } from "@/lib/voice-actions";
 import { normalizePhone } from "@/lib/utils";
 import { rateLimit } from "@/lib/rate-limit";
 import { isConnected } from "@/lib/google";
+import { previewTarget } from "@/lib/send";
 import { DEFAULT_TZ, isValidTimeZone, nowInZone, zonedToUtc } from "@/lib/time";
 
 export const runtime = "nodejs";
@@ -147,6 +148,21 @@ export async function POST(req: Request) {
           }
           if (!Object.keys(patch).length) { issues.push("Não entendi o que alterar no lead."); break; }
           actions.push({ kind: "update_lead", ...(await resolveLead(i.lead)), patch });
+          break;
+        }
+        case "schedule_message": {
+          const at = zonedToUtc(String(i.send_at ?? ""), tz);
+          if (!at) { issues.push("Não entendi quando enviar a mensagem. Diga, por exemplo: dia 31 às 9 horas."); break; }
+          if (at.getTime() < Date.now() - 60_000) { issues.push("A data de envio já passou. Diga o dia e a hora de novo."); break; }
+          const text = String(i.text ?? "").trim().slice(0, 4096);
+          if (!text) { issues.push("Não entendi o texto da mensagem a ser enviada."); break; }
+          const lead = await resolveLead(i.lead);
+          const target = lead.leadId ? await previewTarget(sb, ctx.org.id, { leadId: lead.leadId }) : null;
+          if (target?.provider === "meta" && (!target.windowOpenUntil || new Date(target.windowOpenUntil) < at)) {
+            issues.push(`${lead.leadName} usa a API oficial: texto livre só é entregue se o cliente tiver falado nas 24h anteriores. Para garantir, agende com um modelo aprovado pelo chat ou pelo lead.`);
+          }
+          if (lead.leadId && !target) issues.push("Nenhum WhatsApp conectado para este lead agora; a mensagem será enviada se houver número conectado no horário.");
+          actions.push({ kind: "schedule_message", ...lead, sendAt: at.toISOString(), timeZone: tz, text, provider: target?.provider ?? null });
           break;
         }
         case "schedule_meeting": {

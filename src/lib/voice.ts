@@ -70,6 +70,19 @@ const TOOLS = [
     },
   },
   {
+    name: "schedule_message",
+    description: "Agenda o ENVIO AUTOMÁTICO de uma mensagem de WhatsApp para o lead numa data/hora futura (follow-up, retomar contato, lembrete para o cliente).",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead: { type: "string", description: "Nome do lead como foi dito" },
+        send_at: { type: "string", description: "Quando enviar, horário LOCAL do usuário, formato YYYY-MM-DDTHH:mm" },
+        text: { type: "string", description: "Texto exato que o cliente vai receber, com pontuação corrigida. Mantenha o tom e as gírias do usuário." },
+      },
+      required: ["lead", "send_at", "text"],
+    },
+  },
+  {
     name: "update_lead",
     description: "Altera dados cadastrais de um lead: nome, telefone e/ou e-mail. Informe só o que mudou.",
     input_schema: { type: "object", properties: { lead: { type: "string" }, name: { type: "string", description: "Novo nome" }, phone: { type: "string", description: "Novo telefone" }, email: { type: "string", description: "Novo e-mail" } }, required: ["lead"] },
@@ -99,6 +112,7 @@ export async function interpret(
     `Equipe: ${context.members.join(" | ") || "(nenhum)"}`,
     `Agora é ${context.now}, fuso ${context.timeZone}. Converta datas faladas para esse fuso: "amanhã às 10 horas" = dia seguinte 10:00; "sexta às 15h30" = próxima sexta 15:30; "meio-dia" = 12:00; "10 da noite" = 22:00; só a hora sem dia = hoje se ainda não passou, senão amanhã.`,
     "Agendamento: quando o usuário falar em agendar/agendamento/marcar com um horário, chame schedule_meeting. O sistema já move o lead para a etapa de agendamento sozinho, então NÃO chame move_lead para essa etapa junto.",
+    "Mensagem agendada: quando o usuário quiser que uma mensagem seja ENVIADA ao cliente no futuro (\"entrar em contato dia 31\", \"mande para ele na segunda\", \"retomar contato no fim do mês\"), chame schedule_message com o texto que o cliente vai receber. Data sem horário = 09:00; \"final do mês\" sem dia = último dia do mês às 09:00. Não confunda com schedule_meeting, que é compromisso na agenda do vendedor.",
     "Se o comando não for uma ação de CRM, responda em uma frase curta sem chamar ferramentas.",
   ].join("\n");
 

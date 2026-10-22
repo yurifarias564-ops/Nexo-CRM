@@ -10,6 +10,7 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 - **Janela de 24h (API oficial)**: o chat avisa quando a janela fecha e oferece **modelos aprovados** da Meta com variáveis e prévia.
 - **Voz**: mover etapa, adicionar/remover tags, criar lead, valor, responsável, anotação, **editar nome/telefone/e-mail** e **enviar mensagem no WhatsApp falando** — sempre com confirmação.
 - **Google Agenda**: cada vendedor conecta a própria conta. Agendar por voz (“agendamento com o Yuri amanhã às 10 horas” → move para a etapa **Agendamento** e cria o evento), arrastando o lead para a coluna Agendamento ou pelo botão Agendar no lead; cancelar remove o evento do Google.
+- **Mensagens agendadas**: escolha dia, hora e texto (ou modelo aprovado) e o sistema envia sozinho no WhatsApp do lead — pelo chat, pelo lead, pela tela **Agendadas** ou por voz (“entrar em contato com o Yuri dia 31 de outubro: e aí, meu patrão, tudo certo?”). Falha temporária tenta de novo (até 3 vezes); falha que exige ação aparece com o motivo e botão de reenviar.
 - **Leads**: tabela com busca, ações em massa, importação/exportação Excel.
 - **Limite de uso por usuário** em todas as rotas sensíveis (voz, envio, importação, convites).
 
@@ -41,8 +42,8 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 
 ```bash
 npm test          # roda tudo
-npm run test:unit # 16 testes: webhooks, modelos, mídia, fuso horário/agenda, telefone, CPF/CNPJ, dinheiro, voz
-npm run test:db   # 56 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos
+npm run test:unit # 17 testes: webhooks, modelos, mídia, fuso horário/agenda, mensagens agendadas, telefone, CPF/CNPJ, dinheiro, voz
+npm run test:db   # 69 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos, mensagens agendadas (sem envio duplicado)
 npm run typecheck
 npm run build
 ```
@@ -117,7 +118,21 @@ Ações suportadas: mover de etapa, adicionar/remover tags (cria a tag se não e
 
 Empresas criadas a partir de agora já nascem com a etapa **Agendamento** no funil. Em empresas antigas, crie uma etapa com "Agendamento" no nome (Configurações → Funil).
 
-### 8. Deploy (Vercel)
+### 8. Mensagens agendadas (disparador)
+
+O disparador já está criado no Supabase (pg_cron, a cada minuto, só chama o app quando há mensagem vencida). Depois do deploy, ative-o uma vez:
+
+1. Gere um segredo: `openssl rand -hex 32` e coloque em `CRON_SECRET` (Vercel/`.env.local`).
+2. No **SQL Editor** do Supabase, rode (com os seus valores):
+   ```sql
+   select vault.create_secret('https://seu-dominio.com.br', 'app_url');
+   select vault.create_secret('<o mesmo CRON_SECRET>', 'cron_secret');
+   ```
+3. Pronto. Para conferir: **Integrations → Cron** no painel do Supabase mostra as execuções do job `nexo-scheduled-messages`.
+
+Regra da Meta: na **API oficial**, texto livre só é entregue se o cliente falou nas 24h anteriores; para retomar contato, agende um **modelo aprovado** (o sistema avisa e oferece). Pelo **QR Code** não há essa restrição.
+
+### 9. Deploy (Vercel)
 
 1. Suba o código para um repositório GitHub e importe na [Vercel](https://vercel.com).
 2. Cadastre as variáveis de ambiente.

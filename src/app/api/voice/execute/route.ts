@@ -7,6 +7,7 @@ import { describe, ResolvedAction } from "@/lib/voice-actions";
 import { rateLimit } from "@/lib/rate-limit";
 import { sendText } from "@/lib/send";
 import { createAppointment } from "@/lib/appointments";
+import { createScheduled } from "@/lib/scheduled";
 
 export const runtime = "nodejs";
 
@@ -96,6 +97,12 @@ export async function POST(req: Request) {
         case "send_message": {
           await rateLimit(`send:${ctx.userId}`, 60, 60);
           await sendText(sb, ctx.org.id, ctx.userId, { leadId: need(a.leadId) }, a.text);
+          break;
+        }
+        case "schedule_message": {
+          await createScheduled(sb, { orgId: ctx.org.id, userId: ctx.userId }, {
+            target: { leadId: need(a.leadId) }, sendAt: new Date(a.sendAt), timeZone: a.timeZone, body: a.text,
+          });
           break;
         }
         case "schedule_meeting": {
