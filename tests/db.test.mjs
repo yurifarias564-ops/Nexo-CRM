@@ -251,9 +251,6 @@ await expectError("indicador automático não aceita lançamento manual", () => 
 await expectError("lançamento no futuro é recusado", () => as(A, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date+10,5,$4)", [orgA, sBia, mInsta, A]), "23514");
 await expectError("valor negativo é recusado", () => as(A, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date-1,-1,$4)", [orgA, sBia, mInsta, A]), "23514");
 ok("mesmo dia atualiza (não duplica)", (await as(C, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date,9,$4) on conflict (seller_id, metric_id, day) do update set value=excluded.value, updated_by=excluded.updated_by returning value", [orgA, sBia, mInsta, C]))[0].value === "9.00");
-ok("dono define meta individual do mês", (await as(A, `insert into public.team_goals (organization_id, seller_id, metric_id, period, daily_target, monthly_target) values ($1,$2,$3,${per},15,330) returning 1`, [orgA, sCarla, mInsta])).length === 1);
-await expectError("atendente não altera metas do time", () => as(C, `insert into public.team_goals (organization_id, seller_id, metric_id, period, monthly_target) values ($1,$2,$3,${per},1)`, [orgA, sBia, mInsta]), "42501");
-await expectError("meta não aponta vendedor de outra empresa", () => su(`insert into public.team_goals (organization_id, seller_id, metric_id, period) values ($1,$2,$3,${per})`, [orgB, sBia, mInsta]), "23514");
 await as(A, "update public.leads set assigned_to=$1 where id=$2", [A, leadA]);
 const tv = await as(A, "select seller_id, metric_id, value::float v from public.team_values($1, current_date - 30, current_date, 'UTC')", [orgA]);
 const sum = (sel, met) => tv.filter((r) => r.seller_id === sel && r.metric_id === met).reduce((a, r) => a + r.v, 0);
@@ -261,6 +258,37 @@ ok("time: lançamentos manuais somados", sum(sBia, mInsta) === 9 && sum(sCarla, 
 ok("time: ligações da vendedora vêm do CRM", sum(sAna, mCalls) === 2, String(sum(sAna, mCalls)));
 ok("time: faturamento da vendedora vem das vendas", sum(sAna, mWon) === 1500, String(sum(sAna, mWon)));
 ok("time: outra empresa não vê nada", (await as(B, "select * from public.team_values($1, current_date - 30, current_date)", [orgA])).length === 0 && (await as(B, "select * from public.team_entries")).length === 0);
+
+console.log("\n# Time comercial v2 (lojas, função, OS, notas)");
+const loja = (await as(A, "insert into public.team_stores (organization_id, name, revenue_goal, os_daily_goal) values ($1,'Matriz',110000,4) returning id", [orgA]))[0].id;
+await expectError("atendente não cria loja", () => as(C, "insert into public.team_stores (organization_id, name) values ($1,'X')", [orgA]), "42501");
+await as(A, "update public.team_sellers set role='closer', store_id=$1 where id=$2", [loja, sCarla]);
+await as(A, "update public.team_sellers set role='sdr', store_id=$1 where id=$2", [loja, sBia]);
+const lojaB = (await as(B, "insert into public.team_stores (organization_id, name) values ($1,'Loja B') returning id", [orgB]))[0].id;
+await expectError("pessoa não vai para loja de outra empresa", () => as(A, "update public.team_sellers set store_id=$1 where id=$2", [lojaB, sBia]), "23514");
+const mLig = (await as(A, "insert into public.team_metrics (organization_id, name, role, daily_target) values ($1,'Ligações SDR','sdr',20) returning id", [orgA]))[0].id;
+ok("resultado ligado a uma atividade", (await as(A, "insert into public.team_metrics (organization_id, name, role, result_of) values ($1,'Contatos efetivos','sdr',$2) returning 1", [orgA, mLig])).length === 1);
+await expectError("resultado não liga em indicador automático", () => as(A, "insert into public.team_metrics (organization_id, name, result_of) values ($1,'X',$2)", [orgA, mCalls]), "23514");
+const mOs = (await as(A, "insert into public.team_metrics (organization_id, name, role, source, daily_target) values ($1,'OS fechadas','closer','os_count',4) returning id", [orgA]))[0].id;
+const mFat = (await as(A, "insert into public.team_metrics (organization_id, name, role, source, unit) values ($1,'Faturamento OS','closer','os_value','money') returning id", [orgA]))[0].id;
+ok("meta individual fixa (dia/semana/mês)", (await as(A, "insert into public.team_seller_goals (organization_id, seller_id, metric_id, daily_target, weekly_target, monthly_target) values ($1,$2,$3,25,125,500) returning 1", [orgA, sBia, mLig])).length === 1);
+await expectError("atendente não altera meta individual", () => as(C, "update public.team_seller_goals set daily_target=1 where seller_id=$1 returning 1", [sBia]).then((r) => { if (!r.length) { const e = new Error("bloqueado"); e.code = "42501"; throw e; } }), "42501");
+ok("closer registra OS da própria loja", (await as(C, "insert into public.team_sales (organization_id, seller_id, sdr_id, day, value, os_number, created_by) values ($1,$2,$3,current_date,1850.5,'OS-1001',$4) returning store_id", [orgA, sCarla, sBia, C]))[0].store_id === loja);
+await as(C, "insert into public.team_sales (organization_id, seller_id, day, value, created_by) values ($1,$2,current_date,650,$3)", [orgA, sCarla, C]);
+await expectError("atendente não registra OS em nome de outra pessoa com login", () => as(C, "insert into public.team_sales (organization_id, seller_id, day, value, created_by) values ($1,$2,current_date,10,$3)", [orgA, sAna, C]), "42501");
+await expectError("OS com SDR de outra empresa é recusada", async () => {
+  const sB = (await as(B, "insert into public.team_sellers (organization_id, name) values ($1,'SDR B') returning id", [orgB]))[0].id;
+  await as(A, "insert into public.team_sales (organization_id, seller_id, sdr_id, day, value, created_by) values ($1,$2,$3,current_date,1,$4)", [orgA, sAna, sB, A]);
+}, "23514");
+const tv2 = await as(A, "select seller_id, metric_id, value::float v from public.team_values($1, current_date - 1, current_date, 'UTC')", [orgA]);
+const sumV2 = (sel, met) => tv2.filter((r) => r.seller_id === sel && r.metric_id === met).reduce((a, r) => a + r.v, 0);
+ok("OS fechadas e faturamento saem das OS registradas", sumV2(sCarla, mOs) === 2 && sumV2(sCarla, mFat) === 2500.5, JSON.stringify([sumV2(sCarla, mOs), sumV2(sCarla, mFat)]));
+ok("vendedora salva o bloco de notas do dia", (await as(C, "insert into public.team_notes (organization_id, seller_id, day, body, updated_by) values ($1,$2,current_date,'Maria quer orçamento até sexta',$3) returning 1", [orgA, sCarla, C])).length === 1);
+ok("equipe lê as notas", (await as(A, "select body from public.team_notes where seller_id=$1", [sCarla]))[0]?.body.includes("Maria"));
+await expectError("atendente não escreve no bloco de outra pessoa com login", () => as(C, "insert into public.team_notes (organization_id, seller_id, day, body, updated_by) values ($1,$2,current_date,'x',$3)", [orgA, sAna, C]), "42501");
+ok("início da consultoria e marco zero", (await as(A, "insert into public.team_settings (organization_id, cycle_start, baseline) values ($1, '2026-10-14', '{\"x\":10}') returning 1", [orgA])).length === 1);
+await expectError("atendente não altera marco zero", () => as(C, "insert into public.team_settings (organization_id) values ($1)", [orgB]), "42501");
+ok("outra empresa não vê OS nem notas", (await as(B, "select * from public.team_sales")).length === 0 && (await as(B, "select * from public.team_notes")).length === 0);
 
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

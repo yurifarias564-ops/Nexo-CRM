@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HttpError } from "@/lib/http";
 import { monthRange, periodLabel, previousPeriod } from "./period";
-import { monthDays, targetFor, totals, type TeamGoal, type TeamMetric, type TeamSeller, type TeamValue } from "@/lib/team";
+import { goalFor, metricApplies, monthDays, ROLE_LABEL, totals, type TeamMetric, type TeamSeller, type TeamSellerGoal, type TeamValue } from "@/lib/team";
 export { monthRange, periodLabel, previousPeriod, currentPeriod, isLastDayOfMonth, hourIn, shiftPeriod } from "./period";
 
 export type Metrics = {
@@ -111,29 +111,29 @@ export async function buildReportData(db: SupabaseClient, orgId: string, period:
   };
 }
 
-/** Resultado de cada vendedora no mês (acompanhamento do time). */
+/** Resultado de cada pessoa do time no mês (checklist do time comercial). */
 async function buildTeam(db: SupabaseClient, orgId: string, period: string, prevP: string, tz: string): Promise<TeamSellerReport[]> {
   const a = monthDays(period);
   const b = monthDays(prevP);
   const [s, m, g, cur, prev] = await Promise.all([
-    db.from("team_sellers").select("id, name, user_id, active, position").eq("organization_id", orgId).order("position"),
-    db.from("team_metrics").select("id, name, unit, source, daily_target, monthly_target, active, position").eq("organization_id", orgId).eq("active", true).order("position"),
-    db.from("team_goals").select("seller_id, metric_id, daily_target, monthly_target").eq("organization_id", orgId).eq("period", a.first),
+    db.from("team_sellers").select("id, name, user_id, active, position, role, store_id").eq("organization_id", orgId).order("position"),
+    db.from("team_metrics").select("id, name, unit, source, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", orgId).eq("active", true).order("position"),
+    db.from("team_seller_goals").select("seller_id, metric_id, daily_target, weekly_target, monthly_target").eq("organization_id", orgId),
     db.rpc("team_values", { org: orgId, p_from: a.first, p_to: a.last, tz }),
     db.rpc("team_values", { org: orgId, p_from: b.first, p_to: b.last, tz }),
   ]);
   const metrics = (m.data ?? []) as TeamMetric[];
-  if (!metrics.length || cur.error || prev.error) return [];
-  const goals = (g.data ?? []) as TeamGoal[];
+  if (!metrics.length || s.error || cur.error || prev.error) return [];
+  const goals = (g.data ?? []) as TeamSellerGoal[];
   const curT = totals(((cur.data ?? []) as TeamValue[]));
   const prevT = totals(((prev.data ?? []) as TeamValue[]));
   return ((s.data ?? []) as TeamSeller[])
     .filter((x) => x.active || metrics.some((mm) => (curT.get(`${x.id}:${mm.id}`) ?? 0) > 0))
     .map((x) => ({
-      seller: x.name,
-      rows: metrics.map((mm) => ({
-        metric: mm.name, unit: mm.unit, actual: curT.get(`${x.id}:${mm.id}`) ?? 0,
-        target: targetFor(goals, mm, x.id).monthly, previous: prevT.get(`${x.id}:${mm.id}`) ?? 0,
+      seller: x.role ? `${x.name} (${ROLE_LABEL[x.role]})` : x.name,
+      rows: metrics.filter((mm) => metricApplies(mm, x)).map((mm) => ({
+        metric: mm.result_of ? `${mm.name} (resultado)` : mm.name, unit: mm.unit, actual: Number(curT.get(`${x.id}:${mm.id}`) ?? 0),
+        target: mm.result_of ? null : goalFor(goals, mm, x.id).monthly, previous: Number(prevT.get(`${x.id}:${mm.id}`) ?? 0),
       })),
     }));
 }

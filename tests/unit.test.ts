@@ -332,22 +332,56 @@ test("relatório: gera PDF válido com várias páginas", async () => {
   if (process.env.SAVE_SAMPLE_PDF) (await import("node:fs")).writeFileSync(process.env.SAVE_SAMPLE_PDF, bytes);
 });
 
-import { delta as tDelta, filledDays, monthDays as tMonthDays, targetFor, totals as tTotals, addDays } from "@/lib/team";
+import { addDays, conv, dayGoalItems, dayProgress, delta as tDelta, filledDays, goalFor, monthDays as tMonthDays, parseBRL, periodAt, periodList, periodScore, totals as tTotals, weekdaysBetween, weekStart, type TeamMetric, type TeamSeller } from "@/lib/team";
 
-test("time: meta individual sobrepõe a padrão; totais e dias preenchidos", () => {
-  const m = { id: "m1", name: "Contatos", unit: "count" as const, source: "manual" as const, daily_target: 30, monthly_target: 660, active: true, position: 0 };
-  const goals = [{ seller_id: "s1", metric_id: "m1", daily_target: 40, monthly_target: null }];
-  assert.deepEqual(targetFor(goals, m, "s1"), { daily: 40, monthly: 660 }, "sem meta mensal individual: usa a padrão");
-  assert.deepEqual(targetFor(goals, m, "s2"), { daily: 30, monthly: 660 });
+const tm = (p: Partial<TeamMetric> & { id: string }): TeamMetric => ({ name: p.id, unit: "count", source: "manual", role: "todos", result_of: null, daily_target: null, weekly_target: null, monthly_target: null, active: true, position: 0, ...p });
+const sdr: TeamSeller = { id: "s1", name: "Alison", user_id: null, active: true, position: 0, role: "sdr", store_id: "matriz" };
+const closer: TeamSeller = { id: "s2", name: "Lucas", user_id: null, active: true, position: 1, role: "closer", store_id: "matriz" };
+
+test("time: meta individual sobrepõe a padrão; semana e mês derivam da diária (5 e 20 dias úteis)", () => {
+  const lig = tm({ id: "lig", role: "sdr", daily_target: 20 });
+  assert.deepEqual(goalFor([], lig, "s1"), { daily: 20, weekly: 100, monthly: 400 });
+  assert.deepEqual(goalFor([{ seller_id: "s1", metric_id: "lig", daily_target: 25, weekly_target: null, monthly_target: 480 }], lig, "s1"), { daily: 25, weekly: 125, monthly: 480 });
+});
+
+test("time: metas por função, % do dia e conversão", () => {
+  const ms = [tm({ id: "lig", role: "sdr", daily_target: 20 }), tm({ id: "efet", role: "sdr", result_of: "lig" }), tm({ id: "aval", role: "closer", daily_target: 3 }),
+    tm({ id: "os", role: "closer", source: "os_count", daily_target: 4 }), tm({ id: "fat", role: "closer", source: "os_value", unit: "money" })];
+  assert.deepEqual(dayGoalItems(ms, [], sdr).map((x) => x.m.id), ["lig"], "SDR só vê metas de SDR; resultado não é meta");
+  assert.deepEqual(dayGoalItems(ms, [], closer).map((x) => x.m.id), ["aval", "os"], "closer: atividade + OS; faturamento não entra no dia");
+  const vals: Record<string, number> = { aval: 3, os: 2 };
+  assert.equal(dayProgress(dayGoalItems(ms, [], closer), (id) => vals[id] ?? 0), 75);
+  assert.equal(conv(6, 20), 30);
+  assert.equal(conv(1, 0), null);
+  assert.equal(periodScore(ms, [], closer, (id) => ({ aval: 60, os: 40, fat: 55000 })[id] ?? 0, 110000), 67, "média de 100%, 50% e 50% (faturamento x meta da loja)");
+});
+
+test("time: ciclos de 30 dias a partir do início da consultoria", () => {
+  const p = periodAt("2026-10-22", "2026-10-14");
+  assert.deepEqual([p.label, p.from, p.to], ["Ciclo 1 · 14/10 a 12/11", "2026-10-14", "2026-11-12"]);
+  assert.equal(periodAt("2026-11-13", "2026-10-14").short, "Ciclo 2");
+  assert.equal(periodAt("2026-10-22", null).label, "Outubro de 2026");
+  assert.equal(periodAt("2026-01-10", null, -1).key, "2025-12");
+  assert.equal(periodList("2026-12-20", "2026-10-14").length, 3, "lista só até o ciclo 1");
+  assert.equal(weekStart("2026-10-22"), "2026-10-19", "semana começa na segunda");
+  assert.equal(weekdaysBetween("2026-10-22", "2026-10-31"), 7);
+  assert.equal(addDays("2026-12-31", 1), "2027-01-01");
+  assert.deepEqual(tMonthDays("2028-02"), { first: "2028-02-01", last: "2028-02-29", days: 29 });
+});
+
+test("time: valores, dias preenchidos e dinheiro em formato brasileiro", () => {
   const vals = [
     { seller_id: "s1", metric_id: "m1", day: "2026-10-01", value: 10 }, { seller_id: "s1", metric_id: "m1", day: "2026-10-02", value: 5 },
     { seller_id: "s1", metric_id: "auto", day: "2026-10-03", value: 3 },
   ];
   assert.equal(tTotals(vals).get("s1:m1"), 15);
-  assert.equal(tTotals(vals, "2026-10-02").get("s1:m1"), 5);
-  assert.equal(filledDays(vals, new Set(["m1"])).get("s1"), 2, "indicador automático não conta como preenchido");
+  assert.equal(tTotals(vals, "2026-10-02", "2026-10-02").get("s1:m1"), 5);
+  assert.equal(filledDays(vals, new Set(["m1"])).get("s1"), 2);
   assert.equal(tDelta(150, 100), 50);
   assert.equal(tDelta(5, 0), null);
-  assert.deepEqual(tMonthDays("2028-02"), { first: "2028-02-01", last: "2028-02-29", days: 29 });
-  assert.equal(addDays("2026-12-31", 1), "2027-01-01");
+  assert.equal(parseBRL("R$ 1.850,50"), 1850.5);
+  assert.equal(parseBRL("1850.5"), 1850.5);
+  assert.equal(parseBRL("110.000"), 110000, "ponto de milhar");
+  assert.equal(parseBRL("1.250.000,00"), 1250000);
+  assert.equal(parseBRL("abc"), null);
 });
