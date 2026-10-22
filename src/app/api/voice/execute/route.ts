@@ -4,6 +4,8 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { describe, ResolvedAction } from "@/lib/voice-actions";
+import { rateLimit } from "@/lib/rate-limit";
+import { sendText } from "@/lib/send";
 
 export const runtime = "nodejs";
 
@@ -13,6 +15,7 @@ const Body = z.object({ transcript: z.string().max(2000), actions: z.array(Resol
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext();
+    await rateLimit(`voice-exec:${ctx.userId}`, 30, 60);
     const { transcript, actions } = Body.parse(await readJson(req, 64_000));
     const sb = await supabaseServer();
     const done: string[] = [];
@@ -35,7 +38,9 @@ export async function POST(req: Request) {
       return id;
     };
 
+    let failure: { action: string; error: string } | null = null;
     for (const a of actions) {
+      try {
       switch (a.kind) {
         case "move_lead": {
           const { data: top } = await sb.from("leads").select("position").eq("stage_id", a.stageId).order("position").limit(1).maybeSingle();
@@ -82,6 +87,16 @@ export async function POST(req: Request) {
           if (error) throw error;
           break;
         }
+        case "update_lead": {
+          const { error } = await sb.from("leads").update(a.patch).eq("id", need(a.leadId));
+          if (error) throw error.code === "23505" ? new HttpError(409, "Já existe outro lead com esse telefone") : error;
+          break;
+        }
+        case "send_message": {
+          await rateLimit(`send:${ctx.userId}`, 60, 60);
+          await sendText(sb, ctx.org.id, ctx.userId, { leadId: need(a.leadId) }, a.text);
+          break;
+        }
         case "add_note": {
           const { error } = await sb.from("activities").insert({ organization_id: ctx.org.id, lead_id: need(a.leadId), actor_id: ctx.userId, type: "note", payload: { text: a.note, via: "voz" } });
           if (error) throw error;
@@ -89,10 +104,18 @@ export async function POST(req: Request) {
         }
       }
       done.push(describe(a));
+      } catch (err) {
+        // Para no primeiro erro e informa exatamente o que foi e o que não foi feito
+        const msg = err instanceof HttpError ? err.message : err instanceof Error && "code" in err ? "Não permitido ou dado inválido" : "Erro inesperado";
+        if (!(err instanceof HttpError)) console.error("[voice execute]", err);
+        failure = { action: describe(a), error: msg };
+        break;
+      }
     }
 
-    await supabaseAdmin().from("voice_commands").insert({ organization_id: ctx.org.id, user_id: ctx.userId, transcript, actions, executed: true });
-    return ok({ done });
+    await supabaseAdmin().from("voice_commands").insert({ organization_id: ctx.org.id, user_id: ctx.userId, transcript, actions, executed: done.length > 0 });
+    if (failure && !done.length) throw new HttpError(422, `${failure.action}: ${failure.error}`);
+    return ok({ done, failure });
   } catch (e) {
     return fail(e);
   }

@@ -48,6 +48,89 @@ export async function sendText(phoneNumberId: string, token: string, to: string,
   return id;
 }
 
+export type MetaMediaType = "image" | "video" | "audio" | "document";
+
+/** Envia o arquivo para a Meta e devolve o id da mídia. */
+export async function uploadMedia(phoneNumberId: string, token: string, file: Blob, mime: string, filename: string): Promise<string> {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", mime);
+  form.append("file", file, filename);
+  const res = await fetch(`${graph()}/${encodeURIComponent(phoneNumberId)}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+    signal: AbortSignal.timeout(60_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+  if (!res.ok || !body.id) throw new HttpError(res.status >= 500 ? 502 : 422, `WhatsApp: ${body.error?.message ?? "falha no upload da mídia"}`);
+  return body.id;
+}
+
+export async function sendMedia(phoneNumberId: string, token: string, to: string, type: MetaMediaType, mediaId: string, caption?: string, filename?: string): Promise<string> {
+  const media: Record<string, string> = { id: mediaId };
+  if (caption && type !== "audio") media.caption = caption;
+  if (type === "document" && filename) media.filename = filename;
+  const r = await call<{ messages?: { id: string }[] }>(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to, type, [type]: media }),
+  });
+  const id = r.messages?.[0]?.id;
+  if (!id) throw new HttpError(502, "WhatsApp não retornou o id da mensagem");
+  return id;
+}
+
+export interface MetaTemplate {
+  name: string;
+  language: string;
+  category: string;
+  body: string;
+  params: number;
+}
+
+type RawComponent = { type: string; format?: string; text?: string; buttons?: { type: string; url?: string }[] };
+
+/** Modelos aprovados que podem ser enviados só com texto (parâmetros no corpo). */
+export async function listTemplates(wabaId: string, token: string): Promise<MetaTemplate[]> {
+  const out: MetaTemplate[] = [];
+  let next: string | null = `/${encodeURIComponent(wabaId)}/message_templates?fields=name,language,status,category,components&limit=200`;
+  for (let page = 0; next && page < 10; page++) {
+    const r: { data?: { name: string; language: string; status: string; category: string; components?: RawComponent[] }[]; paging?: { next?: string } } =
+      await call(next, token);
+    for (const t of r.data ?? []) {
+      if (t.status !== "APPROVED") continue;
+      const comps = t.components ?? [];
+      const header = comps.find((c) => c.type === "HEADER");
+      const body = comps.find((c) => c.type === "BODY")?.text ?? "";
+      const buttons = comps.find((c) => c.type === "BUTTONS")?.buttons ?? [];
+      const headerNeedsInput = header && (header.format !== "TEXT" || /\{\{/.test(header.text ?? ""));
+      const buttonNeedsInput = buttons.some((b) => b.type === "URL" && /\{\{/.test(b.url ?? ""));
+      if (headerNeedsInput || buttonNeedsInput) continue;
+      if (/\{\{[^0-9}]+\}\}/.test(body)) continue; // parâmetros nomeados: não suportados aqui
+      const nums = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]));
+      out.push({ name: t.name, language: t.language, category: t.category, body, params: nums.length ? Math.max(...nums) : 0 });
+    }
+    const n: string | undefined = r.paging?.next;
+    next = n ? n.replace(/^https:\/\/graph\.facebook\.com\/v[\d.]+/, "") : null;
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function renderTemplate(body: string, params: string[]): string {
+  return body.replace(/\{\{(\d+)\}\}/g, (_m, n: string) => params[Number(n) - 1] ?? "");
+}
+
+export async function sendTemplate(phoneNumberId: string, token: string, to: string, name: string, language: string, params: string[]): Promise<string> {
+  const components = params.length ? [{ type: "body", parameters: params.map((text) => ({ type: "text", text })) }] : [];
+  const r = await call<{ messages?: { id: string }[] }>(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", to, type: "template", template: { name, language: { code: language }, components } }),
+  });
+  const id = r.messages?.[0]?.id;
+  if (!id) throw new HttpError(502, "WhatsApp não retornou o id da mensagem");
+  return id;
+}
+
 /** Coexistência: pede à Meta o envio do histórico do app WhatsApp Business (até ~6 meses). */
 export async function requestHistorySync(phoneNumberId: string, token: string) {
   return call<{ request_id?: string }>(`/${encodeURIComponent(phoneNumberId)}/smb_app_data`, token, {

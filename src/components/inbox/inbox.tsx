@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, CheckCheck, Clock, FileText, MapPin, MessageCircle, Search, Send, UserRound, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, Check, CheckCheck, Clock, FileText, Lock, MapPin, MessageCircle, Paperclip, Search, Send, UserRound, X, Zap, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -9,10 +9,21 @@ import { LeadDrawer } from "@/components/lead/lead-drawer";
 import { Button } from "@/components/ui/button";
 import { Avatar, Empty, Spinner, TagPill } from "@/components/ui/misc";
 import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-replies";
+import { TemplateModal } from "./template-modal";
 import { cn, formatPhone } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time-ago";
 import { useLatest } from "@/lib/hooks";
-import type { Conversation, Lead, Message } from "@/lib/types";
+import type { Conversation, Lead, Message, MsgType, Provider } from "@/lib/types";
+
+const DAY_MS = 24 * 3600 * 1000;
+const MAX_FILE = 16 * 1024 * 1024;
+
+function kindOf(mime: string): MsgType {
+  if (/^image\/(jpeg|png)$/.test(mime)) return "image";
+  if (/^video\/(mp4|3gpp)$/.test(mime)) return "video";
+  if (/^audio\//.test(mime)) return "audio";
+  return "document";
+}
 
 type ConvRow = Conversation & { leads: Pick<Lead, "id" | "name" | "stage_id"> | null };
 const CONV_PAGE = 40;
@@ -172,6 +183,12 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const [qrOpen, setQrOpen] = useState(false);
   const [qrIndex, setQrIndex] = useState(0);
   const [tagIds, setTagIds] = useState<string[]>([]);
+  const [provider, setProvider] = useState<Provider | null>(null);
+  const [lastInAt, setLastInAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [file, setFile] = useState<File | null>(null);
+  const [tplOpen, setTplOpen] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
@@ -196,6 +213,10 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       scrollToBottom();
       if (unreadRef.current > 0) await sb.rpc("mark_conversation_read", { conv: conv.id });
     })();
+    sb.from("whatsapp_channels").select("provider").eq("id", conv.channel_id).maybeSingle()
+      .then(({ data }) => alive && setProvider((data?.provider as Provider | undefined) ?? null));
+    sb.from("messages").select("sent_at").eq("conversation_id", conv.id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => alive && setLastInAt(data ? new Date(data.sent_at).getTime() : null));
     if (conv.lead_id) sb.from("lead_tags").select("tag_id").eq("lead_id", conv.lead_id).then(({ data }) => alive && setTagIds((data ?? []).map((r) => r.tag_id)));
 
     const ch = sb.channel(`chat:${conv.id}`)
@@ -208,7 +229,11 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
             return [...withoutTemp, m].sort((a, b) => a.sent_at.localeCompare(b.sent_at));
           });
           if (stickToBottom.current) scrollToBottom();
-          if (m.direction === "in") void sb.rpc("mark_conversation_read", { conv: conv.id });
+          if (m.direction === "in") {
+            setLastInAt((cur) => Math.max(cur ?? 0, new Date(m.sent_at).getTime()));
+            setNow(Date.now());
+            void sb.rpc("mark_conversation_read", { conv: conv.id });
+          }
         } else if (p.eventType === "UPDATE") {
           const m = p.new as Message;
           setMessages((cur) => cur.map((x) => (x.id === m.id ? m : x)));
@@ -216,8 +241,19 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       })
       .subscribe();
     inputRef.current?.focus();
-    return () => { alive = false; sb.removeChannel(ch); };
-  }, [conv.id, conv.lead_id, unreadRef]);
+    const tick = setInterval(() => setNow(Date.now()), 60_000);
+    return () => { alive = false; clearInterval(tick); sb.removeChannel(ch); };
+  }, [conv.id, conv.lead_id, conv.channel_id, unreadRef]);
+
+  const windowClosed = provider === "meta" && (lastInAt === null || now - lastInAt > DAY_MS);
+  const hoursLeft = provider === "meta" && lastInAt !== null && !windowClosed ? Math.max(0, Math.floor((DAY_MS - (now - lastInAt)) / 3600000)) : null;
+
+  function pickFile(f: File | undefined) {
+    if (!f) return;
+    if (f.size > MAX_FILE) return toast.error("Arquivo maior que 16 MB");
+    setFile(f);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
 
   async function loadOlder() {
     const first = messages[0];
@@ -238,7 +274,41 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
+  async function sendFile(f: File) {
+    if (sending) return;
+    setSending(true);
+    const caption = text.trim();
+    const tempId = `tmp-${Date.now()}`;
+    const kind = kindOf(f.type || "");
+    const temp: Message = { id: tempId, conversation_id: conv.id, channel_id: conv.channel_id, external_id: tempId, direction: "out", type: kind, body: caption || (kind === "document" ? f.name : `📎 ${f.name}`), media_ref: null, media_mime: f.type, status: "pending", sent_by: ws.userId, sent_at: new Date().toISOString() };
+    setMessages((cur) => [...cur, temp]);
+    setText("");
+    setFile(null);
+    stickToBottom.current = true;
+    scrollToBottom();
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("conversationId", conv.id);
+      fd.append("caption", caption);
+      const res = await fetch("/api/messages/media", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); throw new Error(data.error); }
+      setMessages((cur) => cur.some((m) => m.id === data.id)
+        ? cur.filter((m) => m.id !== tempId)
+        : cur.map((m) => (m.id === tempId ? { ...m, id: data.id, external_id: data.externalId, status: "sent", media_ref: "sent" } : m)));
+    } catch (e) {
+      setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m)));
+      setFile(f);
+      setText(caption);
+      toast.error(e instanceof Error ? e.message : "Falha ao enviar arquivo");
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function send() {
+    if (file) return sendFile(file);
     const body = text.trim();
     if (!body || sending) return;
     setSending(true);
@@ -251,7 +321,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     try {
       const res = await fetch("/api/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conv.id, text: body }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); throw new Error(data.error); }
       setMessages((cur) => cur.some((m) => m.id === data.id)
         ? cur.filter((m) => m.id !== tempId)
         : cur.map((m) => (m.id === tempId ? { ...m, id: data.id, external_id: data.externalId, status: "sent" } : m)));
@@ -337,29 +407,63 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
         )}
       </div>
 
-      <footer className="border-t border-line bg-ink-900/80 p-3">
-        <div className="relative mx-auto flex max-w-4xl items-end gap-2">
-          {menuOpen && (
-            <QuickReplyMenu query={slashQuery ?? ""} activeIndex={qrIndex} onHover={setQrIndex} onPick={(q) => insertQuickReply(q.content)} />
-          )}
-          <button onClick={() => setQrOpen((v) => !v)} className={cn("mb-0.5 rounded-lg p-2.5 transition", menuOpen ? "bg-brand-500/20 text-brand-200" : "text-slate-400 hover:bg-ink-800 hover:text-brand-200")} title="Mensagens rápidas (/)" aria-label="Mensagens rápidas">
-            <Zap className="h-5 w-5" />
-          </button>
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={text}
-            onChange={(e) => { setText(e.target.value); setQrIndex(0); }}
-            onKeyDown={onKeyDown}
-            placeholder="Digite uma mensagem ou / para respostas rápidas"
-            maxLength={4096}
-            className="field h-auto min-h-[42px] flex-1 resize-none py-2.5 leading-5"
-          />
-          <Button size="icon" className="mb-0.5 h-[42px] w-[42px]" onClick={send} disabled={!text.trim()} loading={sending} aria-label="Enviar">
-            {!sending && <Send className="h-4 w-4" />}
-          </Button>
-        </div>
+      <footer className="border-t border-line bg-ink-900/80 p-3"
+        onDragOver={(e) => { if (!windowClosed) e.preventDefault(); }}
+        onDrop={(e) => { if (windowClosed) return; e.preventDefault(); pickFile(e.dataTransfer.files[0]); }}>
+        {windowClosed ? (
+          <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+            <Lock className="h-4 w-4 shrink-0 text-amber-300" />
+            <p className="min-w-0 flex-1 text-sm text-amber-100">
+              Janela de 24h encerrada. Pela regra da API oficial, só é possível enviar um <b>modelo aprovado</b> até o cliente responder.
+            </p>
+            <Button size="sm" onClick={() => setTplOpen(true)}><FileText className="h-3.5 w-3.5" /> Enviar modelo</Button>
+          </div>
+        ) : (
+          <div className="mx-auto max-w-4xl">
+            {file && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg border border-brand-400/30 bg-brand-500/10 px-3 py-2 text-sm">
+                <Paperclip className="h-4 w-4 text-brand-300" />
+                <span className="min-w-0 flex-1 truncate text-slate-100">{file.name}</span>
+                <span className="text-xs text-slate-400">{(file.size / 1024 / 1024).toFixed(1)} MB</span>
+                <button onClick={() => setFile(null)} className="rounded p-0.5 text-slate-400 hover:bg-ink-700 hover:text-white" aria-label="Remover arquivo"><X className="h-4 w-4" /></button>
+              </div>
+            )}
+            {hoursLeft !== null && hoursLeft < 4 && (
+              <p className="mb-2 text-xs text-amber-300">A janela de 24h da API oficial fecha em menos de {hoursLeft + 1}h.</p>
+            )}
+            <div className="relative flex items-end gap-2">
+              {menuOpen && !file && (
+                <QuickReplyMenu query={slashQuery ?? ""} activeIndex={qrIndex} onHover={setQrIndex} onPick={(q) => insertQuickReply(q.content)} />
+              )}
+              <button onClick={() => setQrOpen((v) => !v)} className={cn("mb-0.5 rounded-lg p-2.5 transition", menuOpen ? "bg-brand-500/20 text-brand-200" : "text-slate-400 hover:bg-ink-800 hover:text-brand-200")} title="Mensagens rápidas (/)" aria-label="Mensagens rápidas">
+                <Zap className="h-5 w-5" />
+              </button>
+              <button onClick={() => fileInput.current?.click()} className="mb-0.5 rounded-lg p-2.5 text-slate-400 transition hover:bg-ink-800 hover:text-brand-200" title="Anexar foto, vídeo, áudio ou documento" aria-label="Anexar arquivo">
+                <Paperclip className="h-5 w-5" />
+              </button>
+              <input ref={fileInput} type="file" className="hidden"
+                accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
+                onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={text}
+                onChange={(e) => { setText(e.target.value); setQrIndex(0); }}
+                onKeyDown={onKeyDown}
+                onPaste={(e) => { const f = e.clipboardData.files[0]; if (f) { e.preventDefault(); pickFile(f); } }}
+                placeholder={file ? "Legenda (opcional)" : "Digite uma mensagem ou / para respostas rápidas"}
+                maxLength={file ? 1024 : 4096}
+                className="field h-auto min-h-[42px] flex-1 resize-none py-2.5 leading-5"
+              />
+              <Button size="icon" className="mb-0.5 h-[42px] w-[42px]" onClick={send} disabled={!text.trim() && !file} loading={sending} aria-label="Enviar">
+                {!sending && <Send className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+        )}
       </footer>
+      <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ conversationId: conv.id }} channelId={conv.channel_id}
+        defaultFirstParam={(conv.leads?.name ?? conv.contact_name ?? "").split(" ")[0]} />
     </div>
   );
 }

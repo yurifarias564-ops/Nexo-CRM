@@ -1,4 +1,5 @@
 import { requireApiContext } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { supabaseServer } from "@/lib/supabase/server";
 import { fail, HttpError, ok } from "@/lib/http";
 import { parseMoney, readRows } from "@/lib/spreadsheet";
@@ -14,6 +15,7 @@ const MAX_ROWS = 20_000;
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext();
+    await rateLimit(`import:${ctx.userId}`, 5, 600, "Muitas importações seguidas. Aguarde alguns minutos.");
     const form = await req.formData();
     const file = form.get("file");
     const targetStage = String(form.get("stageId") ?? "");

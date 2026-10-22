@@ -1,6 +1,16 @@
 # Nexo CRM
 
-CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo real, mensagens rápidas, comandos por voz, importação/exportação Excel e cobrança recorrente via Asaas — o acesso só é liberado com a assinatura paga.
+CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo real, mensagens rápidas, comandos por voz, painel de métricas, importação/exportação Excel e cobrança recorrente via Asaas — o acesso só é liberado com a assinatura paga.
+
+## Funcionalidades
+
+- **Painel**: leads novos, valor em andamento, vendas ganhas, conversão, mensagens por dia, funil, origem, tags e ranking por responsável (7/30/90 dias ou mês).
+- **Funil (kanban)**: arrastar e soltar, tempo real entre a equipe, filtros, vários funis.
+- **Conversas**: estilo WhatsApp Web, texto + **foto, vídeo, áudio e documento** (anexar, arrastar ou colar), mensagens rápidas com `/`, status de entrega/leitura.
+- **Janela de 24h (API oficial)**: o chat avisa quando a janela fecha e oferece **modelos aprovados** da Meta com variáveis e prévia.
+- **Voz**: mover etapa, adicionar/remover tags, criar lead, valor, responsável, anotação, **editar nome/telefone/e-mail** e **enviar mensagem no WhatsApp falando** — sempre com confirmação.
+- **Leads**: tabela com busca, ações em massa, importação/exportação Excel.
+- **Limite de uso por usuário** em todas as rotas sensíveis (voz, envio, importação, convites).
 
 > "Nexo CRM" é um nome provisório. Para trocar, edite `src/components/logo.tsx` e o `title` em `src/app/layout.tsx`.
 
@@ -30,8 +40,8 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 
 ```bash
 npm test          # roda tudo
-npm run test:unit # 11 testes: parsers de webhook (Meta/Evolution), telefone, CPF/CNPJ, dinheiro, voz
-npm run test:db   # 39 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito
+npm run test:unit # 14 testes: webhooks Meta/Evolution, modelos, mídia, telefone, CPF/CNPJ, dinheiro, voz
+npm run test:db   # 48 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel
 npm run typecheck
 npm run build
 ```
@@ -43,10 +53,9 @@ npm run build
 ### 1. Supabase
 
 1. Crie um projeto em [supabase.com](https://supabase.com) (região **São Paulo**).
-2. Em **SQL Editor**, rode, nesta ordem, os arquivos de `supabase/migrations/`:
-   1. `20261021000000_init.sql`
-   2. `20261021000100_ingest.sql`
-   (ou use a CLI: `supabase link` e `supabase db push`)
+2. Em **SQL Editor**, rode, na ordem do nome, todos os arquivos de `supabase/migrations/`
+   (ou use a CLI: `supabase link` e `supabase db push`).
+   > O projeto **nexo-crm** já está criado e com todas as migrations aplicadas.
 3. Em **Authentication → URL Configuration**:
    - *Site URL*: `https://seu-dominio.com.br`
    - *Redirect URLs*: `https://seu-dominio.com.br/auth/callback`
@@ -130,8 +139,6 @@ tests/                    testes unitários e de banco
 
 ## Próximos passos sugeridos
 
-1. Envio de mídia (imagem/áudio/documento) pelo chat.
-2. Modelos de mensagem aprovados (templates) para iniciar conversa fora da janela de 24h na API oficial.
-3. Painel de métricas (conversão por etapa, tempo de resposta, receita).
-4. Limite de requisições por usuário (ex.: Upstash Redis) nas rotas de voz e envio.
-5. Monitoramento de erros (Sentry) e alertas de webhook.
+1. Cadastro pelo **Embedded Signup** da Meta (conexão do número oficial em 1 clique, com coexistência) — exige o app aprovado como Tech Provider.
+2. Gravação de áudio direto no chat (nota de voz).
+3. Monitoramento de erros (Sentry) e alertas de webhook.

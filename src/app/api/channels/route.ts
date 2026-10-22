@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { rateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -26,6 +27,7 @@ const Body = z.discriminatedUnion("provider", [
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext({ manage: true });
+    await rateLimit(`channel:${ctx.org.id}`, 10, 3600, "Limite de conexões por hora atingido.");
     const body = Body.parse(await readJson(req));
     const db = supabaseAdmin();
     const secret = randomBytes(32).toString("hex");

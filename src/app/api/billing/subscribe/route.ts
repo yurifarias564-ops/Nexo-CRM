@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rateLimit } from "@/lib/rate-limit";
 import { requireApiContext } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createCustomer, createSubscription, firstPaymentUrl, isValidCpfCnpj } from "@/lib/asaas";
@@ -16,6 +17,7 @@ const Body = z.object({
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext({ allowInactive: true });
+    await rateLimit(`billing:${ctx.org.id}`, 10, 3600);
     if (ctx.role !== "owner") throw new HttpError(403, "Apenas o dono da conta pode assinar");
     const body = Body.parse(await readJson(req));
     const db = supabaseAdmin();

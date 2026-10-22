@@ -14,7 +14,10 @@ export function ok<T>(data: T, status = 200) {
 
 /** Converte qualquer erro em resposta JSON segura (sem vazar detalhes internos). */
 export function fail(err: unknown) {
-  if (err instanceof HttpError) return NextResponse.json({ error: err.message }, { status: err.status });
+  if (err instanceof HttpError) {
+    const code = (err as HttpError & { code?: string }).code;
+    return NextResponse.json(code ? { error: err.message, code } : { error: err.message }, { status: err.status });
+  }
   if (err instanceof ZodError) {
     return NextResponse.json({ error: err.issues[0]?.message ?? "Dados inválidos" }, { status: 422 });
   }

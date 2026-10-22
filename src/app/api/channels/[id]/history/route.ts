@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rateLimit } from "@/lib/rate-limit";
 import { requireApiContext } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
@@ -22,6 +23,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const { id } = await params;
     const ctx = await requireApiContext({ manage: true });
+    await rateLimit(`history:${ctx.org.id}`, 2000, 3600);
     const { cursor } = Body.parse(await readJson(req));
     const ch = await loadChannel(id);
     if (ch.organization_id !== ctx.org.id) throw new HttpError(404, "Canal não encontrado");

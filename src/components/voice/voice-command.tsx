@@ -138,7 +138,11 @@ export function VoiceCommand() {
       const res = await fetch("/api/voice/execute", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript, actions: chosen }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast.success(data.done.length === 1 ? data.done[0] : `${data.done.length} ações executadas`);
+      if (data.failure) {
+        toast.warning(`Feito: ${data.done.join("; ")}`, { description: `Não executado — ${data.failure.action}: ${data.failure.error}`, duration: 10000 });
+      } else {
+        toast.success(data.done.length === 1 ? data.done[0] : `${data.done.length} ações executadas`);
+      }
       window.dispatchEvent(new CustomEvent("crm:refresh"));
       close();
     } catch (e) {
@@ -215,7 +219,7 @@ export function VoiceCommand() {
           <div className="space-y-3">
             <textarea
               className="field h-24 resize-none py-2"
-              placeholder='Ex.: "Mova o lead Yuri para Negociação e coloque a tag Anúncio"'
+              placeholder='Ex.: "Mova o lead Yuri para Negociação, coloque a tag Anúncio e mande pra ele: já separei sua proposta"'
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && typed.trim()) { e.preventDefault(); void interpret({ text: typed }); } }}

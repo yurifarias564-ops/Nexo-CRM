@@ -154,3 +154,41 @@ test("Evolution: histórico, status e conexão", () => {
   assert.equal(parseEvo({ event: "qrcode.updated", data: { qrcode: { base64: "data:image/png;base64,AAA" } } }).qr, "data:image/png;base64,AAA");
   assert.deepEqual(parseEvo({}).messages, []);
 });
+
+test("Meta: lista só modelos aprovados e enviáveis com texto", async () => {
+  const { listTemplates, renderTemplate } = await import("@/lib/whatsapp/meta");
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ data: [
+    { name: "boas_vindas", language: "pt_BR", status: "APPROVED", category: "MARKETING", components: [{ type: "BODY", text: "Olá {{1}}, sua proposta de {{2}} está pronta." }] },
+    { name: "pendente", language: "pt_BR", status: "PENDING", category: "UTILITY", components: [{ type: "BODY", text: "x" }] },
+    { name: "com_imagem", language: "pt_BR", status: "APPROVED", category: "MARKETING", components: [{ type: "HEADER", format: "IMAGE" }, { type: "BODY", text: "y" }] },
+    { name: "botao_url", language: "pt_BR", status: "APPROVED", category: "UTILITY", components: [{ type: "BODY", text: "z" }, { type: "BUTTONS", buttons: [{ type: "URL", url: "https://x.com/{{1}}" }] }] },
+    { name: "simples", language: "en_US", status: "APPROVED", category: "UTILITY", components: [{ type: "HEADER", format: "TEXT", text: "Oi" }, { type: "BODY", text: "Sem variáveis" }] },
+  ] }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+  try {
+    const list = await listTemplates("123", "tok");
+    assert.deepEqual(list.map((t) => `${t.name}:${t.params}`), ["boas_vindas:2", "simples:0"]);
+    assert.equal(renderTemplate(list[0]!.body, ["Yuri", "R$ 1.500"]), "Olá Yuri, sua proposta de R$ 1.500 está pronta.");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("mídia: tipo enviado ao WhatsApp a partir do arquivo", async () => {
+  const { mediaKind } = await import("@/lib/send");
+  assert.equal(mediaKind("image/jpeg"), "image");
+  assert.equal(mediaKind("image/webp"), "document", "webp não é aceito como imagem pela Meta");
+  assert.equal(mediaKind("video/mp4"), "video");
+  assert.equal(mediaKind("audio/ogg"), "audio");
+  assert.equal(mediaKind("application/pdf"), "document");
+});
+
+test("voz: novas ações (editar lead e enviar mensagem)", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const up = ResolvedAction.parse({ kind: "update_lead", leadId: id, leadName: "Yuri", leadCandidates: [], patch: { phone: "5585999998888" } });
+  assert.equal(describeAction(up), "Atualizar Yuri: telefone → +5585999998888");
+  const msg = ResolvedAction.parse({ kind: "send_message", leadId: id, leadName: "Yuri", leadCandidates: [], text: "Proposta enviada!" });
+  assert.equal(describeAction(msg), 'Enviar WhatsApp para Yuri: "Proposta enviada!"');
+  assert.throws(() => ResolvedAction.parse({ kind: "update_lead", leadId: id, leadName: "Y", leadCandidates: [], patch: {} }));
+  assert.throws(() => ResolvedAction.parse({ kind: "update_lead", leadId: id, leadName: "Y", leadCandidates: [], patch: { phone: "abc" } }));
+});

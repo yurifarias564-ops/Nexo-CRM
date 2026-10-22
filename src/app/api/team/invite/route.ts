@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rateLimit } from "@/lib/rate-limit";
 import { requireApiContext } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { appUrl } from "@/lib/env";
@@ -15,6 +16,7 @@ const Body = z.object({
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext({ manage: true });
+    await rateLimit(`invite:${ctx.org.id}`, 30, 3600, "Limite de convites por hora atingido.");
     const { email, role } = Body.parse(await readJson(req));
     const db = supabaseAdmin();
 

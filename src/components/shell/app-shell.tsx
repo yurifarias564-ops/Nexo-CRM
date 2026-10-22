@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users } from "lucide-react";
+import { BarChart3, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -12,6 +12,7 @@ import { VoiceCommand } from "@/components/voice/voice-command";
 import { cn } from "@/lib/utils";
 
 const NAV = [
+  { href: "/dashboard", label: "Painel", icon: BarChart3 },
   { href: "/pipeline", label: "Funil", icon: KanbanSquare },
   { href: "/inbox", label: "Conversas", icon: MessageCircle },
   { href: "/leads", label: "Leads", icon: Users },

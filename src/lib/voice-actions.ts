@@ -11,6 +11,12 @@ export const ResolvedAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set_value"), ...Lead, value: z.number().nonnegative().max(1e12) }),
   z.object({ kind: z.literal("assign_lead"), ...Lead, userId: z.string().uuid(), userName: z.string() }),
   z.object({ kind: z.literal("add_note"), ...Lead, note: z.string().min(1).max(2000) }),
+  z.object({
+    kind: z.literal("update_lead"), ...Lead,
+    patch: z.object({ name: z.string().min(1).max(160).optional(), phone: z.string().regex(/^[0-9]{8,15}$/).optional(), email: z.string().email().max(254).optional() })
+      .refine((p) => Object.keys(p).length > 0, "Nada para alterar"),
+  }),
+  z.object({ kind: z.literal("send_message"), ...Lead, text: z.string().trim().min(1).max(4096) }),
 ]);
 export type ResolvedAction = z.infer<typeof ResolvedAction>;
 
@@ -23,5 +29,14 @@ export function describe(a: ResolvedAction): string {
     case "set_value": return `Valor de ${a.leadName}: ${a.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`;
     case "assign_lead": return `Responsável por ${a.leadName}: ${a.userName}`;
     case "add_note": return `Anotação em ${a.leadName}: "${a.note}"`;
+    case "update_lead": {
+      const parts = [
+        a.patch.name && `nome → ${a.patch.name}`,
+        a.patch.phone && `telefone → +${a.patch.phone}`,
+        a.patch.email && `e-mail → ${a.patch.email}`,
+      ].filter(Boolean);
+      return `Atualizar ${a.leadName}: ${parts.join(", ")}`;
+    }
+    case "send_message": return `Enviar WhatsApp para ${a.leadName}: "${a.text}"`;
   }
 }

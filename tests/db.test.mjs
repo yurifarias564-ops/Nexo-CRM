@@ -153,5 +153,25 @@ console.log("\n# Relações usadas pela API (embeds do PostgREST)");
 const fk = await su(`select count(*)::int n from pg_constraint where contype='f' and conrelid='public.organization_members'::regclass and confrelid='public.profiles'::regclass`);
 ok("membros → perfis tem FK direta (nome/e-mail da equipe num select)", fk[0].n === 1);
 
+console.log("\n# Limite de uso");
+await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");
+const hits = [];
+for (let i = 0; i < 4; i++) hits.push((await as("service", "select public.hit_rate_limit('voz:teste', 3, 60) ok"))[0].ok);
+ok("limite de 3: libera 3 e bloqueia a 4ª", JSON.stringify(hits) === "[true,true,true,false]", JSON.stringify(hits));
+await su("update public.rate_limits set window_start = now() - interval '2 minutes' where key='voz:teste'");
+ok("janela expirada libera de novo", (await as("service", "select public.hit_rate_limit('voz:teste', 3, 60) ok"))[0].ok === true);
+
+console.log("\n# Painel de métricas");
+const wonStage = (await su("select id from public.stages where organization_id=$1 and kind='won'", [orgA]))[0].id;
+await as(A, "update public.leads set value=1500 where id=$1", [leadA]);
+await as(A, "update public.leads set stage_id=$1 where id=$2", [wonStage, leadA]);
+const stats = (await as(A, "select public.dashboard_stats($1, now() - interval '7 days', now() + interval '1 day') s", [orgA]))[0].s;
+ok("painel: venda ganha contabilizada", stats.won_count === 1 && Number(stats.won_value) === 1500, JSON.stringify({ w: stats.won_count, v: stats.won_value }));
+ok("painel: leads novos no período", stats.new_leads >= 2, String(stats.new_leads));
+ok("painel: série diária de mensagens", Array.isArray(stats.messages) && stats.messages.length >= 8, String(stats.messages?.length));
+ok("painel: etapas listadas", stats.by_stage.length >= 6);
+const statsB = (await as(B, "select public.dashboard_stats($1, now() - interval '7 days', now() + interval '1 day') s", [orgA]))[0].s;
+ok("painel: outra empresa não vê números de A", statsB.new_leads === 0 && statsB.won_count === 0 && statsB.by_stage.length === 0);
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

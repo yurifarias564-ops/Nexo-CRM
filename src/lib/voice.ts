@@ -10,7 +10,7 @@ export async function transcribe(file: Blob, filename: string): Promise<string> 
   form.append("file", file, filename);
   form.append("model", envOptional("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"));
   form.append("language", "pt");
-  form.append("prompt", "Comandos de CRM: lead, coluna, etapa, funil, negociação, tag, anúncio, proposta, qualificação.");
+  form.append("prompt", "Comandos de CRM: lead, coluna, etapa, funil, negociação, tag, anúncio, proposta, qualificação, WhatsApp, mensagem, telefone.");
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { Authorization: `Bearer ${env("OPENAI_API_KEY")}` },
@@ -54,6 +54,16 @@ const TOOLS = [
     name: "assign_lead",
     description: "Define o responsável (vendedor) por um lead.",
     input_schema: { type: "object", properties: { lead: { type: "string" }, member: { type: "string", description: "Nome do membro da equipe" } }, required: ["lead", "member"] },
+  },
+  {
+    name: "update_lead",
+    description: "Altera dados cadastrais de um lead: nome, telefone e/ou e-mail. Informe só o que mudou.",
+    input_schema: { type: "object", properties: { lead: { type: "string" }, name: { type: "string", description: "Novo nome" }, phone: { type: "string", description: "Novo telefone" }, email: { type: "string", description: "Novo e-mail" } }, required: ["lead"] },
+  },
+  {
+    name: "send_message",
+    description: "Envia uma mensagem de texto no WhatsApp para o lead. Use o texto exatamente como o usuário quer enviar, corrigindo só pontuação.",
+    input_schema: { type: "object", properties: { lead: { type: "string" }, text: { type: "string", description: "Texto da mensagem para o cliente" } }, required: ["lead", "text"] },
   },
   {
     name: "add_note",

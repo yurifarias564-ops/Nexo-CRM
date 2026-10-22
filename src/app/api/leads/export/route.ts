@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { rateLimit } from "@/lib/rate-limit";
 import { requireApiContext } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase/server";
 import { fail } from "@/lib/http";
@@ -11,6 +12,7 @@ export const maxDuration = 120;
 export async function GET(req: Request) {
   try {
     const ctx = await requireApiContext();
+    await rateLimit(`export:${ctx.userId}`, 10, 60);
     const sb = await supabaseServer();
     const stageFilter = new URL(req.url).searchParams.get("stage");
 

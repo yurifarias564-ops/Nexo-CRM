@@ -73,6 +73,21 @@ export async function sendText(instance: string, to: string, text: string): Prom
   return r.key.id;
 }
 
+export async function sendMedia(
+  instance: string, to: string, kind: "image" | "video" | "audio" | "document", mimetype: string, base64: string, fileName: string, caption?: string,
+): Promise<string> {
+  const number = to.includes("@") ? to : to.replace(/\D/g, "");
+  const r = kind === "audio"
+    ? await call<{ key?: { id?: string } }>(`/message/sendWhatsAppAudio/${encodeURIComponent(instance)}`, {
+        method: "POST", body: JSON.stringify({ number, audio: base64 }),
+      }, 60_000)
+    : await call<{ key?: { id?: string } }>(`/message/sendMedia/${encodeURIComponent(instance)}`, {
+        method: "POST", body: JSON.stringify({ number, mediatype: kind, mimetype, media: base64, fileName, caption: caption ?? "" }),
+      }, 60_000);
+  if (!r.key?.id) throw new HttpError(502, "WhatsApp (QR) não retornou o id da mensagem");
+  return r.key.id;
+}
+
 export async function getMediaBase64(instance: string, messageId: string) {
   return call<{ base64?: string; mimetype?: string }>(
     `/chat/getBase64FromMediaMessage/${encodeURIComponent(instance)}`,

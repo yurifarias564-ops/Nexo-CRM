@@ -4,6 +4,7 @@ import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { bestMatch, interpret, norm, transcribe } from "@/lib/voice";
 import type { ResolvedAction } from "@/lib/voice-actions";
 import { normalizePhone } from "@/lib/utils";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,6 +14,8 @@ const MAX_AUDIO = 10 * 1024 * 1024;
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext();
+    await rateLimit(`voice:${ctx.userId}`, 20, 60, "Muitos comandos de voz seguidos. Aguarde um minuto.");
+    await rateLimit(`voice-org:${ctx.org.id}`, 600, 3600, "Limite de comandos de voz da empresa por hora atingido.");
     let transcript = "";
 
     if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
@@ -119,6 +122,29 @@ export async function POST(req: Request) {
         case "add_note":
           actions.push({ kind: "add_note", ...(await resolveLead(i.lead)), note: String(i.note ?? "").slice(0, 2000) });
           break;
+        case "update_lead": {
+          const patch: { name?: string; phone?: string; email?: string } = {};
+          if (typeof i.name === "string" && i.name.trim()) patch.name = i.name.trim().slice(0, 160);
+          if (i.phone !== undefined && i.phone !== null && String(i.phone).trim()) {
+            const p = normalizePhone(i.phone);
+            if (!p) { issues.push(`Telefone inválido: ${i.phone}`); break; }
+            patch.phone = p;
+          }
+          if (typeof i.email === "string" && i.email.trim()) {
+            const em = i.email.trim().toLowerCase().replace(/\s+arroba\s+/g, "@").replace(/\s+ponto\s+/g, ".").replace(/\s+/g, "");
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { issues.push(`E-mail inválido: ${i.email}`); break; }
+            patch.email = em;
+          }
+          if (!Object.keys(patch).length) { issues.push("Não entendi o que alterar no lead."); break; }
+          actions.push({ kind: "update_lead", ...(await resolveLead(i.lead)), patch });
+          break;
+        }
+        case "send_message": {
+          const text = String(i.text ?? "").trim().slice(0, 4096);
+          if (!text) { issues.push("Mensagem vazia."); break; }
+          actions.push({ kind: "send_message", ...(await resolveLead(i.lead)), text });
+          break;
+        }
       }
     }
 

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar, Field, Portal, Spinner, TagPill } from "@/components/ui/misc";
 import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
 import { useLatest } from "@/lib/hooks";
+import { TemplateModal } from "@/components/inbox/template-modal";
 import type { Lead } from "@/lib/types";
 
 type Activity = { id: number; type: string; payload: Record<string, unknown>; created_at: string; actor_id: string | null };
@@ -33,6 +34,7 @@ export function LeadDrawer({
   const [firstMsg, setFirstMsg] = useState("");
   const [tagMenu, setTagMenu] = useState(false);
   const [newTag, setNewTag] = useState("");
+  const [tplOpen, setTplOpen] = useState(false);
   const closeRef = useLatest(onClose);
 
   useEffect(() => {
@@ -134,7 +136,14 @@ export function LeadDrawer({
     if (!lead || !firstMsg.trim()) return;
     const res = await fetch("/api/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadId: lead.id, text: firstMsg.trim() }) });
     const body = await res.json();
-    if (!res.ok) return toast.error(body.error);
+    if (!res.ok) {
+      if (body.code === "window_closed") {
+        toast.message("Este número usa a API oficial: o primeiro contato precisa ser um modelo aprovado.");
+        setTplOpen(true);
+        return;
+      }
+      return toast.error(body.error);
+    }
     setFirstMsg("");
     toast.success("Mensagem enviada");
     const { data: conv } = await supabaseBrowser().from("conversations").select("id").eq("lead_id", lead.id).limit(1).maybeSingle();
@@ -265,6 +274,14 @@ export function LeadDrawer({
           </>
         )}
       </aside>
+      {lead && (
+        <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ leadId: lead.id }}
+          defaultFirstParam={lead.name.split(" ")[0]}
+          onSent={async () => {
+            const { data: conv } = await supabaseBrowser().from("conversations").select("id").eq("lead_id", lead.id).limit(1).maybeSingle();
+            setConversationId(conv?.id ?? null);
+          }} />
+      )}
     </div>
     </Portal>
   );
