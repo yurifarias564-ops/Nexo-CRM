@@ -117,7 +117,7 @@ async function buildTeam(db: SupabaseClient, orgId: string, period: string, prev
   const b = monthDays(prevP);
   const [s, m, g, cur, prev] = await Promise.all([
     db.from("team_sellers").select("id, name, user_id, active, position, role, store_id").eq("organization_id", orgId).order("position"),
-    db.from("team_metrics").select("id, name, unit, source, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", orgId).eq("active", true).order("position"),
+    db.from("team_metrics").select("id, name, unit, source:origin, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", orgId).eq("active", true).order("position"),
     db.from("team_seller_goals").select("seller_id, metric_id, daily_target, weekly_target, monthly_target").eq("organization_id", orgId),
     db.rpc("team_values", { org: orgId, p_from: a.first, p_to: a.last, tz }),
     db.rpc("team_values", { org: orgId, p_from: b.first, p_to: b.last, tz }),

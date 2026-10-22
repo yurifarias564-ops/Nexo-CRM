@@ -50,12 +50,35 @@ begin
 end $$;
 
 -- Indicadores: função, resultado de, meta semanal, origem OS ---------------------
--- Origem ganha "os_count"/"os_value". Sem apagar nada: a coluna antiga vira
--- source_v1 (sem uso) e a nova "source" aceita as origens novas.
-alter table public.team_metrics rename column source to source_v1;
-alter table public.team_metrics add column source text not null default 'manual'
-  check (source in ('manual', 'calls', 'calls_answered', 'won_count', 'won_value', 'appointments', 'followups_sent', 'os_count', 'os_value'));
-update public.team_metrics set source = source_v1;
+-- Origem ganha "os_count"/"os_value". Sem apagar nem renomear nada: a coluna
+-- nova "origin" passa a ser a origem do indicador; "source" (v1) fica sem uso.
+alter table public.team_metrics add column origin text not null default 'manual'
+  check (origin in ('manual', 'calls', 'calls_answered', 'won_count', 'won_value', 'appointments', 'followups_sent', 'os_count', 'os_value'));
+
+-- Integridade dos lançamentos passa a olhar a coluna nova
+create or replace function private.team_rows_check()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare v_src text;
+begin
+  if not exists (select 1 from public.team_sellers s where s.id = new.seller_id and s.organization_id = new.organization_id) then
+    raise exception 'Vendedor de outra empresa' using errcode = '23514';
+  end if;
+  select m.origin into v_src from public.team_metrics m where m.id = new.metric_id and m.organization_id = new.organization_id;
+  if v_src is null then
+    raise exception 'Indicador de outra empresa' using errcode = '23514';
+  end if;
+  if tg_table_name = 'team_entries' then
+    if v_src <> 'manual' then
+      raise exception 'Este indicador é calculado automaticamente pelo CRM' using errcode = '23514';
+    end if;
+    if new.day > current_date + 1 then
+      raise exception 'Não é possível lançar em data futura' using errcode = '23514';
+    end if;
+    new.updated_at := now();
+  end if;
+  return new;
+end $$;
+
 alter table public.team_metrics
   add column role text not null default 'todos' check (role in ('todos', 'sdr', 'closer')),
   add column result_of uuid references public.team_metrics (id) on delete cascade,
@@ -68,11 +91,11 @@ begin
   if new.result_of is not null then
     if new.result_of = new.id or not exists (
       select 1 from public.team_metrics p where p.id = new.result_of and p.organization_id = new.organization_id
-        and p.result_of is null and p.source = 'manual'
+        and p.result_of is null and p.origin = 'manual'
     ) then
       raise exception 'Resultado precisa estar ligado a uma atividade manual da mesma empresa' using errcode = '23514';
     end if;
-    if new.source <> 'manual' then
+    if new.origin <> 'manual' then
       raise exception 'Resultado é sempre preenchido à mão' using errcode = '23514';
     end if;
   end if;
@@ -212,7 +235,7 @@ language sql stable security invoker set search_path = '' as $$
   with
   rng as (select (p_from::timestamp at time zone tz) as t0, ((p_to + 1)::timestamp at time zone tz) as t1),
   sel as (select s.id, s.user_id from public.team_sellers s where s.organization_id = org),
-  met as (select m.id, m.source from public.team_metrics m where m.organization_id = org and m.source <> 'manual' and m.active),
+  met as (select m.id, m.origin as source from public.team_metrics m where m.organization_id = org and m.origin <> 'manual' and m.active),
   calls as (
     select a.actor_id as uid, (a.created_at at time zone tz)::date as d, count(*) as n,
            count(*) filter (where a.payload ->> 'outcome' = 'atendeu') as answered

@@ -32,7 +32,7 @@ export async function GET(req: Request) {
     const [st, s, m, g, cfg, cur, prev, sl, nt] = await Promise.all([
       sb.from("team_stores").select("id, name, revenue_goal, os_daily_goal, position").eq("organization_id", org).order("position"),
       sb.from("team_sellers").select("id, name, user_id, active, position, role, store_id").eq("organization_id", org).order("position"),
-      sb.from("team_metrics").select("id, name, unit, source, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", org).eq("active", true).order("position"),
+      sb.from("team_metrics").select("id, name, unit, source:origin, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", org).eq("active", true).order("position"),
       sb.from("team_seller_goals").select("seller_id, metric_id, daily_target, weekly_target, monthly_target").eq("organization_id", org),
       sb.from("team_settings").select("baseline").eq("organization_id", org).maybeSingle(),
       sb.rpc("team_values", { org, p_from: from, p_to: to, tz }),

@@ -56,11 +56,11 @@ function Kits({ reload }: { reload: () => Promise<void> }) {
     const sb = supabaseBrowser();
     let pos = 0;
     for (const m of kit.metrics) {
-      const { results, ...row } = m;
-      const { data, error } = await sb.from("team_metrics").insert({ organization_id: ws.orgId, ...row, position: pos++ }).select("id").single();
+      const { results, source, ...row } = m;
+      const { data, error } = await sb.from("team_metrics").insert({ organization_id: ws.orgId, ...row, origin: source, position: pos++ }).select("id").single();
       if (!okErr(error) || !data) { setBusy(null); return; }
       for (const r of results ?? []) {
-        const res = await sb.from("team_metrics").insert({ organization_id: ws.orgId, name: r, unit: "count", source: "manual", role: m.role, result_of: data.id, position: pos++ });
+        const res = await sb.from("team_metrics").insert({ organization_id: ws.orgId, name: r, unit: "count", origin: "manual", role: m.role, result_of: data.id, position: pos++ });
         if (!okErr(res.error)) { setBusy(null); return; }
       }
     }
@@ -202,12 +202,15 @@ function Metrics({ base, reload }: { base: TeamBase; reload: () => Promise<void>
   const parents = metrics.filter((m) => !m.result_of && m.source === "manual");
 
   async function patch(m: TeamMetric, p: Partial<TeamMetric>) {
-    if (okErr((await sb.from("team_metrics").update(p).eq("id", m.id)).error)) await reload();
+    // No banco a origem fica na coluna "origin"
+    const { source, ...rest } = p;
+    const body = source ? { ...rest, origin: source } : rest;
+    if (okErr((await sb.from("team_metrics").update(body).eq("id", m.id)).error)) await reload();
   }
   async function add(resultOf?: TeamMetric) {
     const row = resultOf
-      ? { name: "Resultado", unit: "count", source: "manual", role: resultOf.role, result_of: resultOf.id }
-      : { name: "Nova atividade", unit: "count", source: "manual", role: "todos" };
+      ? { name: "Resultado", unit: "count", origin: "manual", role: resultOf.role, result_of: resultOf.id }
+      : { name: "Nova atividade", unit: "count", origin: "manual", role: "todos" };
     if (okErr((await sb.from("team_metrics").insert({ organization_id: ws.orgId, ...row, position: metrics.length })).error)) await reload();
   }
   async function move(i: number, dir: -1 | 1) {

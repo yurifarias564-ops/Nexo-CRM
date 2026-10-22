@@ -27,7 +27,7 @@ export function useTeamBase(orgId: string) {
     const [st, s, m, g, cfg] = await Promise.all([
       sb.from("team_stores").select("id, name, revenue_goal, os_daily_goal, position").eq("organization_id", orgId).order("position").order("created_at"),
       sb.from("team_sellers").select("id, name, user_id, active, position, role, store_id").eq("organization_id", orgId).order("position").order("created_at"),
-      sb.from("team_metrics").select("id, name, unit, source, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", orgId).order("position").order("created_at"),
+      sb.from("team_metrics").select("id, name, unit, source:origin, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", orgId).order("position").order("created_at"),
       sb.from("team_seller_goals").select("seller_id, metric_id, daily_target, weekly_target, monthly_target").eq("organization_id", orgId),
       sb.from("team_settings").select("cycle_start, baseline, baseline_note").eq("organization_id", orgId).maybeSingle(),
     ]);

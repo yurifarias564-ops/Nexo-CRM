@@ -261,8 +261,8 @@ const sCarla = (await as(A, "insert into public.team_sellers (organization_id, n
 await expectError("vendedor com login de fora da empresa é recusado", () => as(A, "insert into public.team_sellers (organization_id, name, user_id) values ($1,'Intrusa',$2)", [orgA, B]), "23514");
 await expectError("atendente não cadastra vendedor", () => as(C, "insert into public.team_sellers (organization_id, name) values ($1,'X')", [orgA]), "42501");
 const mInsta = (await as(A, "insert into public.team_metrics (organization_id, name, daily_target, monthly_target) values ($1,'Contatos no Instagram',10,220) returning id", [orgA]))[0].id;
-const mCalls = (await as(A, "insert into public.team_metrics (organization_id, name, source) values ($1,'Ligações','calls') returning id", [orgA]))[0].id;
-const mWon = (await as(A, "insert into public.team_metrics (organization_id, name, source, unit) values ($1,'Faturamento','won_value','money') returning id", [orgA]))[0].id;
+const mCalls = (await as(A, "insert into public.team_metrics (organization_id, name, origin) values ($1,'Ligações','calls') returning id", [orgA]))[0].id;
+const mWon = (await as(A, "insert into public.team_metrics (organization_id, name, origin, unit) values ($1,'Faturamento','won_value','money') returning id", [orgA]))[0].id;
 ok("atendente preenche checklist de vendedora sem login", (await as(C, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date,7,$4) returning 1", [orgA, sBia, mInsta, C])).length === 1);
 ok("vendedora preenche o próprio checklist", (await as(C, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date,12,$4) returning 1", [orgA, sCarla, mInsta, C])).length === 1);
 await expectError("atendente não preenche checklist de outra vendedora com login", () => as(C, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date,99,$4)", [orgA, sAna, mInsta, C]), "42501");
@@ -288,8 +288,8 @@ await expectError("pessoa não vai para loja de outra empresa", () => as(A, "upd
 const mLig = (await as(A, "insert into public.team_metrics (organization_id, name, role, daily_target) values ($1,'Ligações SDR','sdr',20) returning id", [orgA]))[0].id;
 ok("resultado ligado a uma atividade", (await as(A, "insert into public.team_metrics (organization_id, name, role, result_of) values ($1,'Contatos efetivos','sdr',$2) returning 1", [orgA, mLig])).length === 1);
 await expectError("resultado não liga em indicador automático", () => as(A, "insert into public.team_metrics (organization_id, name, result_of) values ($1,'X',$2)", [orgA, mCalls]), "23514");
-const mOs = (await as(A, "insert into public.team_metrics (organization_id, name, role, source, daily_target) values ($1,'OS fechadas','closer','os_count',4) returning id", [orgA]))[0].id;
-const mFat = (await as(A, "insert into public.team_metrics (organization_id, name, role, source, unit) values ($1,'Faturamento OS','closer','os_value','money') returning id", [orgA]))[0].id;
+const mOs = (await as(A, "insert into public.team_metrics (organization_id, name, role, origin, daily_target) values ($1,'OS fechadas','closer','os_count',4) returning id", [orgA]))[0].id;
+const mFat = (await as(A, "insert into public.team_metrics (organization_id, name, role, origin, unit) values ($1,'Faturamento OS','closer','os_value','money') returning id", [orgA]))[0].id;
 ok("meta individual fixa (dia/semana/mês)", (await as(A, "insert into public.team_seller_goals (organization_id, seller_id, metric_id, daily_target, weekly_target, monthly_target) values ($1,$2,$3,25,125,500) returning 1", [orgA, sBia, mLig])).length === 1);
 await expectError("atendente não altera meta individual", () => as(C, "update public.team_seller_goals set daily_target=1 where seller_id=$1 returning 1", [sBia]).then((r) => { if (!r.length) { const e = new Error("bloqueado"); e.code = "42501"; throw e; } }), "42501");
 ok("closer registra OS da própria loja", (await as(C, "insert into public.team_sales (organization_id, seller_id, sdr_id, day, value, os_number, created_by) values ($1,$2,$3,current_date,1850.5,'OS-1001',$4) returning store_id", [orgA, sCarla, sBia, C]))[0].store_id === loja);
