@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "recording" | "thinking" | "review" | "executing";
 const MAX_SECONDS = 60;
+const userTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return "America/Sao_Paulo"; } };
 
 function pickMime(): string {
   if (typeof MediaRecorder === "undefined") return "";
@@ -47,7 +48,7 @@ export function VoiceCommand() {
 
   useEffect(() => cleanup, [cleanup]);
 
-  const interpret = useCallback(async (body: FormData | { text: string }) => {
+  const interpret = useCallback(async (body: FormData | { text: string; tz: string }) => {
     setPhase("thinking");
     try {
       const res = await fetch("/api/voice/interpret", body instanceof FormData
@@ -84,6 +85,7 @@ export function VoiceCommand() {
         cleanup();
         if (blob.size < 1500) { setPhase("idle"); return toast.message("Gravação muito curta — segure por um instante e fale o comando."); }
         const fd = new FormData();
+        fd.append("tz", userTz());
         fd.append("audio", blob, `comando.${type.includes("mp4") ? "mp4" : type.includes("ogg") ? "ogg" : "webm"}`);
         void interpret(fd);
       };
@@ -203,7 +205,7 @@ export function VoiceCommand() {
           typing && !transcript ? (
             <>
               <Button variant="ghost" onClick={close}>Cancelar</Button>
-              <Button onClick={() => typed.trim() && interpret({ text: typed })} disabled={!typed.trim()}><Wand2 className="h-4 w-4" /> Interpretar</Button>
+              <Button onClick={() => typed.trim() && interpret({ text: typed, tz: userTz() })} disabled={!typed.trim()}><Wand2 className="h-4 w-4" /> Interpretar</Button>
             </>
           ) : (
             <>
@@ -222,7 +224,7 @@ export function VoiceCommand() {
               placeholder='Ex.: "Mova o lead Yuri para Negociação, coloque a tag Anúncio e mande pra ele: já separei sua proposta"'
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && typed.trim()) { e.preventDefault(); void interpret({ text: typed }); } }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && typed.trim()) { e.preventDefault(); void interpret({ text: typed, tz: userTz() }); } }}
             />
             <p className="text-xs text-slate-500">Dica: use o microfone (Ctrl+Shift+M) para falar o mesmo comando.</p>
           </div>

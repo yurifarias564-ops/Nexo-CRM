@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Clock, MessageCircle, Plus, Send, StickyNote, Trash2, X } from "lucide-react";
+import { ArrowRight, CalendarPlus, CalendarX, Clock, ExternalLink, MessageCircle, Plus, Send, StickyNote, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -10,8 +10,11 @@ import { Avatar, Field, Portal, Spinner, TagPill } from "@/components/ui/misc";
 import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
 import { useLatest } from "@/lib/hooks";
 import { TemplateModal } from "@/components/inbox/template-modal";
+import { ScheduleModal } from "./schedule-modal";
+import { formatWhen } from "@/lib/time";
 import type { Lead } from "@/lib/types";
 
+type Appointment = { id: string; title: string; starts_at: string; ends_at: string; time_zone: string; status: "scheduled" | "canceled"; google_link: string | null; user_id: string | null };
 type Activity = { id: number; type: string; payload: Record<string, unknown>; created_at: string; actor_id: string | null };
 
 export function LeadDrawer({
@@ -35,6 +38,9 @@ export function LeadDrawer({
   const [tagMenu, setTagMenu] = useState(false);
   const [newTag, setNewTag] = useState("");
   const [tplOpen, setTplOpen] = useState(false);
+  const [appts, setAppts] = useState<Appointment[]>([]);
+  const [scheduling, setScheduling] = useState(false);
+  const [now] = useState(() => Date.now());
   const closeRef = useLatest(onClose);
 
   useEffect(() => {
@@ -42,11 +48,12 @@ export function LeadDrawer({
     let alive = true;
     const sb = supabaseBrowser();
     (async () => {
-      const [{ data: l }, { data: lt }, { data: act }, { data: conv }] = await Promise.all([
+      const [{ data: l }, { data: lt }, { data: act }, { data: conv }, { data: ap }] = await Promise.all([
         sb.from("leads").select("*").eq("id", leadId).maybeSingle(),
         sb.from("lead_tags").select("tag_id").eq("lead_id", leadId),
         sb.from("activities").select("id, type, payload, created_at, actor_id").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(30),
         sb.from("conversations").select("id").eq("lead_id", leadId).order("last_message_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle(),
+        sb.from("appointments").select("id, title, starts_at, ends_at, time_zone, status, google_link, user_id").eq("lead_id", leadId).order("starts_at", { ascending: false }).limit(20),
       ]);
       if (!alive) return;
       if (!l) { toast.error("Lead não encontrado"); closeRef.current(); return; }
@@ -58,6 +65,7 @@ export function LeadDrawer({
       setTagIds((lt ?? []).map((r) => r.tag_id));
       setActivities((act ?? []) as Activity[]);
       setConversationId(conv?.id ?? null);
+      setAppts((ap ?? []) as Appointment[]);
     })();
     return () => { alive = false; };
   }, [leadId, closeRef]);
@@ -159,6 +167,28 @@ export function LeadDrawer({
     onClose();
   }
 
+  async function reloadSide() {
+    if (!lead) return;
+    const sb = supabaseBrowser();
+    const [{ data: ap }, { data: act }, { data: l }] = await Promise.all([
+      sb.from("appointments").select("id, title, starts_at, ends_at, time_zone, status, google_link, user_id").eq("lead_id", lead.id).order("starts_at", { ascending: false }).limit(20),
+      sb.from("activities").select("id, type, payload, created_at, actor_id").eq("lead_id", lead.id).order("created_at", { ascending: false }).limit(30),
+      sb.from("leads").select("*").eq("id", lead.id).maybeSingle(),
+    ]);
+    setAppts((ap ?? []) as Appointment[]);
+    setActivities((act ?? []) as Activity[]);
+    if (l) { setLead(l as Lead); setForm((f) => ({ ...f, stage_id: l.stage_id })); onSaved?.(l as Lead); }
+  }
+
+  async function cancelAppt(a: Appointment) {
+    if (!confirm(`Cancelar "${a.title}"? O evento também sai do Google Agenda.`)) return;
+    const res = await fetch(`/api/appointments/${a.id}`, { method: "DELETE" });
+    const body = await res.json();
+    if (!res.ok) return toast.error(body.error);
+    toast.success(body.google === "error" ? "Cancelado no CRM (não consegui remover do Google Agenda)" : "Agendamento cancelado");
+    void reloadSide();
+  }
+
   const describeActivity = (a: Activity) => {
     const who = a.actor_id ? ws.memberById.get(a.actor_id)?.full_name ?? "Alguém" : "Sistema";
     if (a.type === "stage_changed") {
@@ -167,6 +197,8 @@ export function LeadDrawer({
       return <>{who} moveu de <b className="text-slate-300">{from}</b> <ArrowRight className="inline h-3 w-3" /> <b className="text-slate-300">{to}</b></>;
     }
     if (a.type === "lead_created") return <>{who} criou o lead</>;
+    if (a.type === "appointment_created") return <>{who} agendou <b className="text-slate-300">{String(a.payload.title ?? "")}</b> para {formatWhen(String(a.payload.starts_at), Intl.DateTimeFormat().resolvedOptions().timeZone)}</>;
+    if (a.type === "appointment_canceled") return <>{who} cancelou <b className="text-slate-300">{String(a.payload.title ?? "")}</b></>;
     if (a.type === "note") return <><span className="text-slate-300">{String(a.payload.text ?? "")}</span> <span className="text-slate-600">— {who}{a.payload.via === "voz" ? " (voz)" : ""}</span></>;
     return a.type;
   };
@@ -254,6 +286,34 @@ export function LeadDrawer({
               </div>
 
               <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="label mb-0">Agendamentos</span>
+                  <Button size="sm" variant="outline" onClick={() => setScheduling(true)}><CalendarPlus className="h-3.5 w-3.5" /> Agendar</Button>
+                </div>
+                {appts.length ? (
+                  <ul className="space-y-1.5">
+                    {appts.map((a) => {
+                      const past = new Date(a.ends_at).getTime() < now;
+                      return (
+                        <li key={a.id} className={`flex items-center gap-3 rounded-lg border border-line bg-ink-850 px-3 py-2 text-sm ${a.status === "canceled" || past ? "opacity-60" : ""}`}>
+                          <div className="min-w-0 flex-1">
+                            <p className={`truncate font-medium text-slate-100 ${a.status === "canceled" ? "line-through" : ""}`}>{a.title}</p>
+                            <p className="text-xs text-slate-400">{formatWhen(a.starts_at, a.time_zone)}{a.status === "canceled" ? " · cancelado" : past ? " · realizado" : ""}</p>
+                          </div>
+                          {a.google_link && a.status === "scheduled" && (
+                            <a href={a.google_link} target="_blank" rel="noopener noreferrer" className="rounded p-1.5 text-slate-400 hover:bg-ink-700 hover:text-brand-200" title="Abrir no Google Agenda" aria-label="Abrir no Google Agenda"><ExternalLink className="h-3.5 w-3.5" /></a>
+                          )}
+                          {a.status === "scheduled" && !past && (a.user_id === ws.userId || ws.canManage) && (
+                            <button onClick={() => cancelAppt(a)} className="rounded p-1.5 text-slate-400 hover:bg-red-500/10 hover:text-red-300" title="Cancelar" aria-label="Cancelar agendamento"><CalendarX className="h-3.5 w-3.5" /></button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : <p className="text-sm text-slate-600">Nenhum agendamento.</p>}
+              </div>
+
+              <div>
                 <span className="label">Histórico</span>
                 <div className="mb-3 flex gap-2">
                   <input className="field" placeholder="Adicionar anotação…" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNote()} maxLength={2000} />
@@ -274,6 +334,9 @@ export function LeadDrawer({
           </>
         )}
       </aside>
+      {lead && (
+        <ScheduleModal open={scheduling} onClose={() => setScheduling(false)} leadId={lead.id} leadName={lead.name} moveToScheduleStage onDone={() => void reloadSide()} />
+      )}
       {lead && (
         <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ leadId: lead.id }}
           defaultFirstParam={lead.name.split(" ")[0]}

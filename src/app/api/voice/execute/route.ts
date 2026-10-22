@@ -6,6 +6,7 @@ import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { describe, ResolvedAction } from "@/lib/voice-actions";
 import { rateLimit } from "@/lib/rate-limit";
 import { sendText } from "@/lib/send";
+import { createAppointment } from "@/lib/appointments";
 
 export const runtime = "nodejs";
 
@@ -96,6 +97,15 @@ export async function POST(req: Request) {
           await rateLimit(`send:${ctx.userId}`, 60, 60);
           await sendText(sb, ctx.org.id, ctx.userId, { leadId: need(a.leadId) }, a.text);
           break;
+        }
+        case "schedule_meeting": {
+          const r = await createAppointment(sb, { orgId: ctx.org.id, userId: ctx.userId }, {
+            leadId: need(a.leadId), start: new Date(a.start), end: new Date(a.end), timeZone: a.timeZone, title: a.title,
+            moveToScheduleStage: Boolean(a.moveToStage),
+          });
+          const g = r.google === "created" ? " ✓ no Google Agenda" : r.google === "error" ? ` (salvo no CRM; Google: ${r.googleError})` : " (salvo no CRM; conecte o Google em Configurações)";
+          done.push(`${describe(a).split(" · ")[0]}${g}`);
+          continue;
         }
         case "add_note": {
           const { error } = await sb.from("activities").insert({ organization_id: ctx.org.id, lead_id: need(a.leadId), actor_id: ctx.userId, type: "note", payload: { text: a.note, via: "voz" } });

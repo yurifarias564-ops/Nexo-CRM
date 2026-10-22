@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatWhen } from "@/lib/time";
 
 const Lead = { leadId: z.string().uuid().nullable(), leadName: z.string(), leadCandidates: z.array(z.object({ id: z.string().uuid(), name: z.string(), phone: z.string().nullable() })) };
 
@@ -17,6 +18,11 @@ export const ResolvedAction = z.discriminatedUnion("kind", [
       .refine((p) => Object.keys(p).length > 0, "Nada para alterar"),
   }),
   z.object({ kind: z.literal("send_message"), ...Lead, text: z.string().trim().min(1).max(4096) }),
+  z.object({
+    kind: z.literal("schedule_meeting"), ...Lead,
+    start: z.string().datetime(), end: z.string().datetime(), timeZone: z.string().min(1).max(64),
+    title: z.string().trim().min(1).max(200), moveToStage: z.string().nullable(), google: z.boolean(),
+  }),
 ]);
 export type ResolvedAction = z.infer<typeof ResolvedAction>;
 
@@ -38,5 +44,9 @@ export function describe(a: ResolvedAction): string {
       return `Atualizar ${a.leadName}: ${parts.join(", ")}`;
     }
     case "send_message": return `Enviar WhatsApp para ${a.leadName}: "${a.text}"`;
+    case "schedule_meeting": {
+      const mins = Math.round((new Date(a.end).getTime() - new Date(a.start).getTime()) / 60000);
+      return `Agendar "${a.title}" — ${formatWhen(a.start, a.timeZone)} (${mins} min)${a.moveToStage ? ` e mover ${a.leadName} para "${a.moveToStage}"` : ""}${a.google ? " · Google Agenda" : " · só no CRM (Google Agenda não conectado)"}`;
+    }
   }
 }

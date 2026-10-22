@@ -31,7 +31,7 @@ begin
 
   execute 'set local role authenticated';
   select count(*) into n from public.stages;
-  res := res || format(E'\n05 etapas COM pagamento: %s (esperado 6)', n);
+  res := res || format(E'\n05 etapas COM pagamento: %s (esperado 7)', n);
   select id into st from public.stages where name='Novo lead';
   insert into public.leads (organization_id, pipeline_id, stage_id, name, phone)
     select organization_id, pipeline_id, id, 'Yuri Farias', '5585999998888' from public.stages where id=st returning id into lead;

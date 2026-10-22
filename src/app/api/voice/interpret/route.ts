@@ -5,6 +5,8 @@ import { bestMatch, interpret, norm, transcribe } from "@/lib/voice";
 import type { ResolvedAction } from "@/lib/voice-actions";
 import { normalizePhone } from "@/lib/utils";
 import { rateLimit } from "@/lib/rate-limit";
+import { isConnected } from "@/lib/google";
+import { DEFAULT_TZ, isValidTimeZone, nowInZone, zonedToUtc } from "@/lib/time";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,16 +19,20 @@ export async function POST(req: Request) {
     await rateLimit(`voice:${ctx.userId}`, 20, 60, "Muitos comandos de voz seguidos. Aguarde um minuto.");
     await rateLimit(`voice-org:${ctx.org.id}`, 600, 3600, "Limite de comandos de voz da empresa por hora atingido.");
     let transcript = "";
+    let tz = DEFAULT_TZ;
 
     if ((req.headers.get("content-type") ?? "").includes("multipart/form-data")) {
       const form = await req.formData();
       const audio = form.get("audio");
+      const ftz = form.get("tz");
+      if (isValidTimeZone(ftz)) tz = ftz;
       if (!(audio instanceof Blob) || audio.size === 0) throw new HttpError(422, "Áudio não recebido");
       if (audio.size > MAX_AUDIO) throw new HttpError(413, "Áudio muito longo (máx. ~2 minutos)");
       const ext = audio.type.includes("mp4") ? "mp4" : audio.type.includes("ogg") ? "ogg" : "webm";
       transcript = await transcribe(audio, `comando.${ext}`);
     } else {
-      const body = (await readJson(req, 8_000)) as { text?: unknown };
+      const body = (await readJson(req, 8_000)) as { text?: unknown; tz?: unknown };
+      if (isValidTimeZone(body.tz)) tz = body.tz;
       transcript = typeof body.text === "string" ? body.text.trim().slice(0, 1000) : "";
     }
     if (!transcript) throw new HttpError(422, "Não consegui ouvir nada. Tente falar mais perto do microfone.");
@@ -49,7 +55,11 @@ export async function POST(req: Request) {
       stages: stageList.map((s) => s.name),
       tags: tagList.map((t) => t.name),
       members: memberList.map((m) => m.name),
+      now: nowInZone(tz),
+      timeZone: tz,
     });
+    const scheduleStage = stageList.find((s) => norm(s.name).includes("agend")) ?? null;
+    const googleOn = calls.some((c) => c.name === "schedule_meeting") ? await isConnected(ctx.userId) : false;
 
     const issues: string[] = [];
     const actions: ResolvedAction[] = [];
@@ -139,6 +149,20 @@ export async function POST(req: Request) {
           actions.push({ kind: "update_lead", ...(await resolveLead(i.lead)), patch });
           break;
         }
+        case "schedule_meeting": {
+          const start = zonedToUtc(String(i.start ?? ""), tz);
+          if (!start) { issues.push("Não entendi o dia/horário do agendamento. Diga, por exemplo: amanhã às 10 horas."); break; }
+          if (start.getTime() < Date.now() - 5 * 60_000) { issues.push("O horário do agendamento já passou. Diga o dia e a hora de novo."); break; }
+          const mins = Number.isInteger(i.duration_minutes) && Number(i.duration_minutes) >= 5 && Number(i.duration_minutes) <= 1440 ? Number(i.duration_minutes) : 60;
+          const lead = await resolveLead(i.lead);
+          actions.push({
+            kind: "schedule_meeting", ...lead,
+            start: start.toISOString(), end: new Date(start.getTime() + mins * 60_000).toISOString(), timeZone: tz,
+            title: (typeof i.title === "string" && i.title.trim() ? i.title.trim() : `Reunião com ${lead.leadName}`).slice(0, 200),
+            moveToStage: scheduleStage?.name ?? null, google: googleOn,
+          });
+          break;
+        }
         case "send_message": {
           const text = String(i.text ?? "").trim().slice(0, 4096);
           if (!text) { issues.push("Mensagem vazia."); break; }
@@ -148,6 +172,15 @@ export async function POST(req: Request) {
       }
     }
 
+    // Não duplica: se já vai agendar, a mudança para a etapa de agendamento acontece junto
+    const scheduled = new Set(actions.filter((a) => a.kind === "schedule_meeting").map((a) => ("leadId" in a ? a.leadId ?? a.leadName : "")));
+    for (let k = actions.length - 1; k >= 0; k--) {
+      const a = actions[k]!;
+      if (a.kind === "move_lead" && scheduleStage && a.stageId === scheduleStage.id && scheduled.has(a.leadId ?? a.leadName)) actions.splice(k, 1);
+    }
+    if (actions.some((a) => a.kind === "move_lead" && scheduleStage && a.stageId === scheduleStage.id) && !scheduled.size) {
+      issues.push("Dica: diga também o dia e a hora (ex.: \"amanhã às 10 horas\") para já criar o evento no Google Agenda.");
+    }
     if (!calls.length && reply) issues.push(reply);
     return ok({ transcript, actions, issues });
   } catch (e) {

@@ -1,18 +1,20 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CreditCard, KanbanSquare, MessageCircle, Tags, Users, Zap } from "lucide-react";
+import { CalendarDays, CreditCard, KanbanSquare, MessageCircle, Tags, Users, Zap } from "lucide-react";
 import { useWorkspace } from "@/components/workspace";
 import { WhatsAppTab } from "./whatsapp-tab";
 import { QuickRepliesTab } from "./quick-replies-tab";
 import { PipelineTab } from "./pipeline-tab";
 import { TagsTab } from "./tags-tab";
 import { TeamTab } from "./team-tab";
+import { IntegrationsTab } from "./integrations-tab";
 import { cn } from "@/lib/utils";
 import { Section } from "./section";
 
 const TABS = [
   { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
+  { id: "integrations", label: "Integrações", icon: CalendarDays },
   { id: "quick", label: "Mensagens rápidas", icon: Zap },
   { id: "pipeline", label: "Funil", icon: KanbanSquare },
   { id: "tags", label: "Tags", icon: Tags },
@@ -20,7 +22,7 @@ const TABS = [
   { id: "billing", label: "Assinatura", icon: CreditCard },
 ];
 
-export function Settings({ initialTab, subscription }: { initialTab: string; subscription: { status: string; periodEnd: string | null } }) {
+export function Settings({ initialTab, subscription, googleStatus, googleMsg }: { initialTab: string; subscription: { status: string; periodEnd: string | null }; googleStatus?: string; googleMsg?: string }) {
   const router = useRouter();
   const ws = useWorkspace();
   const [tab, setTab] = useState(TABS.some((t) => t.id === initialTab) ? initialTab : "whatsapp");
@@ -39,6 +41,7 @@ export function Settings({ initialTab, subscription }: { initialTab: string; sub
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl p-4 md:p-8">
           {tab === "whatsapp" && <WhatsAppTab />}
+          {tab === "integrations" && <IntegrationsTab googleStatus={googleStatus} googleMsg={googleMsg} />}
           {tab === "quick" && <QuickRepliesTab />}
           {tab === "pipeline" && <PipelineTab />}
           {tab === "tags" && <TagsTab />}

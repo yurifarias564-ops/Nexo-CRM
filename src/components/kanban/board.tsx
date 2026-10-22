@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  closestCorners, DndContext, DragOverlay, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors,
+  closestCorners, DndContext, pointerWithin, rectIntersection, type CollisionDetection, DragOverlay, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors,
   type DragEndEvent, type DragOverEvent, type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -12,6 +12,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { LeadCardView, SortableLeadCard } from "./card";
 import { LeadDrawer } from "@/components/lead/lead-drawer";
+import { ScheduleModal } from "@/components/lead/schedule-modal";
 import { Button } from "@/components/ui/button";
 import { Empty, Spinner } from "@/components/ui/misc";
 import { KANBAN_PAGE_SIZE } from "@/lib/constants";
@@ -20,6 +21,20 @@ import type { Lead, Stage } from "@/lib/types";
 import { useLatest } from "@/lib/hooks";
 
 type TagRow = { lead_id: string; tag_id: string };
+
+/**
+ * Colisão guiada pelo ponteiro: solta onde o mouse está (inclusive em coluna
+ * vazia). Dentro de uma coluna, prefere o card sob o ponteiro.
+ */
+const pointerFirst: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  if (hits.length) {
+    const cards = hits.filter((h) => !String(h.id).startsWith("col:"));
+    if (cards.length) return closestCorners({ ...args, droppableContainers: args.droppableContainers.filter((c) => cards.some((h) => h.id === c.id)) });
+    return hits;
+  }
+  return rectIntersection(args);
+};
 
 export function KanbanBoard({
   pipelineId, initialLeads, initialCounts, initialTags,
@@ -41,6 +56,7 @@ export function KanbanBoard({
   const [ownerFilter, setOwnerFilter] = useState("");
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
+  const [scheduleFor, setScheduleFor] = useState<{ id: string; name: string } | null>(null);
   const leadsRef = useLatest(leads);
 
   const stages = useMemo(() => ws.stages.filter((s) => s.pipeline_id === pipelineId).sort((a, b) => a.position - b.position), [ws.stages, pipelineId]);
@@ -181,6 +197,11 @@ export function KanbanBoard({
       setLeads((cur) => ({ ...cur, [id]: before }));
       if (toStage !== before.stage_id) setCounts((c) => ({ ...c, [before.stage_id]: (c[before.stage_id] ?? 0) + 1, [toStage]: Math.max(0, (c[toStage] ?? 1) - 1) }));
       toast.error("Não foi possível mover o lead. Tente novamente.");
+      return;
+    }
+    // Soltou na etapa de agendamento: já abre para escolher dia e hora
+    if (toStage !== before.stage_id && norm(ws.stageById.get(toStage)?.name ?? "").includes("agend")) {
+      setScheduleFor({ id, name: before.name });
     }
   }
 
@@ -253,7 +274,7 @@ export function KanbanBoard({
         </div>
       </div>
 
-      <DndContext id={`kanban-${pipelineId}`} sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setActiveId(null); setOverStage(null); }}>
+      <DndContext id={`kanban-${pipelineId}`} sensors={sensors} collisionDetection={pointerFirst} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setActiveId(null); setOverStage(null); }}>
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4 md:px-6">
           {stages.map((stage) => {
             const all = columns[stage.id] ?? [];
@@ -296,6 +317,8 @@ export function KanbanBoard({
           {active ? <div className="w-[272px]"><LeadCardView lead={active} tagIds={tagsByLead[active.id] ?? []} dragging /></div> : null}
         </DragOverlay>
       </DndContext>
+
+      <ScheduleModal open={!!scheduleFor} onClose={() => setScheduleFor(null)} leadId={scheduleFor?.id ?? null} leadName={scheduleFor?.name ?? ""} />
 
       <LeadDrawer
         leadId={openLead}

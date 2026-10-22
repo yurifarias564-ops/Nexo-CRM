@@ -3,8 +3,8 @@ import { Settings } from "@/components/settings/settings";
 
 export const metadata = { title: "Configurações" };
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; google?: string; msg?: string }> }) {
   const ctx = await requireAppContext();
-  const { tab } = await searchParams;
-  return <Settings initialTab={tab ?? "whatsapp"} subscription={{ status: ctx.subscription?.status ?? "pending", periodEnd: ctx.subscription?.current_period_end ?? null }} />;
+  const { tab, google, msg } = await searchParams;
+  return <Settings initialTab={tab ?? "whatsapp"} subscription={{ status: ctx.subscription?.status ?? "pending", periodEnd: ctx.subscription?.current_period_end ?? null }} googleStatus={google} googleMsg={msg} />;
 }

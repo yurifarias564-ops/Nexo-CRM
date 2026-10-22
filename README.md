@@ -9,6 +9,7 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 - **Conversas**: estilo WhatsApp Web, texto + **foto, vídeo, áudio e documento** (anexar, arrastar ou colar), mensagens rápidas com `/`, status de entrega/leitura.
 - **Janela de 24h (API oficial)**: o chat avisa quando a janela fecha e oferece **modelos aprovados** da Meta com variáveis e prévia.
 - **Voz**: mover etapa, adicionar/remover tags, criar lead, valor, responsável, anotação, **editar nome/telefone/e-mail** e **enviar mensagem no WhatsApp falando** — sempre com confirmação.
+- **Google Agenda**: cada vendedor conecta a própria conta. Agendar por voz (“agendamento com o Yuri amanhã às 10 horas” → move para a etapa **Agendamento** e cria o evento), arrastando o lead para a coluna Agendamento ou pelo botão Agendar no lead; cancelar remove o evento do Google.
 - **Leads**: tabela com busca, ações em massa, importação/exportação Excel.
 - **Limite de uso por usuário** em todas as rotas sensíveis (voz, envio, importação, convites).
 
@@ -40,8 +41,8 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 
 ```bash
 npm test          # roda tudo
-npm run test:unit # 14 testes: webhooks Meta/Evolution, modelos, mídia, telefone, CPF/CNPJ, dinheiro, voz
-npm run test:db   # 48 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel
+npm run test:unit # 16 testes: webhooks, modelos, mídia, fuso horário/agenda, telefone, CPF/CNPJ, dinheiro, voz
+npm run test:db   # 56 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos
 npm run typecheck
 npm run build
 ```
@@ -106,7 +107,17 @@ Clique em **Comando de voz** (ou `Ctrl+Shift+M`), fale, por exemplo: *"mova o le
 
 Ações suportadas: mover de etapa, adicionar/remover tags (cria a tag se não existir), criar lead, definir valor, definir responsável, adicionar anotação — várias na mesma frase.
 
-### 7. Deploy (Vercel)
+### 7. Google Agenda
+
+1. Em [Google Cloud Console](https://console.cloud.google.com): crie um projeto e ative a **Google Calendar API**.
+2. **Tela de consentimento OAuth**: tipo *Externo*, adicione o escopo `.../auth/calendar.events`. Enquanto o app estiver em *Teste*, só os e-mails cadastrados como testadores conseguem conectar; para todos os clientes, envie para verificação do Google.
+3. **Credenciais → Criar ID do cliente OAuth** (Aplicativo da Web) com o URI de redirecionamento `https://seu-dominio.com.br/api/google/callback`.
+4. Preencha `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`.
+5. No sistema: **Configurações → Integrações → Conectar Google Agenda** (cada pessoa da equipe conecta a sua).
+
+Empresas criadas a partir de agora já nascem com a etapa **Agendamento** no funil. Em empresas antigas, crie uma etapa com "Agendamento" no nome (Configurações → Funil).
+
+### 8. Deploy (Vercel)
 
 1. Suba o código para um repositório GitHub e importe na [Vercel](https://vercel.com).
 2. Cadastre as variáveis de ambiente.

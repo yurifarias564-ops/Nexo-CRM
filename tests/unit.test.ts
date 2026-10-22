@@ -192,3 +192,26 @@ test("voz: novas ações (editar lead e enviar mensagem)", () => {
   assert.throws(() => ResolvedAction.parse({ kind: "update_lead", leadId: id, leadName: "Y", leadCandidates: [], patch: {} }));
   assert.throws(() => ResolvedAction.parse({ kind: "update_lead", leadId: id, leadName: "Y", leadCandidates: [], patch: { phone: "abc" } }));
 });
+
+test("agenda: horário falado vira o instante certo no fuso do usuário", async () => {
+  const { zonedToUtc, nowInZone, formatWhen, isValidTimeZone } = await import("@/lib/time");
+  assert.equal(zonedToUtc("2026-10-23T10:00", "America/Fortaleza")?.toISOString(), "2026-10-23T13:00:00.000Z");
+  assert.equal(zonedToUtc("2026-10-23T10:00", "America/Sao_Paulo")?.toISOString(), "2026-10-23T13:00:00.000Z");
+  assert.equal(zonedToUtc("2026-07-01T10:00", "America/New_York")?.toISOString(), "2026-07-01T14:00:00.000Z", "horário de verão");
+  assert.equal(zonedToUtc("2026-12-01T10:00", "America/New_York")?.toISOString(), "2026-12-01T15:00:00.000Z", "horário padrão");
+  assert.equal(zonedToUtc("amanhã 10h", "America/Fortaleza"), null);
+  assert.equal(nowInZone("America/Fortaleza", new Date("2026-10-22T14:02:00Z")), "2026-10-22T11:02 (quinta-feira)");
+  assert.equal(formatWhen("2026-10-23T13:00:00.000Z", "America/Fortaleza"), "sex., 23/10 às 10:00");
+  assert.equal(isValidTimeZone("America/Fortaleza"), true);
+  assert.equal(isValidTimeZone("Marte/Base"), false);
+});
+
+test("voz: agendamento descreve horário, etapa e Google Agenda", () => {
+  const a = ResolvedAction.parse({
+    kind: "schedule_meeting", leadId: "00000000-0000-4000-8000-000000000001", leadName: "Yuri", leadCandidates: [],
+    start: "2026-10-23T13:00:00.000Z", end: "2026-10-23T14:00:00.000Z", timeZone: "America/Fortaleza",
+    title: "Reunião com Yuri", moveToStage: "Agendamento", google: true,
+  });
+  assert.equal(describeAction(a), 'Agendar "Reunião com Yuri" — sex., 23/10 às 10:00 (60 min) e mover Yuri para "Agendamento" · Google Agenda');
+  assert.throws(() => ResolvedAction.parse({ ...a, start: "amanhã" }));
+});

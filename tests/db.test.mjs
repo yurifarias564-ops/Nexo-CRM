@@ -59,7 +59,7 @@ await su(`insert into auth.users (id, email, raw_user_meta_data) values ($1,'a@x
 ok("perfil criado automaticamente", (await su("select count(*)::int n from public.profiles")).at(0).n === 2);
 const orgA = (await as(A, "select public.create_organization('Empresa A') id"))[0].id;
 const orgB = (await as(B, "select public.create_organization('Empresa B') id"))[0].id;
-ok("empresa A criada com 6 etapas", (await su("select count(*)::int n from public.stages where organization_id=$1", [orgA]))[0].n === 6);
+ok("empresa A criada com 7 etapas (inclui Agendamento)", (await su("select count(*)::int n from public.stages where organization_id=$1", [orgA]))[0].n === 7);
 ok("assinatura nasce pendente", (await su("select status from public.subscriptions where organization_id=$1", [orgA]))[0].status === "pending");
 
 console.log("\n# Bloqueio sem pagamento (no banco)");
@@ -152,6 +152,22 @@ catch (e) { ok("excluir funil remove etapas e leads dele", false, e.message); }
 console.log("\n# Relações usadas pela API (embeds do PostgREST)");
 const fk = await su(`select count(*)::int n from pg_constraint where contype='f' and conrelid='public.organization_members'::regclass and confrelid='public.profiles'::regclass`);
 ok("membros → perfis tem FK direta (nome/e-mail da equipe num select)", fk[0].n === 1);
+
+console.log("\n# Agendamentos e Google Agenda");
+await su("insert into public.google_connections (user_id, google_email) values ($1, 'a@gmail.com')", [A]);
+await su("insert into public.google_credentials (user_id, refresh_grant) values ($1, 'segredo')", [A]);
+ok("usuário vê a própria conexão Google", (await as(A, "select * from public.google_connections")).length === 1);
+ok("outro usuário não vê a conexão Google de A", (await as(B, "select * from public.google_connections")).length === 0);
+ok("credenciais do Google invisíveis até para o dono", (await as(A, "select * from public.google_credentials")).length === 0);
+const ap = await as(A, "insert into public.appointments (organization_id, lead_id, user_id, title, starts_at, ends_at) values ($1,$2,$3,'Reunião', now()+interval '1 day', now()+interval '1 day 1 hour') returning id", [orgA, leadA, A]);
+ok("A agenda reunião com lead da própria empresa", ap.length === 1);
+ok("B não vê agendamentos de A", (await as(B, "select * from public.appointments")).length === 0);
+await expectError("agendamento não pode apontar lead de outra empresa", async () => {
+  const leadB = (await su("insert into public.leads (organization_id,pipeline_id,stage_id,name) values ($1,$2,$3,'LB') returning id", [orgB, pipeB, stageB]))[0].id;
+  await as(A, "insert into public.appointments (organization_id, lead_id, user_id, title, starts_at, ends_at) values ($1,$2,$3,'X', now(), now()+interval '1 hour')", [orgA, leadB, A]);
+}, "42501");
+await expectError("A não agenda em nome de outro usuário", () => as(A, "insert into public.appointments (organization_id, lead_id, user_id, title, starts_at, ends_at) values ($1,$2,$3,'X', now(), now()+interval '1 hour')", [orgA, leadA, C]), "42501");
+await expectError("fim antes do início é recusado", () => as(A, "insert into public.appointments (organization_id, lead_id, user_id, title, starts_at, ends_at) values ($1,$2,$3,'X', now()+interval '2 hour', now())", [orgA, leadA, A]), "23514");
 
 console.log("\n# Limite de uso");
 await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");

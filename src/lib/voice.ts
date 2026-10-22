@@ -10,7 +10,7 @@ export async function transcribe(file: Blob, filename: string): Promise<string> 
   form.append("file", file, filename);
   form.append("model", envOptional("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"));
   form.append("language", "pt");
-  form.append("prompt", "Comandos de CRM: lead, coluna, etapa, funil, negociação, tag, anúncio, proposta, qualificação, WhatsApp, mensagem, telefone.");
+  form.append("prompt", "Comandos de CRM: lead, coluna, etapa, funil, negociação, agendamento, agendar, reunião, amanhã, horas, tag, anúncio, proposta, qualificação, WhatsApp, mensagem, telefone.");
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { Authorization: `Bearer ${env("OPENAI_API_KEY")}` },
@@ -56,6 +56,20 @@ const TOOLS = [
     input_schema: { type: "object", properties: { lead: { type: "string" }, member: { type: "string", description: "Nome do membro da equipe" } }, required: ["lead", "member"] },
   },
   {
+    name: "schedule_meeting",
+    description: "Agenda um compromisso (reunião, visita, consulta, test drive, ligação) com o lead no Google Agenda. Use sempre que o usuário falar em agendar/agendamento com dia ou horário.",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead: { type: "string", description: "Nome do lead como foi dito" },
+        start: { type: "string", description: "Início no horário LOCAL do usuário, formato YYYY-MM-DDTHH:mm (ex.: 2026-10-23T10:00)" },
+        duration_minutes: { type: "integer", description: "Duração em minutos. Padrão 60 se não for dita." },
+        title: { type: "string", description: "Título curto se o usuário disser o tipo (ex.: 'Test drive com Yuri'). Senão omita." },
+      },
+      required: ["lead", "start"],
+    },
+  },
+  {
     name: "update_lead",
     description: "Altera dados cadastrais de um lead: nome, telefone e/ou e-mail. Informe só o que mudou.",
     input_schema: { type: "object", properties: { lead: { type: "string" }, name: { type: "string", description: "Novo nome" }, phone: { type: "string", description: "Novo telefone" }, email: { type: "string", description: "Novo e-mail" } }, required: ["lead"] },
@@ -74,7 +88,7 @@ const TOOLS = [
 
 export async function interpret(
   transcript: string,
-  context: { stages: string[]; tags: string[]; members: string[] },
+  context: { stages: string[]; tags: string[]; members: string[]; now: string; timeZone: string },
 ): Promise<{ calls: ToolCall[]; reply: string | null }> {
   const system = [
     "Você converte comandos falados em português (Brasil) em ações de um CRM, usando as ferramentas.",
@@ -83,6 +97,8 @@ export async function interpret(
     `Etapas existentes: ${context.stages.join(" | ") || "(nenhuma)"}`,
     `Tags existentes: ${context.tags.join(" | ") || "(nenhuma)"}`,
     `Equipe: ${context.members.join(" | ") || "(nenhum)"}`,
+    `Agora é ${context.now}, fuso ${context.timeZone}. Converta datas faladas para esse fuso: "amanhã às 10 horas" = dia seguinte 10:00; "sexta às 15h30" = próxima sexta 15:30; "meio-dia" = 12:00; "10 da noite" = 22:00; só a hora sem dia = hoje se ainda não passou, senão amanhã.`,
+    "Agendamento: quando o usuário falar em agendar/agendamento/marcar com um horário, chame schedule_meeting. O sistema já move o lead para a etapa de agendamento sozinho, então NÃO chame move_lead para essa etapa junto.",
     "Se o comando não for uma ação de CRM, responda em uma frase curta sem chamar ferramentas.",
   ].join("\n");
 
