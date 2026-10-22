@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 
 const Body = z.object({
   enabled: z.boolean(),
-  recording: z.enum(["meta", "browser", "off"]),
+  recording: z.enum(["meta", "browser"]),
   purpose: z.string().trim().min(3, "Escreva o motivo da gravação").max(250),
 });
 

@@ -90,7 +90,7 @@ export function CallButton({ conversationId, name, phone, provider }: { conversa
   );
 }
 
-export interface ChatCall { id: string; direction: "out" | "in"; status: string; duration_s: number | null; recording_path: string | null; created_at: string; error: string | null }
+export interface ChatCall { id: string; direction: "out" | "in"; status: string; duration_s: number | null; recording_path: string | null; backup_path?: string | null; created_at: string; error: string | null }
 
 const LABEL: Record<string, string> = {
   completed: "Ligação", failed: "Ligação falhou", rejected: "Ligação recusada", missed: "Ligação não atendida", canceled: "Ligação cancelada",
@@ -111,8 +111,8 @@ export function CallEntry({ c }: { c: ChatCall }) {
           {c.duration_s ? <span className="font-mono text-xs text-slate-400">{fmtDuration(c.duration_s)}</span> : null}
           <span className="ml-auto text-[10px] text-slate-500">{time}</span>
         </div>
-        {c.recording_path && <audio controls preload="none" src={`/api/calls/${c.id}/recording`} className="mt-2 h-9 w-full" />}
-        {!c.recording_path && c.status === "completed" && c.duration_s ? <p className="mt-1 text-[11px] text-slate-500">A gravação aparece aqui em alguns instantes, se estiver ativada.</p> : null}
+        {(c.recording_path || c.backup_path) && <audio controls preload="none" src={`/api/calls/${c.id}/recording`} className="mt-2 h-9 w-full" />}
+        {!c.recording_path && !c.backup_path && c.status === "completed" && c.duration_s ? <p className="mt-1 text-[11px] text-slate-500">A gravação aparece aqui em alguns instantes, se estiver ativada.</p> : null}
       </div>
     </div>
   );

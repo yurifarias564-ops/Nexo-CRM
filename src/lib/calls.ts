@@ -10,7 +10,7 @@ const LIVE = ["starting", "ringing", "accepting", "connected"];
 export interface CallRow {
   id: string; organization_id: string; channel_id: string; conversation_id: string | null; lead_id: string | null; wa_id: string;
   wa_call_id: string | null; direction: "out" | "in"; status: string; started_by: string | null; answered_by: string | null;
-  recording_mode: "meta" | "browser" | "off"; started_at: string | null; ended_at: string | null; duration_s: number | null;
+  recording_mode: "meta" | "browser"; contact_name: string | null; started_at: string | null; ended_at: string | null; duration_s: number | null;
 }
 
 /** Variações do número com/sem o 9º dígito (celulares do Brasil). */
@@ -35,7 +35,8 @@ export async function callTarget(orgId: string, conversationId: string): Promise
   return { conv, ch, pnid: ch.meta_phone_number_id, token };
 }
 
-const recOpts = (ch: ChannelWithSecrets) => (ch.call_recording === "meta" ? { purpose: ch.call_recording_purpose || "qualidade do atendimento" } : null);
+// Toda ligação é gravada: pelo WhatsApp (com aviso ao cliente) ou só no navegador.
+const recOpts = (ch: ChannelWithSecrets) => (ch.call_recording === "browser" ? null : { purpose: ch.call_recording_purpose || "qualidade do atendimento" });
 export const recordingOf = recOpts;
 
 /** Registra a mensagem de sistema na conversa (aparece no chat). */
@@ -100,7 +101,7 @@ export async function handleCallBatch(channelId: string, batch: mc.CallBatch) {
       const { data: conv } = await db.from("conversations").select("id, lead_id").eq("channel_id", channelId).in("wa_id", brVariants(wa)).maybeSingle();
       await db.from("wa_calls").upsert({
         organization_id: ch.organization_id, channel_id: channelId, conversation_id: conv?.id ?? null, lead_id: conv?.lead_id ?? null,
-        wa_id: wa, wa_call_id: e.id, direction: "in", status: "ringing", sdp_offer: e.sdp, recording_mode: ch.call_recording,
+        wa_id: wa, contact_name: batch.contactName, wa_call_id: e.id, direction: "in", status: "ringing", sdp_offer: e.sdp, recording_mode: ch.call_recording === "browser" ? "browser" : "meta",
       }, { onConflict: "channel_id,wa_call_id", ignoreDuplicates: true });
       continue;
     }

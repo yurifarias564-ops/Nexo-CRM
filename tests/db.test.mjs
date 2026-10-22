@@ -224,7 +224,15 @@ await expectError("usuário não cria ligação direto no banco", () => as(A, "i
 ok("usuário não altera ligação (gravação, duração)", (await as(A, "update public.wa_calls set duration_s=999 where id=$1 returning 1", [callId])).length === 0);
 await expectError("usuário não se dá permissão de ligar para o cliente", () => as(A, "update public.conversations set call_permission_until=now()+interval '7 days' where id=$1", [convA]), "42501");
 await expectError("usuário não liga ligações no número", () => as(A, "update public.whatsapp_channels set calling_enabled=true where id=$1 returning 1", [ch]).then((r) => { if (!r.length) { const e = new Error("x"); e.code = "42501"; throw e; } }), "42501");
-await expectError("modo de gravação inválido é recusado", () => su("update public.whatsapp_channels set call_recording='sempre' where id=$1", [ch]), "23514");
+await expectError("não existe modo 'sem gravação'", () => su("update public.whatsapp_channels set call_recording='off' where id=$1", [ch]), "23514");
+await expectError("ligação não pode ser criada sem gravar", () => su("insert into public.wa_calls (organization_id, channel_id, wa_id, direction, recording_mode) values ($1,$2,'1','out','off')", [orgA, ch]), "23514");
+{
+  const ch2 = (await su("insert into public.whatsapp_channels (organization_id,provider,name,status) values ($1,'meta','Oficial','connected') returning id", [orgA]))[0].id;
+  const k = (await su("insert into public.wa_calls (organization_id, channel_id, wa_id, contact_name, direction, status, recording_path) values ($1,$2,'5585911112222','Maria','out','completed','x/k.ogg') returning id", [orgA, ch2]))[0].id;
+  await su("delete from public.whatsapp_channels where id=$1", [ch2]);
+  const kept = (await su("select channel_id, contact_name, recording_path from public.wa_calls where id=$1", [k]))[0];
+  ok("apagar o número não apaga a ligação nem a gravação", !!kept && kept.channel_id === null && kept.contact_name === "Maria" && kept.recording_path === "x/k.ogg");
+}
 
 console.log("\n# Limite de uso");
 await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");

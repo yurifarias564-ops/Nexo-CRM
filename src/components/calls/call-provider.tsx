@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Phone, PhoneIncoming, PhoneOff } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -46,7 +47,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callIdRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopRingRef = useRef<(() => void) | null>(null);
-  const recModeRef = useRef("off");
+  const recModeRef = useRef("meta");
 
   const cleanupMedia = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -67,12 +68,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     recRef.current = null;
     cleanupMedia();
     setActive((a) => (a ? { ...a, phase: "ended", endedLabel: END_LABEL[status] ?? "Ligação encerrada" } : a));
-    setTimeout(() => setActive((a) => (a?.phase === "ended" ? null : a)), 3500);
+    setTimeout(() => setActive((a) => (a?.phase === "ended" ? null : a)), 6000);
     if (rec && id) {
       const blob = await rec.stop();
       if (blob && blob.size > 2000) {
         const res = await fetch(`/api/calls/${id}/recording`, { method: "POST", headers: { "Content-Type": blob.type || "audio/webm" }, body: blob });
-        if (res.ok) toast.success("Gravação da ligação salva"); else toast.error("Não foi possível salvar a gravação");
+        if (!res.ok) toast.error("Não foi possível salvar a cópia da gravação");
       }
     }
   }, [cleanupMedia]);
@@ -84,7 +85,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const connected = useCallback((recording: string) => {
     setActive((a) => (a ? { ...a, phase: "connected", since: Date.now() } : a));
-    if (recording === "browser" && micRef.current && remoteRef.current && !recRef.current) recRef.current = startMixRecorder(micRef.current, remoteRef.current);
+    // Grava sempre no navegador também (principal no modo navegador; cópia de segurança no modo WhatsApp)
+    void recording;
+    if (micRef.current && remoteRef.current && !recRef.current) recRef.current = startMixRecorder(micRef.current, remoteRef.current);
   }, []);
 
   /** Aplica o que mudou na ligação (tempo real ou consulta). */
@@ -181,7 +184,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const start = useCallback(async ({ conversationId, name, phone }: { conversationId: string; name: string; phone: string }) => {
     if (callIdRef.current || active) return void toast.error("Já existe uma ligação em andamento");
-    setActive({ callId: null, name, phone, direction: "out", phase: "preparing", since: null, muted: false, recording: "off" });
+    setActive({ callId: null, name, phone, direction: "out", phase: "preparing", since: null, muted: false, recording: "meta" });
     try {
       const mic = await getMic();
       micRef.current = mic;
@@ -286,11 +289,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 </p>
               </div>
             </div>
-            {active.recording !== "off" && active.phase !== "ended" && (
+            {active.phase !== "ended" && (
               <p className="mt-3 flex items-center gap-1.5 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-200">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
                 {active.recording === "meta" ? "Gravando — o WhatsApp avisa o cliente antes de começar" : "Gravando no navegador — avise o cliente"}
               </p>
+            )}
+            {active.phase === "ended" && (
+              <Link href="/ligacoes" className="mt-3 block text-center text-xs font-medium text-brand-300 hover:text-brand-200">Ver em Ligações →</Link>
             )}
             {active.phase !== "ended" && (
               <div className="mt-4 flex items-center justify-center gap-4">

@@ -276,7 +276,7 @@ function QrBody({ channelId, onConnected }: { channelId: string; onConnected: (i
 
 function CallingModal({ channel, onClose, onSaved }: { channel: Channel; onClose: () => void; onSaved: () => void }) {
   const [enabled, setEnabled] = useState(!!channel.calling_enabled);
-  const [recording, setRecording] = useState<"meta" | "browser" | "off">(channel.call_recording ?? "meta");
+  const [recording, setRecording] = useState<"meta" | "browser">(channel.call_recording === "browser" ? "browser" : "meta");
   const [purpose, setPurpose] = useState(channel.call_recording_purpose ?? "qualidade do atendimento");
   const [busy, setBusy] = useState(false);
   async function save() {
@@ -288,10 +288,9 @@ function CallingModal({ channel, onClose, onSaved }: { channel: Channel; onClose
     toast.success(enabled ? "Ligações ativadas neste número" : "Configuração salva");
     onSaved();
   }
-  const opts: { v: "meta" | "browser" | "off"; t: string; d: string }[] = [
-    { v: "meta", t: "Gravar pelo WhatsApp (recomendado)", d: "O WhatsApp avisa o cliente em português antes de gravar. O áudio chega aqui no CRM em segundos." },
-    { v: "browser", t: "Gravar no navegador", d: "Grava as duas vozes no computador de quem ligou, sem aviso automático — avise o cliente." },
-    { v: "off", t: "Não gravar", d: "" },
+  const opts: { v: "meta" | "browser"; t: string; d: string }[] = [
+    { v: "meta", t: "Pelo WhatsApp (recomendado)", d: "O WhatsApp avisa o cliente em português antes de gravar. O navegador também guarda uma cópia de segurança." },
+    { v: "browser", t: "Só no navegador", d: "Grava as duas vozes no computador de quem ligou, sem aviso automático — avise o cliente." },
   ];
   return (
     <Modal open onClose={onClose} title={`Ligações · ${channel.name}`}
@@ -302,7 +301,7 @@ function CallingModal({ channel, onClose, onSaved }: { channel: Channel; onClose
           <span><b className="text-white">Ativar ligações pelo WhatsApp</b><span className="block text-slate-400">Botão “Ligar” nas conversas e chamadas dos clientes tocando no CRM. O cliente precisa permitir antes da primeira ligação (vale 7 dias).</span></span>
         </label>
         <div className="space-y-2">
-          <span className="label">Gravação</span>
+          <span className="label">Gravação (toda ligação é gravada e fica salva para sempre na aba Ligações)</span>
           {opts.map((o) => (
             <label key={o.v} className={cn("flex cursor-pointer items-start gap-3 rounded-xl border p-3", recording === o.v ? "border-brand-400/60 bg-brand-500/10" : "border-line")}>
               <input type="radio" name="rec" className="mt-1 accent-brand-500" checked={recording === o.v} onChange={() => setRecording(o.v)} />

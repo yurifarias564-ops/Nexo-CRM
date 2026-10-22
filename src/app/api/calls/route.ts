@@ -27,9 +27,14 @@ export async function POST(req: Request) {
     if (busy?.length) throw new HttpError(409, "Já existe uma ligação em andamento com este cliente");
 
     const id = randomUUID();
-    const mode = t.ch.call_recording ?? "off";
+    const mode = t.ch.call_recording === "browser" ? "browser" : "meta";
+    let contactName = t.conv.contact_name;
+    if (t.conv.lead_id) {
+      const { data: lead } = await db.from("leads").select("name").eq("id", t.conv.lead_id).maybeSingle();
+      contactName = lead?.name ?? contactName;
+    }
     const { error } = await db.from("wa_calls").insert({
-      id, organization_id: ctx.org.id, channel_id: t.ch.id, conversation_id: t.conv.id, lead_id: t.conv.lead_id, wa_id: t.conv.wa_id,
+      id, organization_id: ctx.org.id, channel_id: t.ch.id, conversation_id: t.conv.id, lead_id: t.conv.lead_id, wa_id: t.conv.wa_id, contact_name: contactName,
       direction: "out", status: "starting", started_by: ctx.userId, recording_mode: mode,
     });
     if (error) throw error;

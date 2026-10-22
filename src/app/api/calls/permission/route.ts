@@ -28,7 +28,7 @@ export async function GET(req: Request) {
     await supabaseAdmin().from("conversations").update({
       call_permission_until: p.status === "temporary" ? p.expiresAt : null, call_permission_permanent: p.status === "permanent",
     }).eq("id", conversationId);
-    return ok({ ...p, windowOpen: await windowOpen(conversationId), recording: t.ch.call_recording ?? "off" });
+    return ok({ ...p, windowOpen: await windowOpen(conversationId), recording: t.ch.call_recording === "browser" ? "browser" : "meta" });
   } catch (e) {
     return fail(e);
   }

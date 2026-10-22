@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound } from "lucide-react";
+import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -16,6 +16,7 @@ const NAV = [
   { href: "/dashboard", label: "Painel", icon: BarChart3 },
   { href: "/pipeline", label: "Funil", icon: KanbanSquare },
   { href: "/inbox", label: "Conversas", icon: MessageCircle },
+  { href: "/ligacoes", label: "Ligações", icon: PhoneCall },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/agendadas", label: "Agendadas", icon: CalendarClock },
   { href: "/time", label: "Time comercial", icon: UsersRound },

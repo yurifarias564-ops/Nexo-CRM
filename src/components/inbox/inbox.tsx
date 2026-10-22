@@ -223,7 +223,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       .then(({ data }) => alive && setLastInAt(data ? new Date(data.sent_at).getTime() : null));
     if (conv.lead_id) sb.from("lead_tags").select("tag_id").eq("lead_id", conv.lead_id).then(({ data }) => alive && setTagIds((data ?? []).map((r) => r.tag_id)));
 
-    sb.from("wa_calls").select("id, direction, status, duration_s, recording_path, created_at, error").eq("conversation_id", conv.id)
+    sb.from("wa_calls").select("id, direction, status, duration_s, recording_path, backup_path, created_at, error").eq("conversation_id", conv.id)
       .order("created_at", { ascending: false }).limit(50).then(({ data }) => alive && setCalls((data ?? []) as ChatCall[]));
 
     const ch = sb.channel(`chat:${conv.id}`)
