@@ -50,7 +50,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const { error } = await supabaseBrowser().rpc("switch_organization", { org: id });
     if (error) return toast.error(error.message);
     setOrgMenu(false);
-    window.location.href = "/pipeline";
+    router.push("/pipeline");
+    router.refresh();
   }
   async function logout() {
     await supabaseBrowser().auth.signOut();

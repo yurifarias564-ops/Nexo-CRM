@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
+import { useIsClient } from "@/lib/hooks";
 
 export function Avatar({ name, className }: { name: string | null | undefined; className?: string }) {
   const hue = [...(name ?? "?")].reduce((a, c) => a + c.charCodeAt(0), 0) % 40;
@@ -52,9 +53,8 @@ export function Empty({ icon, title, text, action }: { icon: React.ReactNode; ti
 
 /** Renderiza no <body>, fora de qualquer ancestral com transform/filter (que prenderia o position:fixed). */
 export function Portal({ children }: { children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  return mounted ? createPortal(children, document.body) : null;
+  const isClient = useIsClient();
+  return isClient ? createPortal(children, document.body) : null;
 }
 
 /** Modal acessível (ESC fecha, foco preso no conteúdo, clique fora fecha). */

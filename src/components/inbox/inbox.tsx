@@ -11,6 +11,7 @@ import { Avatar, Empty, Spinner, TagPill } from "@/components/ui/misc";
 import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-replies";
 import { cn, formatPhone } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time-ago";
+import { useLatest } from "@/lib/hooks";
 import type { Conversation, Lead, Message } from "@/lib/types";
 
 type ConvRow = Conversation & { leads: Pick<Lead, "id" | "name" | "stage_id"> | null };
@@ -174,8 +175,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickToBottom = useRef(true);
-  const unreadRef = useRef(conv.unread_count);
-  unreadRef.current = conv.unread_count;
+  const unreadRef = useLatest(conv.unread_count);
 
   const name = conv.leads?.name ?? conv.contact_name ?? formatPhone(conv.wa_id);
   const slashQuery = text.startsWith("/") && !text.includes(" ") && !text.includes("\n") ? text.slice(1) : null;
@@ -217,7 +217,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       .subscribe();
     inputRef.current?.focus();
     return () => { alive = false; sb.removeChannel(ch); };
-  }, [conv.id, conv.lead_id]);
+  }, [conv.id, conv.lead_id, unreadRef]);
 
   async function loadOlder() {
     const first = messages[0];
@@ -283,7 +283,6 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [text]);
 
-  useEffect(() => setQrIndex(0), [slashQuery]);
 
   const grouped = useMemo(() => {
     const out: { day: string; items: Message[] }[] = [];
@@ -350,7 +349,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
             ref={inputRef}
             rows={1}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); setQrIndex(0); }}
             onKeyDown={onKeyDown}
             placeholder="Digite uma mensagem ou / para respostas rápidas"
             maxLength={4096}

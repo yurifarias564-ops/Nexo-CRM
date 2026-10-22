@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   closestCorners, DndContext, DragOverlay, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors,
@@ -17,6 +17,7 @@ import { Empty, Spinner } from "@/components/ui/misc";
 import { KANBAN_PAGE_SIZE } from "@/lib/constants";
 import { between, cn, formatBRL, norm } from "@/lib/utils";
 import type { Lead, Stage } from "@/lib/types";
+import { useLatest } from "@/lib/hooks";
 
 type TagRow = { lead_id: string; tag_id: string };
 
@@ -40,20 +41,21 @@ export function KanbanBoard({
   const [ownerFilter, setOwnerFilter] = useState("");
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
-  const leadsRef = useRef(leads);
-  leadsRef.current = leads;
+  const leadsRef = useLatest(leads);
 
   const stages = useMemo(() => ws.stages.filter((s) => s.pipeline_id === pipelineId).sort((a, b) => a.position - b.position), [ws.stages, pipelineId]);
   const stageIds = useMemo(() => new Set(stages.map((s) => s.id)), [stages]);
 
   // Re-sincroniza quando o servidor manda dados novos (router.refresh)
-  useEffect(() => {
+  const [synced, setSynced] = useState(initialLeads);
+  if (synced !== initialLeads) {
+    setSynced(initialLeads);
     setLeads(Object.fromEntries(initialLeads.map((l) => [l.id, l])));
     setCounts(initialCounts);
     const m: Record<string, string[]> = {};
     initialTags.forEach((r) => (m[r.lead_id] ??= []).push(r.tag_id));
     setTagsByLead(m);
-  }, [initialLeads, initialCounts, initialTags]);
+  }
 
   useEffect(() => {
     const onRefresh = () => router.refresh();
@@ -111,7 +113,7 @@ export function KanbanBoard({
       })
       .subscribe();
     return () => { sb.removeChannel(ch); };
-  }, [ws.orgId, pipelineId, stageIds]);
+  }, [ws.orgId, pipelineId, stageIds, leadsRef]);
 
   const matches = useCallback((l: Lead) => {
     if (q) {

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, History, Plus, QrCode, ShieldCheck, Smartphone, Trash2, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
@@ -9,6 +9,7 @@ import { Empty, Field, Modal, Spinner } from "@/components/ui/misc";
 import { Section } from "./section";
 import { cn, formatPhone, relativeTime } from "@/lib/utils";
 import type { Channel } from "@/lib/types";
+import { useLatest } from "@/lib/hooks";
 
 export function WhatsAppTab() {
   const ws = useWorkspace();
@@ -23,8 +24,8 @@ export function WhatsAppTab() {
   }, []);
 
   useEffect(() => {
-    void load();
     const sb = supabaseBrowser();
+    sb.from("whatsapp_channels").select("*").order("created_at").then(({ data }) => setChannels((data ?? []) as Channel[]));
     const ch = sb.channel(`channels:${ws.orgId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "whatsapp_channels", filter: `organization_id=eq.${ws.orgId}` }, () => void load())
       .subscribe();
@@ -215,16 +216,22 @@ function EvolutionForm({ open, onClose, onCreated }: { open: boolean; onClose: (
 }
 
 function QrModal({ channelId, onClose, onConnected }: { channelId: string | null; onClose: () => void; onConnected: (id: string) => void }) {
+  return (
+    <Modal open={!!channelId} onClose={onClose} title="Escaneie o QR Code">
+      {channelId && <QrBody key={channelId} channelId={channelId} onConnected={onConnected} />}
+    </Modal>
+  );
+}
+
+/** Estado novo a cada canal (key), sem precisar resetar dentro de effect. */
+function QrBody({ channelId, onConnected }: { channelId: string; onConnected: (id: string) => void }) {
   const [qr, setQr] = useState<string | null>(null);
   const [pairing, setPairing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const connectedRef = useRef(onConnected);
-  connectedRef.current = onConnected;
+  const connectedRef = useLatest(onConnected);
 
   useEffect(() => {
-    if (!channelId) return;
     let alive = true;
-    setQr(null); setErr(null); setPairing(null);
     const poll = async () => {
       try {
         const res = await fetch(`/api/channels/${channelId}/qr`, { cache: "no-store" });
@@ -239,27 +246,25 @@ function QrModal({ channelId, onClose, onConnected }: { channelId: string | null
         if (alive) setErr(e instanceof Error ? e.message : "Falha ao obter QR Code");
       }
     };
-    void poll();
+    const first = setTimeout(poll, 0);
     const t = setInterval(poll, 4000);
-    return () => { alive = false; clearInterval(t); };
-  }, [channelId]);
+    return () => { alive = false; clearTimeout(first); clearInterval(t); };
+  }, [channelId, connectedRef]);
 
   return (
-    <Modal open={!!channelId} onClose={onClose} title="Escaneie o QR Code">
-      <div className="flex flex-col items-center gap-4 text-center">
-        <div className="flex h-64 w-64 items-center justify-center rounded-xl bg-white p-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {qr ? <img src={qr} alt="QR Code do WhatsApp" className="h-full w-full" /> : <Spinner className="border-slate-300 border-t-slate-700" />}
-        </div>
-        {pairing && <p className="text-sm text-slate-300">Ou use o código: <code className="rounded bg-ink-950 px-2 py-1 text-brand-300">{pairing}</code></p>}
-        {err && <p className="text-sm text-red-300">{err}</p>}
-        <ol className="space-y-1 text-left text-sm text-slate-400">
-          <li>1. Abra o WhatsApp no celular</li>
-          <li>2. Toque em <b className="text-slate-200">Aparelhos conectados → Conectar aparelho</b></li>
-          <li>3. Aponte a câmera para este QR Code</li>
-        </ol>
-        <p className="flex items-center gap-2 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5" /> O QR é renovado automaticamente</p>
+    <div className="flex flex-col items-center gap-4 text-center">
+      <div className="flex h-64 w-64 items-center justify-center rounded-xl bg-white p-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {qr ? <img src={qr} alt="QR Code do WhatsApp" className="h-full w-full" /> : <Spinner className="border-slate-300 border-t-slate-700" />}
       </div>
-    </Modal>
+      {pairing && <p className="text-sm text-slate-300">Ou use o código: <code className="rounded bg-ink-950 px-2 py-1 text-brand-300">{pairing}</code></p>}
+      {err && <p className="text-sm text-red-300">{err}</p>}
+      <ol className="space-y-1 text-left text-sm text-slate-400">
+        <li>1. Abra o WhatsApp no celular</li>
+        <li>2. Toque em <b className="text-slate-200">Aparelhos conectados → Conectar aparelho</b></li>
+        <li>3. Aponte a câmera para este QR Code</li>
+      </ol>
+      <p className="flex items-center gap-2 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5" /> O QR é renovado automaticamente</p>
+    </div>
   );
 }

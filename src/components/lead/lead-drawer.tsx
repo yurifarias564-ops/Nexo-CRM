@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Clock, MessageCircle, Plus, Send, StickyNote, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
 import { Avatar, Field, Portal, Spinner, TagPill } from "@/components/ui/misc";
 import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
+import { useLatest } from "@/lib/hooks";
 import type { Lead } from "@/lib/types";
 
 type Activity = { id: number; type: string; payload: Record<string, unknown>; created_at: string; actor_id: string | null };
@@ -32,13 +33,11 @@ export function LeadDrawer({
   const [firstMsg, setFirstMsg] = useState("");
   const [tagMenu, setTagMenu] = useState(false);
   const [newTag, setNewTag] = useState("");
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  const closeRef = useLatest(onClose);
 
   useEffect(() => {
     if (!leadId) return;
     let alive = true;
-    setLead(null);
     const sb = supabaseBrowser();
     (async () => {
       const [{ data: l }, { data: lt }, { data: act }, { data: conv }] = await Promise.all([
@@ -59,14 +58,14 @@ export function LeadDrawer({
       setConversationId(conv?.id ?? null);
     })();
     return () => { alive = false; };
-  }, [leadId]);
+  }, [leadId, closeRef]);
 
   useEffect(() => {
     if (!leadId) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [leadId]);
+  }, [leadId, closeRef]);
 
   const stageOptions = useMemo(() => {
     if (!lead) return [];
@@ -168,7 +167,7 @@ export function LeadDrawer({
     <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal aria-label="Detalhes do lead">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
       <aside className="relative flex h-full w-full max-w-lg animate-fadeIn flex-col border-l border-line bg-ink-900 shadow-2xl">
-        {!lead ? (
+        {!lead || lead.id !== leadId ? (
           <div className="flex flex-1 items-center justify-center"><Spinner /></div>
         ) : (
           <>

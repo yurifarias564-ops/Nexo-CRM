@@ -48,7 +48,6 @@ export function LeadsTable() {
   }, [page, q, stage]);
 
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [q, stage]);
   useEffect(() => {
     const r = () => load();
     window.addEventListener("crm:refresh", r);
@@ -89,9 +88,9 @@ export function LeadsTable() {
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3 md:px-6">
         <div className="relative w-full max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <input className="field h-9 pl-9" placeholder="Nome, e-mail ou telefone" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="field h-9 pl-9" placeholder="Nome, e-mail ou telefone" value={q} onChange={(e) => { setQ(e.target.value); setPage(0); setSelected(new Set()); }} />
         </div>
-        <select className="field h-9 w-auto" value={stage} onChange={(e) => setStage(e.target.value)} aria-label="Filtrar etapa">
+        <select className="field h-9 w-auto" value={stage} onChange={(e) => { setStage(e.target.value); setPage(0); setSelected(new Set()); }} aria-label="Filtrar etapa">
           <option value="">Todas as etapas</option>
           {ws.stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
