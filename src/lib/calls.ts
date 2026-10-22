@@ -29,6 +29,7 @@ export async function callTarget(orgId: string, conversationId: string): Promise
   const ch = await loadChannel(conv.channel_id);
   if (ch.provider !== "meta") throw new HttpError(409, "Ligação pelo WhatsApp só funciona no número conectado pela API oficial (Meta). Pelo QR Code o WhatsApp não permite ligar.");
   if (ch.status !== "connected") throw new HttpError(409, `O WhatsApp "${ch.name}" está desconectado`);
+  if (ch.meta_coexistence) throw new HttpError(409, "Este número também está no app do WhatsApp do celular (coexistência). Nesse modo a Meta não libera ligações pela API — ligue pelo celular.");
   if (!ch.calling_enabled) throw new HttpError(409, "Ligações estão desativadas neste número. Ative em Configurações → WhatsApp.");
   const token = ch.secrets.meta_access_token;
   if (!token || !ch.meta_phone_number_id) throw new HttpError(409, "Canal oficial sem credenciais");

@@ -414,3 +414,30 @@ test("ligações: número com e sem o 9º dígito encontra a mesma conversa", ()
   assert.deepEqual(brVariants("558599998888").sort(), ["558599998888", "5585999998888"]);
   assert.deepEqual(brVariants("14085551234"), ["14085551234"]);
 });
+
+test("whatsapp em 1 clique: troca do código e registro do número chamam a Meta certo", async () => {
+  process.env.NEXT_PUBLIC_META_APP_ID = "1145128041279591";
+  process.env.META_APP_SECRET = "segredo-teste";
+  const es = await import("@/lib/whatsapp/embedded");
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    calls.push({ url: String(url), init });
+    const body = String(url).includes("oauth/access_token") ? { access_token: "TOKEN_EMPRESA" } : String(url).includes("phone_numbers") ? { data: [{ id: "PN9", display_phone_number: "+55 85 9999-8888", verified_name: "Notebook CE" }] } : { success: true };
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as typeof fetch;
+  try {
+    assert.equal(await es.exchangeCode("CODIGO"), "TOKEN_EMPRESA");
+    const u = new URL(calls[0]!.url);
+    assert.deepEqual([u.pathname.endsWith("/oauth/access_token"), u.searchParams.get("client_id"), u.searchParams.get("client_secret"), u.searchParams.get("code")], [true, "1145128041279591", "segredo-teste", "CODIGO"]);
+    assert.equal((await es.listPhones("WABA1", "T"))[0]!.id, "PN9");
+    await es.subscribe("WABA1", "T");
+    assert.match(calls[2]!.url, /\/WABA1\/subscribed_apps$/);
+    await es.register("PN9", "T", "123456");
+    assert.match(calls[3]!.url, /\/PN9\/register$/);
+    assert.deepEqual(JSON.parse(String(calls[3]!.init?.body)), { messaging_product: "whatsapp", pin: "123456" });
+    assert.equal((calls[3]!.init?.headers as Record<string, string>).Authorization, "Bearer T");
+  } finally {
+    globalThis.fetch = orig;
+  }
+});

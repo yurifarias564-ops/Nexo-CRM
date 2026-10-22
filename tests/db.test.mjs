@@ -234,6 +234,9 @@ await expectError("ligação não pode ser criada sem gravar", () => su("insert 
   ok("apagar o número não apaga a ligação nem a gravação", !!kept && kept.channel_id === null && kept.contact_name === "Maria" && kept.recording_path === "x/k.ogg");
 }
 
+await expectError("PIN do número precisa ter 6 dígitos", () => su("update public.whatsapp_channel_secrets set meta_pin='12' where channel_id=$1", [ch]), "23514");
+ok("usuário não lê o PIN do número", (await as(A, "select meta_pin from public.whatsapp_channel_secrets")).length === 0);
+
 console.log("\n# Limite de uso");
 await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");
 const hits = [];

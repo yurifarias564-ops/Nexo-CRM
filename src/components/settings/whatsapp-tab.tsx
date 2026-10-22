@@ -7,6 +7,7 @@ import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
 import { Empty, Field, Modal, Spinner } from "@/components/ui/misc";
 import { Section } from "./section";
+import { EmbeddedSignup, embeddedSignupReady } from "./embedded-signup";
 import { cn, formatPhone, relativeTime } from "@/lib/utils";
 import type { Channel } from "@/lib/types";
 import { useLatest } from "@/lib/hooks";
@@ -14,7 +15,7 @@ import { useLatest } from "@/lib/hooks";
 export function WhatsAppTab() {
   const ws = useWorkspace();
   const [channels, setChannels] = useState<Channel[] | null>(null);
-  const [adding, setAdding] = useState<null | "choose" | "meta" | "evolution">(null);
+  const [adding, setAdding] = useState<null | "choose" | "meta" | "evolution" | "embedded">(null);
   const [callsFor, setCallsFor] = useState<Channel | null>(null);
   const [qrFor, setQrFor] = useState<string | null>(null);
   const [importing, setImporting] = useState<{ id: string; done: number; total: number; msgs: number } | null>(null);
@@ -90,7 +91,7 @@ export function WhatsAppTab() {
                 </Button>
               )
             )}
-            {c.provider === "meta" && (
+            {c.provider === "meta" && !c.meta_coexistence && (
               <Button size="sm" variant="outline" onClick={() => setCallsFor(c)}><Phone className="h-3.5 w-3.5" /> Ligações{c.calling_enabled ? " · ativas" : ""}</Button>
             )}
             <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-red-300" onClick={() => remove(c)} aria-label="Remover"><Trash2 className="h-3.5 w-3.5" /></Button>
@@ -101,10 +102,10 @@ export function WhatsAppTab() {
 
       <Modal open={adding === "choose"} onClose={() => setAdding(null)} title="Como deseja conectar?" wide>
         <div className="grid gap-3 sm:grid-cols-2">
-          <button onClick={() => setAdding("meta")} className="card p-5 text-left transition hover:border-brand-400/50 hover:bg-ink-800">
+          <button onClick={() => setAdding(embeddedSignupReady ? "embedded" : "meta")} className="card p-5 text-left transition hover:border-brand-400/50 hover:bg-ink-800">
             <ShieldCheck className="h-6 w-6 text-emerald-300" />
             <p className="mt-3 font-medium text-white">API oficial (Meta)</p>
-            <p className="mt-1 text-sm text-slate-400">Sem risco de banimento e mais estável. Com coexistência, importa até ~6 meses de histórico do app.</p>
+            <p className="mt-1 text-sm text-slate-400">Sem risco de banimento, com ligações gravadas. Conecta em 1 clique entrando com o Facebook da empresa.</p>
           </button>
           <button onClick={() => setAdding("evolution")} className="card p-5 text-left transition hover:border-brand-400/50 hover:bg-ink-800">
             <QrCode className="h-6 w-6 text-brand-300" />
@@ -112,9 +113,14 @@ export function WhatsAppTab() {
             <p className="mt-1 text-sm text-slate-400">Conecta em segundos lendo o QR pelo celular e importa todo o histórico. Uso não oficial: há risco de bloqueio pela Meta.</p>
           </button>
         </div>
+        <p className="mt-4 text-center text-xs text-slate-500">
+          Já tem os IDs e o token da Meta? <button type="button" onClick={() => setAdding("meta")} className="font-medium text-brand-300 hover:text-brand-200">Conectar manualmente</button>
+        </p>
+      
       </Modal>
 
       {callsFor && <CallingModal channel={callsFor} onClose={() => setCallsFor(null)} onSaved={() => { setCallsFor(null); void load(); }} />}
+      <EmbeddedSignup open={adding === "embedded"} onClose={() => setAdding(null)} onDone={() => { setAdding(null); void load(); }} />
       <MetaForm open={adding === "meta"} onClose={() => setAdding(null)} onDone={() => { setAdding(null); void load(); }} />
       <EvolutionForm open={adding === "evolution"} onClose={() => setAdding(null)} onCreated={(id) => { setAdding(null); void load(); setQrFor(id); }} />
       <QrModal channelId={qrFor} onClose={() => setQrFor(null)} onConnected={(id) => {

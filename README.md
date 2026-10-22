@@ -91,7 +91,18 @@ Fluxo: cadastro → cria empresa → tela de assinatura → paga a fatura → o 
    - Token de verificação: o valor de `META_WEBHOOK_VERIFY_TOKEN`
    - Assine os campos: `messages`, `history`, `smb_message_echoes`
 3. `META_APP_SECRET` = **Configurações do app → Básico → Chave secreta do app**.
-4. No sistema, em **Configurações → WhatsApp → API oficial**, informe *Phone Number ID*, *WABA ID* e um **token permanente** de usuário do sistema.
+4. Assine também o campo `calls` no webhook (ligações).
+
+**Conexão em 1 clique para os clientes (Cadastro Incorporado / Embedded Signup)** — o app é criado **uma vez só**; cada cliente conecta o próprio número sozinho:
+
+1. No app da Meta: **Login do Facebook para Empresas → Configurações → Criar configuração**. Escolha a variação **WhatsApp Embedded Signup**, marque os produtos *WhatsApp Cloud API* (e *Marketing Messages*, se quiser) e as permissões `whatsapp_business_management` e `whatsapp_business_messaging`. Copie o **ID da configuração**.
+2. Em **Login do Facebook para Empresas → Configurações**, adicione o seu domínio em *Domínios permitidos para o SDK JavaScript* e *URIs de redirecionamento OAuth válidos* (ex.: `https://seu-dominio.com.br/`).
+3. Variáveis: `NEXT_PUBLIC_META_APP_ID` (ID do app), `NEXT_PUBLIC_META_ES_CONFIG_ID` (ID da configuração), `META_APP_SECRET`.
+4. Para clientes de fora do seu Business: **verificação da empresa** (Configurações do Business → Central de segurança), virar **Tech Provider** e passar pela **Análise do app** com as permissões acima no acesso avançado.
+
+O cliente clica em **Configurações → WhatsApp → API oficial → Continuar com o Facebook**, entra, escolhe/cria a conta e confirma o número por SMS. O sistema troca o código pelo token, assina os webhooks, registra o número (PIN gerado e guardado) e ativa as ligações. Opção "mesmo número do app do celular" usa a coexistência (sem ligações pela API — limite da Meta).
+
+Conexão manual (sem Embedded Signup): informe *Phone Number ID*, *WABA ID* e um **token permanente** de usuário do sistema pelo link "Conectar manualmente".
 
 **Histórico na API oficial**: só existe via *coexistência* (número que já usa o app WhatsApp Business, conectado pelo Embedded Signup). A Meta envia até ~6 meses de conversas, e a solicitação precisa ser feita em até 24h após conectar — o sistema já pede isso automaticamente ao cadastrar o número.
 
