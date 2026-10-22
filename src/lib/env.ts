@@ -12,5 +12,10 @@ export function envOptional(name: string, fallback = ""): string {
 }
 
 export function appUrl(): string {
-  return env("NEXT_PUBLIC_APP_URL").replace(/\/+$/, "");
+  const v = envOptional("NEXT_PUBLIC_APP_URL");
+  if (v) return v.replace(/\/+$/, "");
+  // Na Vercel o domínio de produção já vem pronto
+  const vercel = envOptional("VERCEL_PROJECT_PRODUCTION_URL") || envOptional("VERCEL_URL");
+  if (vercel) return `https://${vercel.replace(/\/+$/, "")}`;
+  return env("NEXT_PUBLIC_APP_URL");
 }
