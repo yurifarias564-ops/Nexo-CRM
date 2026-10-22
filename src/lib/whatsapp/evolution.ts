@@ -88,6 +88,17 @@ export async function sendMedia(
   return r.key.id;
 }
 
+/** Grupos do número conectado por QR Code (para enviar relatórios). */
+export async function fetchGroups(instance: string): Promise<{ id: string; subject: string; size: number | null }[]> {
+  const r = await call<unknown>(`/group/fetchAllGroups/${encodeURIComponent(instance)}?getParticipants=false`, {}, 60_000);
+  const arr = Array.isArray(r) ? r : [];
+  return arr
+    .map((g) => g as { id?: string; subject?: string; size?: number })
+    .filter((g): g is { id: string; subject?: string; size?: number } => typeof g.id === "string" && g.id.endsWith("@g.us"))
+    .map((g) => ({ id: g.id, subject: g.subject?.trim() || "Grupo sem nome", size: typeof g.size === "number" ? g.size : null }))
+    .sort((a, b) => a.subject.localeCompare(b.subject, "pt-BR"));
+}
+
 export async function getMediaBase64(instance: string, messageId: string) {
   return call<{ base64?: string; mimetype?: string }>(
     `/chat/getBase64FromMediaMessage/${encodeURIComponent(instance)}`,

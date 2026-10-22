@@ -93,6 +93,20 @@ const TOOLS = [
     input_schema: { type: "object", properties: { lead: { type: "string" }, text: { type: "string", description: "Texto da mensagem para o cliente" } }, required: ["lead", "text"] },
   },
   {
+    name: "log_call",
+    description: "Registra uma ligação feita para o lead (ex.: 'liguei pro Yuri e ele não atendeu', 'registra ligação com a Ana, atendeu, 5 minutos, pediu proposta').",
+    input_schema: {
+      type: "object",
+      properties: {
+        lead: { type: "string" },
+        outcome: { type: "string", enum: ["atendeu", "nao_atendeu", "caixa_postal", "ocupado", "numero_errado"], description: "Resultado da ligação" },
+        duration_min: { type: "number", description: "Duração em minutos, se dita" },
+        notes: { type: "string", description: "Resumo do que foi conversado, se dito" },
+      },
+      required: ["lead", "outcome"],
+    },
+  },
+  {
     name: "add_note",
     description: "Adiciona uma anotação ao lead.",
     input_schema: { type: "object", properties: { lead: { type: "string" }, note: { type: "string" } }, required: ["lead", "note"] },

@@ -194,6 +194,27 @@ await as("service", "select id from public.claim_scheduled_messages(10)");
 ok("travada há >10 min vira 'falhou' (não reenvia às cegas)", (await su("select status from public.scheduled_messages where id=$1", [sch]))[0].status === "failed");
 ok("usuário pode reagendar uma que falhou", (await as(A, "update public.scheduled_messages set status='pending', send_at=now()+interval '1 hour' where id=$1 returning 1", [sch])).length === 1);
 
+console.log("\n# Relatórios, metas e ligações");
+await as(A, "insert into public.activities (organization_id, lead_id, actor_id, type, payload) values ($1,$2,$3,'call','{\"outcome\":\"atendeu\"}'), ($1,$2,$3,'call','{\"outcome\":\"nao_atendeu\"}')", [orgA, leadA, A]);
+const rm = (await as(A, "select public.report_metrics($1, now() - interval '30 days', now() + interval '1 day') m", [orgA]))[0].m;
+ok("métricas: 2 ligações, 1 atendida", rm.calls === 2 && rm.calls_answered === 1, JSON.stringify({ c: rm.calls, a: rm.calls_answered }));
+ok("métricas: agendamentos e vendas presentes", typeof rm.appointments === "number" && typeof rm.won_count === "number");
+ok("métricas: outra empresa não vê números de A", (await as(B, "select public.report_metrics($1, now() - interval '30 days', now() + interval '1 day') m", [orgA]))[0].m.calls === 0);
+const per = "date_trunc('month', now())::date";
+ok("dono define meta do mês", (await as(A, `insert into public.monthly_goals (organization_id, period, metric, target) values ($1, ${per}, 'won_count', 10) returning 1`, [orgA])).length === 1);
+ok("atendente vê as metas", (await as(C, "select * from public.monthly_goals")).length === 1);
+await expectError("atendente não altera metas", () => as(C, `insert into public.monthly_goals (organization_id, period, metric, target) values ($1, ${per}, 'calls', 5)`, [orgA]), "42501");
+ok("outra empresa não vê metas de A", (await as(B, "select * from public.monthly_goals")).length === 0);
+await expectError("meta precisa ser no dia 1 do mês", () => as(A, "insert into public.monthly_goals (organization_id, period, metric, target) values ($1, '2026-10-15', 'calls', 5)", [orgA]), "23514");
+await su("insert into public.report_templates (owner_id, name, file_name, file_mime, file_path) values ($1,'Modelo Yuri','m.pdf','application/pdf','t/a.pdf')", [A]);
+ok("dono vê o próprio modelo", (await as(A, "select * from public.report_templates")).length === 1);
+ok("outro usuário (mesmo da equipe) não vê o modelo de A", (await as(C, "select * from public.report_templates")).length === 0);
+await expectError("usuário não grava configuração de envio direto", () => as(A, "insert into public.report_settings (organization_id, enabled) values ($1, true)", [orgA]), "42501");
+ok("comentário do mês salvo pela equipe", (await as(C, `insert into public.report_notes (organization_id, period, notes, updated_by) values ($1, ${per}, 'Feriado reduziu movimento', $2) returning 1`, [orgA, C])).length === 1);
+await su(`insert into public.report_runs (organization_id, period, kind, status) values ($1, ${per}, 'auto', 'sent')`, [orgA]);
+await expectError("relatório automático do mês não duplica", () => su(`insert into public.report_runs (organization_id, period, kind, status) values ($1, ${per}, 'auto', 'generating')`, [orgA]), "23505");
+ok("relatórios manuais podem ser vários", (await su(`insert into public.report_runs (organization_id, period, kind) values ($1, ${per}, 'manual'), ($1, ${per}, 'manual') returning 1`, [orgA])).length === 2);
+
 console.log("\n# Limite de uso");
 await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");
 const hits = [];

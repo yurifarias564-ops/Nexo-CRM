@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatWhen } from "@/lib/time";
+import { callOutcomeLabel } from "@/lib/constants";
 
 const Lead = { leadId: z.string().uuid().nullable(), leadName: z.string(), leadCandidates: z.array(z.object({ id: z.string().uuid(), name: z.string(), phone: z.string().nullable() })) };
 
@@ -12,6 +13,11 @@ export const ResolvedAction = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set_value"), ...Lead, value: z.number().nonnegative().max(1e12) }),
   z.object({ kind: z.literal("assign_lead"), ...Lead, userId: z.string().uuid(), userName: z.string() }),
   z.object({ kind: z.literal("add_note"), ...Lead, note: z.string().min(1).max(2000) }),
+  z.object({
+    kind: z.literal("log_call"), ...Lead,
+    outcome: z.enum(["atendeu", "nao_atendeu", "caixa_postal", "ocupado", "numero_errado"]),
+    durationMin: z.number().min(0).max(600).nullable(), notes: z.string().max(2000).nullable(),
+  }),
   z.object({
     kind: z.literal("update_lead"), ...Lead,
     patch: z.object({ name: z.string().min(1).max(160).optional(), phone: z.string().regex(/^[0-9]{8,15}$/).optional(), email: z.string().email().max(254).optional() })
@@ -40,6 +46,7 @@ export function describe(a: ResolvedAction): string {
     case "set_value": return `Valor de ${a.leadName}: ${a.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`;
     case "assign_lead": return `Responsável por ${a.leadName}: ${a.userName}`;
     case "add_note": return `Anotação em ${a.leadName}: "${a.note}"`;
+    case "log_call": return `Registrar ligação para ${a.leadName}: ${callOutcomeLabel(a.outcome)}${a.durationMin ? ` · ${a.durationMin} min` : ""}${a.notes ? ` — "${a.notes}"` : ""}`;
     case "update_lead": {
       const parts = [
         a.patch.name && `nome → ${a.patch.name}`,

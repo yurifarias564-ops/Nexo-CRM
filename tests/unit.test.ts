@@ -234,3 +234,94 @@ test("mensagem agendada: voz descreve envio e falhas são classificadas", async 
   assert.equal(isPermanent(new HttpError(429, "limite")), false);
   assert.equal(isPermanent(new Error("timeout")), false);
 });
+
+// ---------------------------------------------------------------------------
+// Relatórios
+// ---------------------------------------------------------------------------
+import { evaluateGoals, type Metrics, type ReportData } from "@/lib/reports/data";
+import { currentPeriod, isLastDayOfMonth, monthRange, periodLabel, previousPeriod, shiftPeriod } from "@/lib/reports/period";
+import { renderReportPdf, sanitize } from "@/lib/reports/pdf";
+import { factSheet, WrittenReport } from "@/lib/reports/writer";
+import { Blueprint, templateKind } from "@/lib/reports/blueprint";
+import { PDFDocument } from "pdf-lib";
+
+const metrics = (p: Partial<Metrics> = {}): Metrics => ({
+  new_leads: 120, won_count: 18, won_value: 54000, lost_count: 12, calls: 210, calls_answered: 140, scheduled_sent: 60,
+  appointments: 35, appointments_held: 28, messages_in: 900, messages_out: 1100, open_count: 40, open_value: 98000,
+  by_source: [{ name: "Instagram", count: 70 }, { name: "Indicação", count: 50 }],
+  won_by_source: [{ name: "Indicação", count: 11, value: 36000 }], by_stage: [{ name: "Novo", count: 20 }],
+  won_by_owner: [{ name: "Ana", count: 10, value: 30000 }], followups: 270, conversion: 60, ...p,
+});
+
+test("relatório: metas avaliadas sem IA (bateu / não bateu)", () => {
+  const g = evaluateGoals([
+    { metric: "won_count", target: 15 }, { metric: "won_value", target: 60000 }, { metric: "calls", target: 210 },
+    { metric: "followups", target: 0 }, { metric: "inexistente", target: 5 },
+  ], metrics());
+  assert.equal(g.length, 3, "ignora meta zerada e métrica desconhecida");
+  assert.deepEqual(g.map((x) => [x.metric, x.hit]), [["won_count", true], ["won_value", false], ["calls", true]]);
+  assert.equal(g[1]!.pct, 90);
+  assert.equal(g[1]!.money, true);
+});
+
+test("relatório: períodos e último dia do mês no fuso da empresa", () => {
+  assert.equal(previousPeriod("2026-01"), "2025-12");
+  assert.equal(shiftPeriod("2026-12", 1), "2027-01");
+  assert.equal(shiftPeriod("2026-03", -14), "2025-01");
+  assert.equal(periodLabel("2026-10"), "Outubro de 2026");
+  const r = monthRange("2026-10", "America/Sao_Paulo");
+  assert.equal(r.from.toISOString(), "2026-10-01T03:00:00.000Z");
+  assert.equal(r.to.toISOString(), "2026-11-01T03:00:00.000Z");
+  // 31/10 às 22h em São Paulo = 01/11 01h UTC: ainda é o último dia lá
+  const at = new Date("2026-11-01T01:00:00Z");
+  assert.equal(isLastDayOfMonth("America/Sao_Paulo", at), true);
+  assert.equal(currentPeriod("America/Sao_Paulo", at), "2026-10");
+  assert.equal(isLastDayOfMonth("UTC", at), false);
+  assert.equal(isLastDayOfMonth("America/Sao_Paulo", new Date("2026-10-30T15:00:00Z")), false);
+  assert.equal(isLastDayOfMonth("America/Sao_Paulo", new Date("2027-02-28T15:00:00Z")), true, "fevereiro");
+  assert.equal(isLastDayOfMonth("America/Sao_Paulo", new Date("2028-02-28T15:00:00Z")), false, "bissexto");
+});
+
+test("relatório: PDF aceita só caracteres da fonte padrão", () => {
+  assert.equal(sanitize("Meta → batida ✓ 🚀 ação"), "Meta -> batida OK  ação");
+  assert.equal(sanitize("R$ 1.500,00"), "R$ 1.500,00");
+});
+
+test("relatório: tipos de modelo aceitos", () => {
+  assert.equal(templateKind("application/pdf", "x.bin"), "pdf");
+  assert.equal(templateKind("", "Relatório.DOCX"), "docx");
+  assert.equal(templateKind("image/png", "foto.png"), null);
+  assert.equal(Blueprint.safeParse({ title: "x", tone: "y", sections: [] }).success, false, "precisa de seção");
+});
+
+const sampleData = (): ReportData => ({
+  orgName: "Clínica Sorriso", period: "2026-10", periodLabel: "Outubro de 2026", timeZone: "America/Sao_Paulo",
+  current: metrics(), previous: metrics({ new_leads: 100, won_count: 12, won_value: 40000 }),
+  goals: evaluateGoals([{ metric: "won_count", target: 15 }, { metric: "won_value", target: 60000 }], metrics()),
+  notes: "Campanha de Instagram pausada dia 10.",
+});
+
+test("relatório: ficha de dados traz números, variação e metas já calculadas", () => {
+  const f = factSheet(sampleData());
+  assert.match(f, /Leads recebidos: 120 \| 100 \| \+20%/);
+  assert.match(f, /\[won_count\] Vendas \(quantidade\): meta 15, realizado 18 \(120%\) → BATEU/);
+  assert.match(f, /\[won_value\].*→ NÃO BATEU/);
+  assert.match(f, /Campanha de Instagram pausada/);
+});
+
+test("relatório: gera PDF válido com várias páginas", async () => {
+  const written = WrittenReport.parse({
+    title: "Relatório Mensal de Resultados", headline: "Mês com recorde de vendas → 18 fechamentos 🎉",
+    sections: Array.from({ length: 6 }, (_, i) => ({
+      title: `Seção ${i + 1}`, paragraphs: ["Texto longo ".repeat(120)], bullets: ["Ponto A", "Ponto B com acentuação: ação, atenção"],
+    })),
+    goal_comments: [{ metric: "won_count", comment: "Bateu pela alta de indicações." }, { metric: "won_value", comment: "Ticket médio caiu." }],
+    next_steps: ["Retomar campanha", "Dobrar follow-up"], whatsapp_caption: "Segue o relatório",
+  });
+  const bytes = await renderReportPdf(sampleData(), written);
+  assert.equal(Buffer.from(bytes.subarray(0, 5)).toString(), "%PDF-");
+  const doc = await PDFDocument.load(bytes);
+  assert.ok(doc.getPageCount() >= 3, `páginas: ${doc.getPageCount()}`);
+  assert.match(doc.getTitle() ?? "", /Clínica Sorriso/);
+  if (process.env.SAVE_SAMPLE_PDF) (await import("node:fs")).writeFileSync(process.env.SAVE_SAMPLE_PDF, bytes);
+});

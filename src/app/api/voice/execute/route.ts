@@ -114,6 +114,14 @@ export async function POST(req: Request) {
           done.push(`${describe(a).split(" · ")[0]}${g}`);
           continue;
         }
+        case "log_call": {
+          const { error } = await sb.from("activities").insert({
+            organization_id: ctx.org.id, lead_id: need(a.leadId), actor_id: ctx.userId, type: "call",
+            payload: { outcome: a.outcome, duration_min: a.durationMin, notes: a.notes, via: "voz" },
+          });
+          if (error) throw error;
+          break;
+        }
         case "add_note": {
           const { error } = await sb.from("activities").insert({ organization_id: ctx.org.id, lead_id: need(a.leadId), actor_id: ctx.userId, type: "note", payload: { text: a.note, via: "voz" } });
           if (error) throw error;

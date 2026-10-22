@@ -130,6 +130,17 @@ export async function POST(req: Request) {
           actions.push({ kind: "assign_lead", ...(await resolveLead(i.lead)), userId: m.id, userName: m.name });
           break;
         }
+        case "log_call": {
+          const outcomes = ["atendeu", "nao_atendeu", "caixa_postal", "ocupado", "numero_errado"] as const;
+          const outcome = outcomes.find((o) => o === i.outcome) ?? "atendeu";
+          const d = Number(i.duration_min);
+          actions.push({
+            kind: "log_call", ...(await resolveLead(i.lead)), outcome,
+            durationMin: Number.isFinite(d) && d > 0 && d <= 600 ? Math.round(d * 10) / 10 : null,
+            notes: typeof i.notes === "string" && i.notes.trim() ? i.notes.trim().slice(0, 2000) : null,
+          });
+          break;
+        }
         case "add_note":
           actions.push({ kind: "add_note", ...(await resolveLead(i.lead)), note: String(i.note ?? "").slice(0, 2000) });
           break;

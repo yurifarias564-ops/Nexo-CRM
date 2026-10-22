@@ -11,6 +11,8 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 - **Voz**: mover etapa, adicionar/remover tags, criar lead, valor, responsável, anotação, **editar nome/telefone/e-mail** e **enviar mensagem no WhatsApp falando** — sempre com confirmação.
 - **Google Agenda**: cada vendedor conecta a própria conta. Agendar por voz (“agendamento com o Yuri amanhã às 10 horas” → move para a etapa **Agendamento** e cria o evento), arrastando o lead para a coluna Agendamento ou pelo botão Agendar no lead; cancelar remove o evento do Google.
 - **Mensagens agendadas**: escolha dia, hora e texto (ou modelo aprovado) e o sistema envia sozinho no WhatsApp do lead — pelo chat, pelo lead, pela tela **Agendadas** ou por voz (“entrar em contato com o Yuri dia 31 de outubro: e aí, meu patrão, tudo certo?”). Falha temporária tenta de novo (até 3 vezes); falha que exige ação aparece com o motivo e botão de reenviar.
+- **Relatórios**: envie um relatório de exemplo (PDF ou Word) e a IA aprende a estrutura. Todo **último dia do mês** (30/31; 28/29 em fevereiro) o sistema gera o relatório de cada cliente nesse formato — leads recebidos, ligações, follow-ups, agendamentos, vendas, conversão, **metas batidas ou não e o porquê** — e envia o PDF no **grupo do WhatsApp do cliente** (ou num número). O mesmo modelo serve para todos os seus clientes (“Usar em todos os clientes”). Metas e comentários do mês por empresa, prévia em PDF, envio manual e histórico com download.
+- **Ligações**: botão **Registrar ligação** no lead (atendeu, não atendeu, caixa postal…) ou por voz (“liguei pro Yuri e ele não atendeu”) — entra no relatório.
 - **Leads**: tabela com busca, ações em massa, importação/exportação Excel.
 - **Limite de uso por usuário** em todas as rotas sensíveis (voz, envio, importação, convites).
 
@@ -42,8 +44,8 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 
 ```bash
 npm test          # roda tudo
-npm run test:unit # 17 testes: webhooks, modelos, mídia, fuso horário/agenda, mensagens agendadas, telefone, CPF/CNPJ, dinheiro, voz
-npm run test:db   # 69 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos, mensagens agendadas (sem envio duplicado)
+npm run test:unit # 23 testes: webhooks, modelos, mídia, fuso horário/agenda, mensagens agendadas, relatórios (metas, último dia do mês, PDF), telefone, CPF/CNPJ, dinheiro, voz
+npm run test:db   # 83 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos, mensagens agendadas (sem envio duplicado)
 npm run typecheck
 npm run build
 ```
@@ -106,7 +108,7 @@ Fluxo: cadastro → cria empresa → tela de assinatura → paga a fatura → o 
 
 Clique em **Comando de voz** (ou `Ctrl+Shift+M`), fale, por exemplo: *"mova o lead Yuri para Negociação e coloque a tag Anúncio"*. O sistema mostra o que entendeu e **só executa depois da sua confirmação**; se houver dois "Yuri", ele pergunta qual. Também dá para digitar o comando (ícone de teclado).
 
-Ações suportadas: mover de etapa, adicionar/remover tags (cria a tag se não existir), criar lead, definir valor, definir responsável, adicionar anotação — várias na mesma frase.
+Ações suportadas: mover de etapa, adicionar/remover tags (cria a tag se não existir), criar lead, definir valor, definir responsável, adicionar anotação, registrar ligação, enviar e agendar mensagem, agendar reunião — várias na mesma frase.
 
 ### 7. Google Agenda
 
@@ -132,7 +134,15 @@ O disparador já está criado no Supabase (pg_cron, a cada minuto, só chama o a
 
 Regra da Meta: na **API oficial**, texto livre só é entregue se o cliente falou nas 24h anteriores; para retomar contato, agende um **modelo aprovado** (o sistema avisa e oferece). Pelo **QR Code** não há essa restrição.
 
-### 9. Deploy (Vercel)
+### 9. Relatórios mensais
+
+1. Usa a mesma `ANTHROPIC_API_KEY`. O modelo que escreve o relatório é `ANTHROPIC_REPORT_MODEL` (padrão `claude-sonnet-5-5`).
+2. O disparador mensal já está criado no Supabase (job `nexo-monthly-reports`, de hora em hora) e usa os **mesmos segredos do Vault** do item 8 — se você já fez o item 8, não precisa fazer nada.
+3. Em cada empresa: **Relatórios** → envie o relatório de exemplo → defina metas → em **Envio automático** escolha o WhatsApp, o **grupo do cliente** e o horário → ative.
+4. Envio para **grupo** exige o número conectado por **QR Code** (a API oficial da Meta não envia para grupos). Pela API oficial dá para enviar a um número.
+5. Proteções: um único envio automático por empresa e mês (não duplica no grupo); se falhar, tenta de novo na hora seguinte, até 3 vezes; só envia para empresas com assinatura em dia. Os PDFs ficam no bucket privado `reports` do Supabase.
+
+### 10. Deploy (Vercel)
 
 1. Suba o código para um repositório GitHub e importe na [Vercel](https://vercel.com).
 2. Cadastre as variáveis de ambiente.
