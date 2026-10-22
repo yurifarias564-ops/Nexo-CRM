@@ -215,6 +215,17 @@ await su(`insert into public.report_runs (organization_id, period, kind, status)
 await expectError("relatório automático do mês não duplica", () => su(`insert into public.report_runs (organization_id, period, kind, status) values ($1, ${per}, 'auto', 'generating')`, [orgA]), "23505");
 ok("relatórios manuais podem ser vários", (await su(`insert into public.report_runs (organization_id, period, kind) values ($1, ${per}, 'manual'), ($1, ${per}, 'manual') returning 1`, [orgA])).length === 2);
 
+console.log("\n# Ligações pelo WhatsApp");
+const convA = (await su("select id from public.conversations where channel_id=$1 limit 1", [ch]))[0].id;
+const callId = (await su("insert into public.wa_calls (organization_id, channel_id, conversation_id, lead_id, wa_id, direction, status, started_by, recording_mode) values ($1,$2,$3,$4,'558599998888','out','ringing',$5,'meta') returning id", [orgA, ch, convA, leadA, A]))[0].id;
+ok("equipe vê as ligações da empresa", (await as(C, "select id from public.wa_calls")).length === 1);
+ok("outra empresa não vê ligações", (await as(B, "select id from public.wa_calls")).length === 0);
+await expectError("usuário não cria ligação direto no banco", () => as(A, "insert into public.wa_calls (organization_id, channel_id, wa_id, direction) values ($1,$2,'1','out')", [orgA, ch]), "42501");
+ok("usuário não altera ligação (gravação, duração)", (await as(A, "update public.wa_calls set duration_s=999 where id=$1 returning 1", [callId])).length === 0);
+await expectError("usuário não se dá permissão de ligar para o cliente", () => as(A, "update public.conversations set call_permission_until=now()+interval '7 days' where id=$1", [convA]), "42501");
+await expectError("usuário não liga ligações no número", () => as(A, "update public.whatsapp_channels set calling_enabled=true where id=$1 returning 1", [ch]).then((r) => { if (!r.length) { const e = new Error("x"); e.code = "42501"; throw e; } }), "42501");
+await expectError("modo de gravação inválido é recusado", () => su("update public.whatsapp_channels set call_recording='sempre' where id=$1", [ch]), "23514");
+
 console.log("\n# Limite de uso");
 await expectError("usuário não chama hit_rate_limit", () => as(A, "select public.hit_rate_limit('x', 1, 60)"), "42501");
 const hits = [];

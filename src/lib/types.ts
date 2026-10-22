@@ -31,6 +31,7 @@ export interface Channel {
   id: string; organization_id: string; provider: Provider; name: string; status: ChannelStatus;
   phone_number: string | null; meta_phone_number_id: string | null; meta_waba_id: string | null; evolution_instance: string | null;
   history_imported_at: string | null; last_error: string | null; created_at: string;
+  calling_enabled?: boolean; call_recording?: "meta" | "browser" | "off"; call_recording_purpose?: string;
 }
 export interface Conversation {
   id: string; organization_id: string; channel_id: string; lead_id: string | null; wa_id: string;

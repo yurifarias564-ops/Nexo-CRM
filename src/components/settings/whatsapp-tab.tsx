@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, History, Plus, QrCode, ShieldCheck, Smartphone, Trash2, Wifi, WifiOff } from "lucide-react";
+import { CheckCircle2, History, Phone, Plus, QrCode, ShieldCheck, Smartphone, Trash2, Wifi, WifiOff } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -15,6 +15,7 @@ export function WhatsAppTab() {
   const ws = useWorkspace();
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [adding, setAdding] = useState<null | "choose" | "meta" | "evolution">(null);
+  const [callsFor, setCallsFor] = useState<Channel | null>(null);
   const [qrFor, setQrFor] = useState<string | null>(null);
   const [importing, setImporting] = useState<{ id: string; done: number; total: number; msgs: number } | null>(null);
 
@@ -89,6 +90,9 @@ export function WhatsAppTab() {
                 </Button>
               )
             )}
+            {c.provider === "meta" && (
+              <Button size="sm" variant="outline" onClick={() => setCallsFor(c)}><Phone className="h-3.5 w-3.5" /> Ligações{c.calling_enabled ? " · ativas" : ""}</Button>
+            )}
             <Button size="icon" variant="ghost" className="h-8 w-8 hover:text-red-300" onClick={() => remove(c)} aria-label="Remover"><Trash2 className="h-3.5 w-3.5" /></Button>
           </>
         )}
@@ -110,6 +114,7 @@ export function WhatsAppTab() {
         </div>
       </Modal>
 
+      {callsFor && <CallingModal channel={callsFor} onClose={() => setCallsFor(null)} onSaved={() => { setCallsFor(null); void load(); }} />}
       <MetaForm open={adding === "meta"} onClose={() => setAdding(null)} onDone={() => { setAdding(null); void load(); }} />
       <EvolutionForm open={adding === "evolution"} onClose={() => setAdding(null)} onCreated={(id) => { setAdding(null); void load(); setQrFor(id); }} />
       <QrModal channelId={qrFor} onClose={() => setQrFor(null)} onConnected={(id) => {
@@ -266,5 +271,52 @@ function QrBody({ channelId, onConnected }: { channelId: string; onConnected: (i
       </ol>
       <p className="flex items-center gap-2 text-xs text-slate-500"><CheckCircle2 className="h-3.5 w-3.5" /> O QR é renovado automaticamente</p>
     </div>
+  );
+}
+
+function CallingModal({ channel, onClose, onSaved }: { channel: Channel; onClose: () => void; onSaved: () => void }) {
+  const [enabled, setEnabled] = useState(!!channel.calling_enabled);
+  const [recording, setRecording] = useState<"meta" | "browser" | "off">(channel.call_recording ?? "meta");
+  const [purpose, setPurpose] = useState(channel.call_recording_purpose ?? "qualidade do atendimento");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true);
+    const res = await fetch(`/api/channels/${channel.id}/calling`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled, recording, purpose }) });
+    const body = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return toast.error(body.error ?? "Não foi possível salvar");
+    toast.success(enabled ? "Ligações ativadas neste número" : "Configuração salva");
+    onSaved();
+  }
+  const opts: { v: "meta" | "browser" | "off"; t: string; d: string }[] = [
+    { v: "meta", t: "Gravar pelo WhatsApp (recomendado)", d: "O WhatsApp avisa o cliente em português antes de gravar. O áudio chega aqui no CRM em segundos." },
+    { v: "browser", t: "Gravar no navegador", d: "Grava as duas vozes no computador de quem ligou, sem aviso automático — avise o cliente." },
+    { v: "off", t: "Não gravar", d: "" },
+  ];
+  return (
+    <Modal open onClose={onClose} title={`Ligações · ${channel.name}`}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={() => void save()} loading={busy}>Salvar</Button></>}>
+      <div className="space-y-4 text-sm">
+        <label className="flex items-start gap-3 rounded-xl border border-line bg-ink-850 p-3">
+          <input type="checkbox" className="mt-1 h-4 w-4 accent-brand-500" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <span><b className="text-white">Ativar ligações pelo WhatsApp</b><span className="block text-slate-400">Botão “Ligar” nas conversas e chamadas dos clientes tocando no CRM. O cliente precisa permitir antes da primeira ligação (vale 7 dias).</span></span>
+        </label>
+        <div className="space-y-2">
+          <span className="label">Gravação</span>
+          {opts.map((o) => (
+            <label key={o.v} className={cn("flex cursor-pointer items-start gap-3 rounded-xl border p-3", recording === o.v ? "border-brand-400/60 bg-brand-500/10" : "border-line")}>
+              <input type="radio" name="rec" className="mt-1 accent-brand-500" checked={recording === o.v} onChange={() => setRecording(o.v)} />
+              <span><b className="text-slate-100">{o.t}</b>{o.d && <span className="block text-xs text-slate-400">{o.d}</span>}</span>
+            </label>
+          ))}
+        </div>
+        {recording === "meta" && (
+          <label className="block"><span className="label">Motivo da gravação (falado ao cliente)</span>
+            <input className="field" maxLength={250} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+            <span className="mt-1 block text-xs text-slate-500">O cliente ouve: “O áudio desta ligação será gravado para: {purpose || "…"}”.</span></label>
+        )}
+        <p className="text-xs text-slate-500">No painel da Meta (app → WhatsApp → Configuração → Webhooks), marque também o campo <b>calls</b>.</p>
+      </div>
+    </Modal>
   );
 }

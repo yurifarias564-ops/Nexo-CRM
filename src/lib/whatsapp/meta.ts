@@ -180,6 +180,10 @@ function parseContent(m: MetaMsg): Pick<NormalizedMessage, "type" | "body" | "me
     }
     case "interactive": {
       const i = obj("interactive");
+      if (i.type === "call_permission_reply") {
+        const cp = (i.call_permission_reply ?? {}) as { response?: string; is_permanent?: boolean };
+        return { type: "other", body: cp.response === "accept" ? `📞 Cliente permitiu ligações${cp.is_permanent ? " (sempre)" : " por 7 dias"}` : "📞 Cliente recusou receber ligações", media_ref: null, media_mime: null };
+      }
       const r = (i.button_reply ?? i.list_reply ?? {}) as { title?: string };
       return { type: "text", body: r.title ?? "Resposta interativa", media_ref: null, media_mime: null };
     }

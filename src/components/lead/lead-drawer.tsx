@@ -211,7 +211,9 @@ export function LeadDrawer({
     if (a.type === "scheduled_failed") return <span className="text-amber-300">Mensagem agendada não foi enviada: {String(a.payload.error ?? "")}</span>;
     if (a.type === "call") {
       const d = Number(a.payload.duration_min);
-      return <>{who} ligou{a.payload.via === "voz" ? " (voz)" : ""}: <b className={a.payload.outcome === "atendeu" ? "text-emerald-300" : "text-slate-300"}>{callOutcomeLabel(a.payload.outcome)}</b>{d > 0 ? ` · ${d} min` : ""}{a.payload.notes ? <span className="text-slate-300"> — {String(a.payload.notes)}</span> : null}</>;
+      const viaWa = a.payload.via === "whatsapp";
+      const rec = viaWa && a.payload.call_id ? <> · <a href={`/api/calls/${String(a.payload.call_id)}/recording`} target="_blank" rel="noopener noreferrer" className="text-brand-300 hover:text-brand-200">ouvir gravação</a></> : null;
+      return <>{a.payload.direction === "in" ? `${who} atendeu ligação do cliente` : `${who} ligou`}{a.payload.via === "voz" ? " (voz)" : viaWa ? " pelo WhatsApp" : ""}: <b className={a.payload.outcome === "atendeu" ? "text-emerald-300" : "text-slate-300"}>{callOutcomeLabel(a.payload.outcome)}</b>{d > 0 ? ` · ${d} min` : ""}{a.payload.notes ? <span className="text-slate-300"> — {String(a.payload.notes)}</span> : null}{rec}</>;
     }
     if (a.type === "note") return <><span className="text-slate-300">{String(a.payload.text ?? "")}</span> <span className="text-slate-600">— {who}{a.payload.via === "voz" ? " (voz)" : ""}</span></>;
     return a.type;

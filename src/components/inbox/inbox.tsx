@@ -12,6 +12,7 @@ import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-repl
 import { TemplateModal } from "./template-modal";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { cn, formatPhone } from "@/lib/utils";
+import { CallButton, CallEntry, type ChatCall } from "@/components/calls/call-button";
 import { TimeAgo } from "@/components/ui/time-ago";
 import { useLatest } from "@/lib/hooks";
 import type { Conversation, Lead, Message, MsgType, Provider } from "@/lib/types";
@@ -190,6 +191,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const [file, setFile] = useState<File | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
   const [schedOpen, setSchedOpen] = useState(false);
+  const [calls, setCalls] = useState<ChatCall[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -221,7 +223,16 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       .then(({ data }) => alive && setLastInAt(data ? new Date(data.sent_at).getTime() : null));
     if (conv.lead_id) sb.from("lead_tags").select("tag_id").eq("lead_id", conv.lead_id).then(({ data }) => alive && setTagIds((data ?? []).map((r) => r.tag_id)));
 
+    sb.from("wa_calls").select("id, direction, status, duration_s, recording_path, created_at, error").eq("conversation_id", conv.id)
+      .order("created_at", { ascending: false }).limit(50).then(({ data }) => alive && setCalls((data ?? []) as ChatCall[]));
+
     const ch = sb.channel(`chat:${conv.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "wa_calls", filter: `conversation_id=eq.${conv.id}` }, (p) => {
+        const c = p.new as ChatCall;
+        if (!c?.id) return;
+        setCalls((cur) => [c, ...cur.filter((x) => x.id !== c.id)]);
+        if (stickToBottom.current) scrollToBottom();
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `conversation_id=eq.${conv.id}` }, (p) => {
         if (p.eventType === "INSERT") {
           const m = p.new as Message;
@@ -357,8 +368,12 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
 
 
   const grouped = useMemo(() => {
-    const out: { day: string; items: Message[] }[] = [];
-    for (const m of messages) {
+    type Item = Message | (ChatCall & { kind: "call"; sent_at: string });
+    const oldest = messages[0]?.sent_at ?? "";
+    const items: Item[] = [...messages, ...calls.filter((c) => !hasMore || c.created_at >= oldest).map((c) => ({ ...c, kind: "call" as const, sent_at: c.created_at }))]
+      .sort((a, b) => a.sent_at.localeCompare(b.sent_at));
+    const out: { day: string; items: Item[] }[] = [];
+    for (const m of items) {
       const d = new Date(m.sent_at);
       const today = new Date();
       const yest = new Date(); yest.setDate(today.getDate() - 1);
@@ -367,7 +382,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       if (last?.day === day) last.items.push(m); else out.push({ day, items: [m] });
     }
     return out;
-  }, [messages]);
+  }, [messages, calls, hasMore]);
 
   const stage = conv.leads?.stage_id ? ws.stageById.get(conv.leads.stage_id) : null;
 
@@ -384,6 +399,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
             {tagIds.map((id) => { const t = ws.tagById.get(id); return t ? <TagPill key={id} name={t.name} color={t.color} className="text-[10px]" /> : null; })}
           </div>
         </div>
+        <CallButton conversationId={conv.id} name={name} phone={conv.wa_id} provider={provider} />
         {conv.lead_id && (
           <Button variant="outline" size="sm" onClick={() => onOpenLead(conv.lead_id!)}><UserRound className="h-3.5 w-3.5" /> Lead</Button>
         )}
@@ -401,7 +417,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
                 <div className="sticky top-0 z-10 my-3 flex justify-center">
                   <span className="rounded-md border border-line bg-ink-850/95 px-3 py-1 text-[11px] font-medium text-slate-400 backdrop-blur">{g.day}</span>
                 </div>
-                <div className="space-y-1.5">{g.items.map((m) => <Bubble key={m.id} m={m} />)}</div>
+                <div className="space-y-1.5">{g.items.map((m) => ("kind" in m ? <CallEntry key={`call-${m.id}`} c={m} /> : <Bubble key={m.id} m={m} />))}</div>
               </div>
             ))}
             {!messages.length && <p className="mt-10 text-center text-sm text-slate-500">Nenhuma mensagem ainda.</p>}

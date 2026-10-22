@@ -385,3 +385,32 @@ test("time: valores, dias preenchidos e dinheiro em formato brasileiro", () => {
   assert.equal(parseBRL("1.250.000,00"), 1250000);
   assert.equal(parseBRL("abc"), null);
 });
+
+import { parseCallWebhook } from "@/lib/whatsapp/meta-calls";
+import { brVariants } from "@/lib/calls";
+
+const wrap = (field: string, value: Record<string, unknown>) => ({ object: "whatsapp_business_account", entry: [{ id: "waba", changes: [{ field, value: { messaging_product: "whatsapp", metadata: { phone_number_id: "PN1" }, ...value } }] }] });
+
+test("ligações: webhook da Meta (atendeu, cliente ligando, fim, gravação, permissão)", () => {
+  const [a] = parseCallWebhook(wrap("calls", { calls: [{ id: "wacid.1", event: "connect", direction: "BUSINESS_INITIATED", biz_opaque_callback_data: "abc", session: { sdp_type: "answer", sdp: "v=0 answer" } }] }));
+  assert.equal(a!.phoneNumberId, "PN1");
+  assert.deepEqual([a!.calls[0]!.event, a!.calls[0]!.sdpType, a!.calls[0]!.sdp, a!.calls[0]!.opaque], ["connect", "answer", "v=0 answer", "abc"]);
+  const [b] = parseCallWebhook(wrap("calls", { contacts: [{ profile: { name: "Yuri" }, wa_id: "5585999998888" }], calls: [{ id: "wacid.2", from: "5585999998888", event: "connect", direction: "USER_INITIATED", session: { sdp_type: "offer", sdp: "v=0 offer" } }] }));
+  assert.equal(b!.contactName, "Yuri");
+  assert.deepEqual([b!.calls[0]!.direction, b!.calls[0]!.from, b!.calls[0]!.sdpType], ["USER_INITIATED", "5585999998888", "offer"]);
+  const [c] = parseCallWebhook(wrap("calls", { calls: [{ id: "wacid.1", event: "terminate", direction: "BUSINESS_INITIATED", status: "COMPLETED", start_time: "1671644824", end_time: "1671644944", duration: 120 }] }));
+  assert.deepEqual([c!.calls[0]!.status, c!.calls[0]!.duration, c!.calls[0]!.startTime], ["COMPLETED", 120, 1671644824]);
+  const [d] = parseCallWebhook(wrap("calls", { calls: [{ id: "wacid.1", event: "call_recording_available", call_recording: { type: "audio", audio: { id: "MID", url: "https://x/y", mime_type: "audio/ogg" } } }] }));
+  assert.deepEqual(d!.calls[0]!.recording, { id: "MID", url: "https://x/y", mime: "audio/ogg" });
+  const [e] = parseCallWebhook(wrap("calls", { statuses: [{ id: "wacid.1", type: "call", status: "RINGING" }, { id: "wamid.x", type: "message", status: "read" }] }));
+  assert.deepEqual(e!.statuses, [{ id: "wacid.1", status: "RINGING" }]);
+  const [f] = parseCallWebhook(wrap("messages", { messages: [{ from: "5585999998888", type: "interactive", interactive: { type: "call_permission_reply", call_permission_reply: { response: "accept", expiration_timestamp: 1745343479, is_permanent: false, response_source: "user_action" } } }] }));
+  assert.deepEqual(f!.permissions[0], { waId: "5585999998888", response: "accept", permanent: false, expiresAt: new Date(1745343479000).toISOString() });
+  assert.equal(parseCallWebhook(wrap("messages", { messages: [{ from: "1", type: "text", text: { body: "oi" } }] })).length, 0, "mensagem comum não vira evento de ligação");
+});
+
+test("ligações: número com e sem o 9º dígito encontra a mesma conversa", () => {
+  assert.deepEqual(brVariants("5585999998888").sort(), ["558599998888", "5585999998888"]);
+  assert.deepEqual(brVariants("558599998888").sort(), ["558599998888", "5585999998888"]);
+  assert.deepEqual(brVariants("14085551234"), ["14085551234"]);
+});

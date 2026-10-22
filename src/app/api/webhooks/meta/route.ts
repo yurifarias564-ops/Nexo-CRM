@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { env } from "@/lib/env";
 import { parseWebhook, verifySignature } from "@/lib/whatsapp/meta";
 import { applyStatuses, ingestBatch } from "@/lib/whatsapp";
+import { parseCallWebhook } from "@/lib/whatsapp/meta-calls";
+import { handleCallBatch } from "@/lib/calls";
 
 export const runtime = "nodejs";
 
@@ -46,6 +48,11 @@ export async function POST(req: Request) {
       if (historical) {
         await db.from("whatsapp_channels").update({ history_imported_at: new Date().toISOString() }).eq("id", ch.id);
       }
+    }
+    // Ligações (Calling API) e respostas de permissão para ligar
+    for (const cb of parseCallWebhook(payload)) {
+      const { data: ch } = await db.from("whatsapp_channels").select("id").eq("meta_phone_number_id", cb.phoneNumberId).maybeSingle();
+      if (ch) await handleCallBatch(ch.id, cb);
     }
   } catch (e) {
     console.error("[meta webhook]", e);
