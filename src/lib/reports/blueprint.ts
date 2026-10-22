@@ -7,7 +7,7 @@ import { callTool } from "./claude";
 export const METRIC_KEYS = [
   "new_leads", "won_count", "won_value", "lost_count", "conversion", "calls", "calls_answered", "scheduled_sent", "followups",
   "appointments", "appointments_held", "messages_in", "messages_out", "open_count", "open_value",
-  "by_source", "won_by_source", "by_stage", "won_by_owner", "goals",
+  "by_source", "won_by_source", "by_stage", "won_by_owner", "goals", "team",
 ] as const;
 
 export const Blueprint = z.object({
@@ -47,7 +47,7 @@ new_leads=leads que chegaram; won_count/won_value=vendas (quantidade/valor); los
 calls/calls_answered=ligações feitas/atendidas; scheduled_sent=mensagens de follow-up automáticas enviadas; followups=total de follow-ups (ligações + mensagens agendadas);
 appointments/appointments_held=agendamentos marcados/realizados; messages_in/messages_out=mensagens recebidas/enviadas;
 open_count/open_value=negócios em aberto; by_source=origem dos leads; won_by_source=vendas por origem; by_stage=funil por etapa;
-won_by_owner=vendas por vendedor; goals=metas do mês (batidas ou não).`;
+won_by_owner=vendas por vendedor; goals=metas do mês (batidas ou não); team=checklist do time comercial por vendedora (contatos, vídeos, ligações etc. x meta).`;
 
 /** Lê o documento de exemplo e devolve a estrutura que os relatórios vão seguir. */
 export async function extractBlueprint(file: Buffer, kind: "pdf" | "docx" | "text"): Promise<Blueprint> {

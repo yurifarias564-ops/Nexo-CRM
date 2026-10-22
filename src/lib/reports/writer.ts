@@ -53,6 +53,18 @@ export function factSheet(d: ReportData): string {
       ? d.goals.map((g) => `- [${g.metric}] ${g.label}: meta ${g.money ? brl(g.target) : g.target}, realizado ${g.money ? brl(g.actual) : g.actual} (${g.pct}%) → ${g.hit ? "BATEU" : "NÃO BATEU"}`)
       : ["- Nenhuma meta cadastrada para este mês."]),
     "",
+    "TIME COMERCIAL — POR VENDEDORA (realizado | meta do mês | mês anterior):",
+    ...(d.team.length
+      ? d.team.flatMap((t) => [
+        `- ${t.seller}:`,
+        ...t.rows.map((r) => {
+          const f = (v: number) => (r.unit === "money" ? brl(v) : String(v));
+          const hit = r.target ? (r.actual >= r.target ? "BATEU" : "NÃO BATEU") : "sem meta";
+          return `    · ${r.metric}: ${f(r.actual)} | ${r.target ? f(r.target) : "—"} | ${f(r.previous)} → ${hit}${r.target ? ` (${Math.round((r.actual / r.target) * 100)}%)` : ""}`;
+        }),
+      ])
+      : ["- Acompanhamento do time não configurado."]),
+    "",
     `COMENTÁRIOS DO CONSULTOR SOBRE O MÊS: ${d.notes.trim() || "(nenhum)"}`,
   ];
   return lines.join("\n");
@@ -67,6 +79,7 @@ export async function writeReport(blueprint: Blueprint, d: ReportData): Promise<
       "1. Use SOMENTE os números da ficha de dados. Nunca invente, arredonde de forma diferente ou estime números.",
       "2. O resultado das metas (BATEU / NÃO BATEU) já está calculado: não contradiga.",
       "3. Para cada meta, explique o porquê com base nos números (ex.: volume de leads, conversão, follow-ups, comparação com o mês anterior) e nos comentários do consultor. Se não houver dado suficiente para explicar, diga isso com honestidade em vez de inventar causas.",
+      "3b. Se houver dados do TIME COMERCIAL, comente o desempenho de cada vendedora (quem bateu, quem ficou abaixo e onde) com base só nesses números, de forma respeitosa e construtiva.",
       "4. Se uma seção do modelo pede um dado que não existe na ficha, escreva que o dado não é acompanhado no sistema.",
       "5. Linguagem clara, profissional e direta; sem emojis no corpo do relatório (eles podem aparecer só na legenda do WhatsApp se o modelo usar).",
       "",

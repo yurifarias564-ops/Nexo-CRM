@@ -299,6 +299,10 @@ const sampleData = (): ReportData => ({
   current: metrics(), previous: metrics({ new_leads: 100, won_count: 12, won_value: 40000 }),
   goals: evaluateGoals([{ metric: "won_count", target: 15 }, { metric: "won_value", target: 60000 }], metrics()),
   notes: "Campanha de Instagram pausada dia 10.",
+  team: [
+    { seller: "Ana", rows: [{ metric: "Contatos no WhatsApp", unit: "count", actual: 700, target: 660, previous: 500 }, { metric: "Faturamento", unit: "money", actual: 30000, target: 40000, previous: 20000 }] },
+    { seller: "Bia", rows: [{ metric: "Contatos no WhatsApp", unit: "count", actual: 400, target: 660, previous: 450 }, { metric: "Faturamento", unit: "money", actual: 24000, target: null, previous: 0 }] },
+  ],
 });
 
 test("relatório: ficha de dados traz números, variação e metas já calculadas", () => {
@@ -307,6 +311,8 @@ test("relatório: ficha de dados traz números, variação e metas já calculada
   assert.match(f, /\[won_count\] Vendas \(quantidade\): meta 15, realizado 18 \(120%\) → BATEU/);
   assert.match(f, /\[won_value\].*→ NÃO BATEU/);
   assert.match(f, /Campanha de Instagram pausada/);
+  assert.match(f, /Contatos no WhatsApp: 700 \| 660 \| 500 → BATEU \(106%\)/);
+  assert.match(f, /Contatos no WhatsApp: 400 \| 660 \| 450 → NÃO BATEU/);
 });
 
 test("relatório: gera PDF válido com várias páginas", async () => {
@@ -324,4 +330,24 @@ test("relatório: gera PDF válido com várias páginas", async () => {
   assert.ok(doc.getPageCount() >= 3, `páginas: ${doc.getPageCount()}`);
   assert.match(doc.getTitle() ?? "", /Clínica Sorriso/);
   if (process.env.SAVE_SAMPLE_PDF) (await import("node:fs")).writeFileSync(process.env.SAVE_SAMPLE_PDF, bytes);
+});
+
+import { delta as tDelta, filledDays, monthDays as tMonthDays, targetFor, totals as tTotals, addDays } from "@/lib/team";
+
+test("time: meta individual sobrepõe a padrão; totais e dias preenchidos", () => {
+  const m = { id: "m1", name: "Contatos", unit: "count" as const, source: "manual" as const, daily_target: 30, monthly_target: 660, active: true, position: 0 };
+  const goals = [{ seller_id: "s1", metric_id: "m1", daily_target: 40, monthly_target: null }];
+  assert.deepEqual(targetFor(goals, m, "s1"), { daily: 40, monthly: 660 }, "sem meta mensal individual: usa a padrão");
+  assert.deepEqual(targetFor(goals, m, "s2"), { daily: 30, monthly: 660 });
+  const vals = [
+    { seller_id: "s1", metric_id: "m1", day: "2026-10-01", value: 10 }, { seller_id: "s1", metric_id: "m1", day: "2026-10-02", value: 5 },
+    { seller_id: "s1", metric_id: "auto", day: "2026-10-03", value: 3 },
+  ];
+  assert.equal(tTotals(vals).get("s1:m1"), 15);
+  assert.equal(tTotals(vals, "2026-10-02").get("s1:m1"), 5);
+  assert.equal(filledDays(vals, new Set(["m1"])).get("s1"), 2, "indicador automático não conta como preenchido");
+  assert.equal(tDelta(150, 100), 50);
+  assert.equal(tDelta(5, 0), null);
+  assert.deepEqual(tMonthDays("2028-02"), { first: "2028-02-01", last: "2028-02-29", days: 29 });
+  assert.equal(addDays("2026-12-31", 1), "2027-01-01");
 });

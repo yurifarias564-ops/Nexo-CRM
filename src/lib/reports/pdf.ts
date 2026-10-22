@@ -185,6 +185,28 @@ export async function renderReportPdf(d: ReportData, r: WrittenReport): Promise<
     }
   }
 
+  // Time comercial (por vendedora)
+  if (d.team.length && d.team.some((t) => t.rows.length)) {
+    w.heading("Time comercial");
+    const fv = (v: number, unit: "count" | "money") => (unit === "money" ? sanitize(v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 })) : num(v));
+    for (const t of d.team) {
+      w.ensure(40);
+      w.text(t.seller, { bold: true, size: 11, color: C.navy, gap: 2 });
+      for (const r of t.rows) {
+        w.ensure(16);
+        const p = r.target ? Math.round((r.actual / r.target) * 100) : null;
+        const label = sanitize(r.metric);
+        w.page.drawText(label.length > 34 ? `${label.slice(0, 33)}…` : label, { x: M + 10, y: w.y - 9.5, size: 9.5, font, color: C.ink });
+        const val = sanitize(`${fv(r.actual, r.unit)}${r.target ? ` / ${fv(r.target, r.unit)}` : ""}`);
+        w.page.drawText(val, { x: M + 200, y: w.y - 9.5, size: 9.5, font: bold, color: C.ink });
+        if (p !== null) w.page.drawText(`${p}%`, { x: M + 350, y: w.y - 9.5, size: 9.5, font: bold, color: p >= 100 ? C.green : C.red });
+        w.page.drawText(sanitize(`ant.: ${fv(r.previous, r.unit)}`), { x: M + 400, y: w.y - 9.5, size: 8.5, font, color: C.muted });
+        w.y -= 15;
+      }
+      w.y -= 6;
+    }
+  }
+
   // Seções do modelo
   for (const s of r.sections) {
     w.heading(s.title);

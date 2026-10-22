@@ -12,6 +12,7 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 - **Google Agenda**: cada vendedor conecta a própria conta. Agendar por voz (“agendamento com o Yuri amanhã às 10 horas” → move para a etapa **Agendamento** e cria o evento), arrastando o lead para a coluna Agendamento ou pelo botão Agendar no lead; cancelar remove o evento do Google.
 - **Mensagens agendadas**: escolha dia, hora e texto (ou modelo aprovado) e o sistema envia sozinho no WhatsApp do lead — pelo chat, pelo lead, pela tela **Agendadas** ou por voz (“entrar em contato com o Yuri dia 31 de outubro: e aí, meu patrão, tudo certo?”). Falha temporária tenta de novo (até 3 vezes); falha que exige ação aparece com o motivo e botão de reenviar.
 - **Relatórios**: envie um relatório de exemplo (PDF ou Word) e a IA aprende a estrutura. Todo **último dia do mês** (30/31; 28/29 em fevereiro) o sistema gera o relatório de cada cliente nesse formato — leads recebidos, ligações, follow-ups, agendamentos, vendas, conversão, **metas batidas ou não e o porquê** — e envia o PDF no **grupo do WhatsApp do cliente** (ou num número). O mesmo modelo serve para todos os seus clientes (“Usar em todos os clientes”). Metas e comentários do mês por empresa, prévia em PDF, envio manual e histórico com download.
+- **Time comercial**: cada vendedora clica no próprio nome e preenche o **checklist do dia** (contatos no WhatsApp/Instagram, vídeos, o que você definir) com botões + e −; salva sozinho e zera a cada dia. Indicadores e **metas diárias e mensais configuráveis** (padrão e por vendedora, mês a mês). Ligações, vendas, faturamento e agendamentos podem vir **automáticos do CRM**. **Painel do time** com realizado x meta, ritmo do mês, dias preenchidos e **comparação com qualquer mês** (mês a mês ou "antes x depois"); exporta para **Excel**. Os números de cada vendedora entram no **relatório mensal**.
 - **Ligações**: botão **Registrar ligação** no lead (atendeu, não atendeu, caixa postal…) ou por voz (“liguei pro Yuri e ele não atendeu”) — entra no relatório.
 - **Leads**: tabela com busca, ações em massa, importação/exportação Excel.
 - **Limite de uso por usuário** em todas as rotas sensíveis (voz, envio, importação, convites).
@@ -44,8 +45,8 @@ CRM multiempresa com WhatsApp (API oficial **e** QR Code), funil kanban em tempo
 
 ```bash
 npm test          # roda tudo
-npm run test:unit # 23 testes: webhooks, modelos, mídia, fuso horário/agenda, mensagens agendadas, relatórios (metas, último dia do mês, PDF), telefone, CPF/CNPJ, dinheiro, voz
-npm run test:db   # 83 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos, mensagens agendadas (sem envio duplicado)
+npm run test:unit # 24 testes: webhooks, modelos, mídia, fuso horário/agenda, mensagens agendadas, relatórios (metas, último dia do mês, PDF), telefone, CPF/CNPJ, dinheiro, voz
+npm run test:db   # 99 testes: migrations reais num Postgres embutido — isolamento, bloqueio, permissões, deduplicação, 9º dígito, limites, painel, agendamentos, mensagens agendadas (sem envio duplicado)
 npm run typecheck
 npm run build
 ```

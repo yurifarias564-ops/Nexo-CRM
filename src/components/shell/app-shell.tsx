@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart } from "lucide-react";
+import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -17,6 +17,7 @@ const NAV = [
   { href: "/inbox", label: "Conversas", icon: MessageCircle },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/agendadas", label: "Agendadas", icon: CalendarClock },
+  { href: "/time", label: "Time comercial", icon: UsersRound },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart },
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
@@ -117,9 +118,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-ink-950/60 px-4 backdrop-blur md:px-6">
           <div className="md:hidden"><Logo compact /></div>
-          <nav className="flex gap-1 md:hidden">
+          <nav className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] md:hidden">
             {NAV.map(({ href, icon: I, label }) => (
-              <Link key={href} href={href} aria-label={label} className={cn("rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>
+              <Link key={href} href={href} aria-label={label} className={cn("shrink-0 rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>
                 <I className="h-4 w-4" />
               </Link>
             ))}
@@ -127,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <h1 className="hidden text-sm font-medium text-slate-300 md:block">
             {NAV.find((n) => path.startsWith(n.href))?.label}
           </h1>
-          <div className="ml-auto"><VoiceCommand /></div>
+          <div className="ml-auto shrink-0"><VoiceCommand /></div>
         </header>
         <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
       </div>
