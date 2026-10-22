@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  html, body { height: 100%; }
+  body {
+    @apply bg-ink-950 text-slate-200 antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 10% -10%, rgba(30, 58, 138, 0.22), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, rgba(37, 99, 235, 0.10), transparent 60%);
+    background-attachment: fixed;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection { background: rgba(59, 130, 246, 0.35); }
+  *:focus-visible { @apply outline-none ring-2 ring-brand-400/70 ring-offset-0; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(96, 165, 250, 0.14); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(96, 165, 250, 0.28); background-clip: padding-box; border: 3px solid transparent; }
+}
+
+@layer components {
+  .surface { @apply bg-ink-900/80 border border-line backdrop-blur-sm; }
+  .card { @apply rounded-xl bg-ink-850 border border-line shadow-card; }
+  .label { @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400; }
+  .field {
+    @apply h-10 w-full rounded-lg border border-line bg-ink-950/60 px-3 text-sm text-slate-100
+      placeholder:text-slate-500 transition focus:border-brand-400/60 focus:ring-2 focus:ring-brand-500/25;
+  }
+  .chat-bg {
+    background-color: #050912;
+    background-image: radial-gradient(rgba(59,130,246,.06) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+}
