@@ -274,7 +274,7 @@ await expectError("lançamento no futuro é recusado", () => as(A, "insert into 
 await expectError("valor negativo é recusado", () => as(A, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date-1,-1,$4)", [orgA, sBia, mInsta, A]), "23514");
 ok("mesmo dia atualiza (não duplica)", (await as(C, "insert into public.team_entries (organization_id, seller_id, metric_id, day, value, updated_by) values ($1,$2,$3,current_date,9,$4) on conflict (seller_id, metric_id, day) do update set value=excluded.value, updated_by=excluded.updated_by returning value", [orgA, sBia, mInsta, C]))[0].value === "9.00");
 await as(A, "update public.leads set assigned_to=$1 where id=$2", [A, leadA]);
-const tv = await as(A, "select seller_id, metric_id, value::float v from public.team_values($1, current_date - 30, current_date, 'UTC')", [orgA]);
+const tv = await as(A, "select seller_id, metric_id, value::float v from public.team_values($1, current_date - 30, current_date, current_setting('TimeZone'))", [orgA]);
 const sum = (sel, met) => tv.filter((r) => r.seller_id === sel && r.metric_id === met).reduce((a, r) => a + r.v, 0);
 ok("time: lançamentos manuais somados", sum(sBia, mInsta) === 9 && sum(sCarla, mInsta) === 12, JSON.stringify(tv));
 ok("time: ligações da vendedora vêm do CRM", sum(sAna, mCalls) === 2, String(sum(sAna, mCalls)));
