@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Empty, Field, Modal, Spinner } from "@/components/ui/misc";
 import { Section } from "./section";
 import { EmbeddedSignup, embeddedSignupReady } from "./embedded-signup";
+import { PlatformMeta } from "./platform-meta";
 import { cn, formatPhone, relativeTime } from "@/lib/utils";
 import type { Channel } from "@/lib/types";
 import { useLatest } from "@/lib/hooks";
@@ -73,6 +74,7 @@ export function WhatsAppTab() {
   return (
     <Section title="WhatsApp" text="Conecte quantos números precisar. Ao conectar, o histórico das conversas é importado automaticamente."
       action={<Button size="sm" onClick={() => setAdding("choose")}><Plus className="h-3.5 w-3.5" /> Conectar número</Button>}>
+      <PlatformMeta />
       <ChannelList channels={channels}
         actions={(c) => (
           <>

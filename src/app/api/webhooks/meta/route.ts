@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { env } from "@/lib/env";
+import { webhookVerifyToken } from "@/lib/meta-config";
 import { parseWebhook, verifySignature } from "@/lib/whatsapp/meta";
 import { applyStatuses, ingestBatch } from "@/lib/whatsapp";
 import { parseCallWebhook } from "@/lib/whatsapp/meta-calls";
@@ -12,7 +12,8 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const token = u.searchParams.get("hub.verify_token") ?? "";
-  const expected = env("META_WEBHOOK_VERIFY_TOKEN");
+  let expected = "";
+  try { expected = webhookVerifyToken(); } catch { return new Response("forbidden", { status: 403 }); }
   const okToken = token.length === expected.length && timingSafeEqual(Buffer.from(token), Buffer.from(expected));
   if (u.searchParams.get("hub.mode") === "subscribe" && okToken) {
     return new Response(u.searchParams.get("hub.challenge") ?? "", { status: 200 });

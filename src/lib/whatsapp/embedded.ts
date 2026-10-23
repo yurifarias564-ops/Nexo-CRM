@@ -1,4 +1,5 @@
 import "server-only";
+import { META_APP_ID } from "@/lib/meta-public";
 import { env, envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 
@@ -23,7 +24,7 @@ async function g<T>(path: string, init: RequestInit & { token?: string } = {}): 
 
 /** Troca o código (vale ~30s) pelo token da empresa do cliente. */
 export async function exchangeCode(code: string): Promise<string> {
-  const q = new URLSearchParams({ client_id: env("NEXT_PUBLIC_META_APP_ID"), client_secret: env("META_APP_SECRET"), code });
+  const q = new URLSearchParams({ client_id: META_APP_ID, client_secret: env("META_APP_SECRET"), code });
   const r = await g<{ access_token?: string }>(`/oauth/access_token?${q.toString()}`);
   if (!r.access_token) throw new HttpError(502, "A Meta não devolveu o acesso. Tente conectar de novo.");
   return r.access_token;

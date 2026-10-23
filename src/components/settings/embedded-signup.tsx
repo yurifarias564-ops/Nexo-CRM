@@ -5,12 +5,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
+import { META_APP_ID, META_ES_CONFIG_ID, META_GRAPH_VERSION } from "@/lib/meta-public";
 
 // Conexão do WhatsApp oficial em 1 clique (Cadastro Incorporado da Meta).
 
-const APP_ID = process.env.NEXT_PUBLIC_META_APP_ID ?? "";
-const CONFIG_ID = process.env.NEXT_PUBLIC_META_ES_CONFIG_ID ?? "";
-const GRAPH = process.env.NEXT_PUBLIC_META_GRAPH_VERSION ?? "v23.0";
+const APP_ID = META_APP_ID;
+const CONFIG_ID = META_ES_CONFIG_ID;
+const GRAPH = META_GRAPH_VERSION;
 
 interface FBLoginResponse { authResponse?: { code?: string } | null; status?: string }
 interface FBSdk {
