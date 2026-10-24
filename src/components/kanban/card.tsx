@@ -2,7 +2,7 @@
 import { memo, useEffect, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowDownLeft, ArrowUpRight, Clock } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Camera, Clock, FileSpreadsheet, Globe, MessageCircle, Mic, Tag, ThumbsUp, UserPlus } from "lucide-react";
 import { Avatar, TagPill } from "@/components/ui/misc";
 import { useWorkspace } from "@/components/workspace";
 import { cn, formatBRL } from "@/lib/utils";
@@ -44,13 +44,36 @@ function IdleBadge({ since }: { since: number }) {
   );
 }
 
+/** De onde o lead veio: bolinha colorida no canto da foto. */
+function sourceBadge(l: Lead): { label: string; bg: string; Icon: typeof MessageCircle } | null {
+  const s = (l.source ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (s.includes("whats") || (!s && l.last_message_at)) return { label: "WhatsApp", bg: "bg-[#25D366]", Icon: MessageCircle };
+  if (s.includes("insta")) return { label: "Instagram", bg: "bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#8134af]", Icon: Camera };
+  if (s.includes("face") || s.includes("meta")) return { label: "Facebook", bg: "bg-[#1877F2]", Icon: ThumbsUp };
+  if (s.includes("voz")) return { label: "Comando de voz", bg: "bg-brand-500", Icon: Mic };
+  if (s.includes("import") || s.includes("planilha")) return { label: "Planilha importada", bg: "bg-slate-500", Icon: FileSpreadsheet };
+  if (s.includes("site") || s.includes("form")) return { label: "Site", bg: "bg-sky-600", Icon: Globe };
+  if (s.includes("manual")) return { label: "Cadastro manual", bg: "bg-slate-600", Icon: UserPlus };
+  return s ? { label: l.source!, bg: "bg-slate-600", Icon: Tag } : null;
+}
+
 function LeadPhoto({ lead }: { lead: Lead }) {
   const [broken, setBroken] = useState(false);
-  if (lead.avatar_url && !broken) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={lead.avatar_url} alt="" loading="lazy" onError={() => setBroken(true)} className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-line" />;
-  }
-  return <Avatar name={lead.name} className="h-8 w-8 shrink-0 text-[11px]" />;
+  const badge = sourceBadge(lead);
+  return (
+    <span className="relative shrink-0">
+      {lead.avatar_url && !broken
+        // eslint-disable-next-line @next/next/no-img-element
+        ? <img src={lead.avatar_url} alt="" loading="lazy" onError={() => setBroken(true)} className="h-8 w-8 rounded-full object-cover ring-1 ring-line" />
+        : <Avatar name={lead.name} className="h-8 w-8 text-[11px]" />}
+      {badge && (
+        <span title={`Origem: ${badge.label}`} aria-label={`Origem: ${badge.label}`}
+          className={cn("absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-white ring-2 ring-ink-800", badge.bg)}>
+          <badge.Icon className="h-2 w-2" strokeWidth={3} />
+        </span>
+      )}
+    </span>
+  );
 }
 
 export const LeadCardView = memo(function LeadCardView({ lead, tagIds, dragging, onOpen }: { lead: Lead; tagIds: string[]; dragging?: boolean; onOpen?: () => void }) {
