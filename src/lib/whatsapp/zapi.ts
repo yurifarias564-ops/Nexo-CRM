@@ -65,6 +65,14 @@ export async function lidOf(c: ZapiCreds, phone: string): Promise<string | null>
   return pick(b);
 }
 
+/** Link da foto de perfil do contato (null se não tiver ou for privada). */
+export async function profilePicture(c: ZapiCreds, phone: string): Promise<string | null> {
+  const r = await call<unknown>(c, `profile-picture?phone=${encodeURIComponent(phoneOf(phone))}`).catch(() => null);
+  const v = Array.isArray(r) ? r[0] : r;
+  const link = (v as { link?: unknown } | null)?.link;
+  return typeof link === "string" && link.startsWith("https://") ? link : null;
+}
+
 export async function restart(c: ZapiCreds) { await call(c, "restart"); }
 export async function setWebhooks(c: ZapiCreds, url: string) {
   await call(c, "update-every-webhooks", { method: "PUT", body: { value: url, notifySentByMe: true } });

@@ -10,7 +10,7 @@ import { Filter, KanbanSquare, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
-import { LeadCardView, SortableLeadCard } from "./card";
+import { idleSince, LeadCardView, SortableLeadCard } from "./card";
 import { LeadDrawer } from "@/components/lead/lead-drawer";
 import { ScheduleModal } from "@/components/lead/schedule-modal";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,7 @@ export function KanbanBoard({
   const [q, setQ] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
+  const [ageFilter, setAgeFilter] = useState("");
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
   const [scheduleFor, setScheduleFor] = useState<{ id: string; name: string } | null>(null);
@@ -141,8 +142,14 @@ export function KanbanBoard({
     if (ownerFilter === "me" && l.assigned_to !== ws.userId) return false;
     if (ownerFilter === "none" && l.assigned_to) return false;
     if (ownerFilter && !["me", "none"].includes(ownerFilter) && l.assigned_to !== ownerFilter) return false;
+    if (ageFilter) {
+      // "idle:7" = parado há 7+ dias; "base:7" = criado há 7+ dias
+      const [kind, d] = ageFilter.split(":");
+      const ref = kind === "idle" ? idleSince(l) : new Date(l.created_at).getTime();
+      if (Date.now() - ref < Number(d) * 86_400_000) return false;
+    }
     return true;
-  }, [q, tagFilter, ownerFilter, tagsByLead, ws.userId]);
+  }, [q, tagFilter, ownerFilter, ageFilter, tagsByLead, ws.userId]);
 
   const columns = useMemo(() => {
     const by: Record<string, Lead[]> = Object.fromEntries(stages.map((s) => [s.id, []]));
@@ -242,7 +249,7 @@ export function KanbanBoard({
   }
 
   const active = activeId ? leads[activeId] : null;
-  const hasFilter = Boolean(q || tagFilter || ownerFilter);
+  const hasFilter = Boolean(q || tagFilter || ownerFilter || ageFilter);
 
   return (
     <div className="flex h-full flex-col">
@@ -262,6 +269,20 @@ export function KanbanBoard({
             <option value="">Todas as tags</option>
             {ws.tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
+          <select className="field h-9 w-auto" value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)} aria-label="Filtrar por tempo">
+            <option value="">Qualquer tempo</option>
+            <optgroup label="Parados (sem mensagem nem mudança de etapa)">
+              <option value="idle:3">Parados há 3+ dias</option>
+              <option value="idle:7">Parados há 7+ dias</option>
+              <option value="idle:14">Parados há 14+ dias</option>
+              <option value="idle:30">Parados há 1+ mês</option>
+            </optgroup>
+            <optgroup label="Na base (desde que o lead entrou)">
+              <option value="base:7">Na base há 7+ dias</option>
+              <option value="base:14">Na base há 14+ dias</option>
+              <option value="base:30">Na base há 1+ mês</option>
+            </optgroup>
+          </select>
           <select className="field h-9 w-auto" value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} aria-label="Filtrar por responsável">
             <option value="">Todos os responsáveis</option>
             <option value="me">Meus leads</option>
@@ -269,7 +290,7 @@ export function KanbanBoard({
             {ws.members.filter((m) => m.user_id !== ws.userId).map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name ?? m.email}</option>)}
           </select>
           {hasFilter && (
-            <Button variant="ghost" size="sm" onClick={() => { setQ(""); setTagFilter(""); setOwnerFilter(""); }}><X className="h-3.5 w-3.5" /> Limpar</Button>
+            <Button variant="ghost" size="sm" onClick={() => { setQ(""); setTagFilter(""); setOwnerFilter(""); setAgeFilter(""); }}><X className="h-3.5 w-3.5" /> Limpar</Button>
           )}
         </div>
       </div>

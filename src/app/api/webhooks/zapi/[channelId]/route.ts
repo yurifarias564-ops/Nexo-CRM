@@ -5,6 +5,7 @@ import { lidOf, parseWebhook } from "@/lib/whatsapp/zapi";
 import { applyChanges, applyStatuses, ingestBatch, loadChannel, saveSample, zapiCreds } from "@/lib/whatsapp";
 import { markDown, markUp, tryReconnect } from "@/lib/whatsapp/watchdog";
 import { linkLidsAfter, mapLidsBefore } from "@/lib/whatsapp/zapi-lid";
+import { refreshAvatars } from "@/lib/whatsapp/avatars";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -51,6 +52,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
       await ingestBatch(channelId, evt.messages, false);
       const creds = await loadChannel(channelId).then(zapiCreds).catch(() => null);
       await linkLidsAfter(channelId, evt.messages, creds ? (phone) => lidOf(creds, phone) : undefined);
+      // Lead novo: busca a foto de perfil logo
+      after(() => refreshAvatars(3).then(() => undefined));
     }
     if (evt.statuses.length) await applyStatuses(channelId, evt.statuses);
     if (evt.changes.length) await applyChanges(channelId, evt.changes);

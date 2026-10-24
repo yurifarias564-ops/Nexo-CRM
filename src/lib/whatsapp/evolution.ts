@@ -127,6 +127,14 @@ export async function sendCopyButton(instance: string, to: string, m: { title: s
 
 const jidOf = (to: string) => (to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`);
 
+/** Link da foto de perfil do contato (null se não tiver ou for privada). */
+export async function profilePicture(instance: string, phone: string): Promise<string | null> {
+  const r = await call<{ profilePictureUrl?: string | null }>(`/chat/fetchProfilePictureUrl/${encodeURIComponent(instance)}`, {
+    method: "POST", body: JSON.stringify({ number: phone.replace(/\D/g, "") }),
+  }).catch(() => null);
+  return r?.profilePictureUrl && r.profilePictureUrl.startsWith("https://") ? r.profilePictureUrl : null;
+}
+
 /** Edita uma mensagem de texto enviada. */
 export async function editText(instance: string, to: string, externalId: string, text: string) {
   await call(`/chat/updateMessage/${encodeURIComponent(instance)}`, {

@@ -178,6 +178,15 @@ await expectError("ninguém cadastra chave direto no banco (só pelo servidor, q
 ok("vendedor não exclui chave Pix", (await as(C, "delete from public.pix_keys returning 1")).length === 0);
 await expectError("tipo de chave inválido é recusado", () => su("insert into public.pix_keys (organization_id, key_type, key, holder_name, city) values ($1,'boleto','123','Y','Z')", [orgA]), "23514");
 
+console.log("\n# Card do lead: última mensagem e tempo parado");
+const lv = (await su("select last_message_preview, last_message_dir, stage_changed_at from public.leads where phone='5511912345678'"))[0];
+ok("lead guarda a prévia da última mensagem", lv.last_message_preview === "Olá" && lv.last_message_dir === "in", JSON.stringify(lv));
+const before = (await su("select stage_changed_at from public.leads where id=$1", [leadA]))[0].stage_changed_at;
+await su("select pg_sleep(0.01)");
+await as(A, "update public.leads set stage_id=(select id from public.stages where organization_id=$1 and kind='open' order by position desc limit 1) where id=$2", [orgA, leadA]);
+const after = (await su("select stage_changed_at from public.leads where id=$1", [leadA]))[0].stage_changed_at;
+ok("mudar de etapa zera o tempo parado", new Date(after) > new Date(before));
+
 console.log("\n# Vencimento da assinatura");
 await su("update public.subscriptions set current_period_end=now()-interval '1 day' where organization_id=$1", [orgA]);
 ok("assinatura vencida: acesso bloqueado na hora", (await as(A, "select * from public.leads")).length === 0);

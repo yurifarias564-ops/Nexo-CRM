@@ -1,5 +1,6 @@
 import { isCronRequest } from "@/lib/cron";
 import { watchAll } from "@/lib/whatsapp/watchdog";
+import { refreshAvatars } from "@/lib/whatsapp/avatars";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -9,7 +10,9 @@ export const dynamic = "force-dynamic";
 async function handle(req: Request) {
   if (!isCronRequest(req)) return new Response("unauthorized", { status: 401 });
   try {
-    return Response.json(await watchAll(50_000));
+    const watch = await watchAll(40_000);
+    const avatars = await refreshAvatars(8).catch(() => 0);
+    return Response.json({ watch, avatars });
   } catch (e) {
     console.error("[cron whatsapp-watch]", e);
     return new Response("error", { status: 500 });

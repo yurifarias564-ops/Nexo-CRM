@@ -24,6 +24,7 @@ export interface Lead {
   id: string; organization_id: string; pipeline_id: string; stage_id: string; name: string;
   phone: string | null; email: string | null; value: number; source: string | null; notes: string | null;
   assigned_to: string | null; position: number; last_message_at: string | null; created_at: string; updated_at: string;
+  avatar_url?: string | null; last_message_preview?: string | null; last_message_dir?: MsgDirection | null; stage_changed_at?: string;
 }
 export interface LeadTag { lead_id: string; tag_id: string; organization_id: string }
 export interface Member { user_id: string; role: Role; full_name: string | null; email: string | null }
