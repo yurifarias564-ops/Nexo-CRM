@@ -42,7 +42,7 @@ export const embeddedSignupReady = Boolean(APP_ID && CONFIG_ID);
 
 /** Botão "Conectar WhatsApp oficial": o cliente entra com o Facebook e escolhe o número. */
 export function EmbeddedSignup({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
-  const [mode, setMode] = useState<"new" | "app">("new");
+  const [mode, setMode] = useState<"new" | "app">("app");
   const [busy, setBusy] = useState(false);
 
   async function start() {
@@ -102,8 +102,8 @@ export function EmbeddedSignup({ open, onClose, onDone }: { open: boolean; onClo
   }
 
   const opts = [
-    { v: "new" as const, icon: PhoneCall, t: "Número só para o CRM (recomendado)", d: "Mensagens e ligações pelo CRM, com gravação. O número deixa de funcionar no app do WhatsApp do celular." },
-    { v: "app" as const, icon: Smartphone, t: "Mesmo número do app do celular", d: "Continua usando o WhatsApp Business no celular e no CRM ao mesmo tempo, com o histórico. Sem ligações pelo CRM (limite da Meta)." },
+    { v: "app" as const, icon: Smartphone, t: "Mesmo número do app do celular (padrão)", d: "Coexistência: continua usando o WhatsApp Business no celular e no CRM ao mesmo tempo, com o histórico. Ligações de WhatsApp ficam no celular (limite da Meta)." },
+    { v: "new" as const, icon: PhoneCall, t: "Número só para o CRM", d: "Para um número exclusivo: mensagens e ligações de WhatsApp pelo CRM, com gravação. O número deixa de funcionar no app do celular." },
   ];
 
   return (
