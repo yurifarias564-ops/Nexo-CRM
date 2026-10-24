@@ -1,5 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
-import { env } from "@/lib/env";
+import { isCronRequest } from "@/lib/cron";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { currentPeriod, hourIn, isLastDayOfMonth } from "@/lib/reports/data";
 import { runReport, type ReportSettings } from "@/lib/reports/run";
@@ -13,9 +12,7 @@ const PER_CALL = 4; // ~4 relatórios por chamada (cada um usa IA); o cron roda 
 
 /** Envio automático do relatório mensal no último dia do mês (fuso de cada empresa). */
 async function handle(req: Request) {
-  const got = req.headers.get("authorization") ?? "";
-  const want = `Bearer ${env("CRON_SECRET")}`;
-  if (got.length !== want.length || !timingSafeEqual(Buffer.from(got), Buffer.from(want))) return new Response("unauthorized", { status: 401 });
+  if (!isCronRequest(req)) return new Response("unauthorized", { status: 401 });
 
   const db = supabaseAdmin();
   // Gerações interrompidas há mais de 30 min liberam nova tentativa

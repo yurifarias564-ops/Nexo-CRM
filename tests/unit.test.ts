@@ -500,3 +500,15 @@ test("Pix: BR Code igual ao exemplo do Banco Central e chaves normalizadas", asy
   assert.throws(() => normalizePixKey("cpf", "111.111.111-11"), /CPF inválido/);
   assert.throws(() => normalizePixKey("cnpj", "55.255.981/0001-01"), /CNPJ inválido/);
 });
+
+test("WhatsApp QR: queda com sessão encerrada pede QR; queda comum reconecta", async () => {
+  const { LOGGED_OUT_CODES, backoffFor } = await import("@/lib/whatsapp/watchdog");
+  const closed = parseEvo({ event: "connection.update", data: { instance: "x", state: "close", statusReason: 401 } });
+  assert.equal(closed.connection, "close");
+  assert.equal(closed.reason, 401);
+  assert.ok(LOGGED_OUT_CODES.has(closed.reason!));
+  const drop = parseEvo({ event: "CONNECTION_UPDATE", data: { state: "close", statusReason: 428 } });
+  assert.ok(!LOGGED_OUT_CODES.has(drop.reason!));
+  assert.equal(backoffFor(0), 5);
+  assert.equal(backoffFor(99), 300, "espera máxima de 5 min entre tentativas");
+});

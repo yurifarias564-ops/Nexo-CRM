@@ -1,3 +1,5 @@
+import { after } from "next/server";
+import { LOGGED_OUT_CODES, markDown, markUp, tryReconnect } from "@/lib/whatsapp/watchdog";
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { parseWebhook, ownerNumber } from "@/lib/whatsapp/evolution";
@@ -15,7 +17,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
   const db = supabaseAdmin();
   const { data: sec } = await db
     .from("whatsapp_channel_secrets")
-    .select("webhook_secret, whatsapp_channels!inner(id, evolution_instance, status)")
+    .select("webhook_secret, whatsapp_channels!inner(id, evolution_instance, status, phone_number)")
     .eq("channel_id", channelId)
     .maybeSingle();
   if (!sec) return new Response("not found", { status: 404 });
@@ -36,12 +38,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
   try {
     const evt = parseWebhook(payload);
     if (evt.connection) {
-      const status = evt.connection === "open" ? "connected" : evt.connection === "connecting" ? "connecting" : "disconnected";
-      const ch = (Array.isArray(sec.whatsapp_channels) ? sec.whatsapp_channels[0] : sec.whatsapp_channels) as { evolution_instance: string | null } | undefined;
-      const phone = status === "connected" && ch?.evolution_instance ? await ownerNumber(ch.evolution_instance) : null;
-      await db.from("whatsapp_channels")
-        .update({ status, last_error: null, ...(phone ? { phone_number: phone } : {}) })
-        .eq("id", channelId);
+      const ch = (Array.isArray(sec.whatsapp_channels) ? sec.whatsapp_channels[0] : sec.whatsapp_channels) as { evolution_instance: string | null; phone_number: string | null } | undefined;
+      const everConnected = Boolean(ch?.phone_number);
+      if (evt.connection === "open") {
+        await markUp(channelId, ch?.evolution_instance ? await ownerNumber(ch.evolution_instance).catch(() => null) : null);
+      } else if (evt.connection === "close" && !everConnected) {
+        // Ainda no primeiro QR Code (nunca conectou): não é queda
+        await db.from("whatsapp_channels").update({ status: "disconnected" }).eq("id", channelId);
+      } else if (evt.connection === "close") {
+        const loggedOut = evt.reason !== undefined && LOGGED_OUT_CODES.has(evt.reason);
+        await markDown(channelId, { needsQr: loggedOut });
+        // Caiu sem encerrar a sessão: tenta voltar já, sem esperar o vigia
+        if (!loggedOut) after(() => tryReconnect(channelId).then(() => undefined));
+      } else {
+        await db.from("whatsapp_channels").update({ status: "connecting" }).eq("id", channelId).neq("status", "connected");
+      }
     }
     if (evt.messages.length) {
       await ingestBatch(channelId, evt.messages, evt.historical);

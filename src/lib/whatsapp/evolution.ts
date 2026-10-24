@@ -42,6 +42,11 @@ export async function connect(instance: string) {
   return call<{ base64?: string; code?: string; pairingCode?: string | null }>(`/instance/connect/${encodeURIComponent(instance)}`);
 }
 
+/** Reinicia a conexão da instância (reaproveita a sessão salva, sem QR). */
+export async function restart(instance: string) {
+  return call(`/instance/restart/${encodeURIComponent(instance)}`, { method: "POST" }, 30_000);
+}
+
 export async function connectionState(instance: string): Promise<"open" | "connecting" | "close"> {
   const r = await call<{ instance?: { state?: string } }>(`/instance/connectionState/${encodeURIComponent(instance)}`);
   const s = r.instance?.state;
@@ -259,6 +264,8 @@ export interface EvolutionEvent {
   historical: boolean;
   statuses: StatusUpdate[];
   connection?: "open" | "connecting" | "close";
+  /** Código do motivo da queda (401/403/402/406 = sessão encerrada: precisa QR de novo). */
+  reason?: number;
   qr?: string;
 }
 
@@ -291,6 +298,8 @@ export function parseWebhook(payload: unknown): EvolutionEvent {
   } else if (event === "connection.update") {
     const s = (data as { state?: string })?.state;
     if (s === "open" || s === "connecting" || s === "close") out.connection = s;
+    const r = Number((data as { statusReason?: unknown })?.statusReason);
+    if (Number.isFinite(r)) out.reason = r;
   } else if (event === "qrcode.updated") {
     const q = (data as { qrcode?: { base64?: string } })?.qrcode?.base64;
     if (q) out.qr = q;

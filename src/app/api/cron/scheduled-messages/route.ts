@@ -1,5 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
-import { env } from "@/lib/env";
+import { isCronRequest } from "@/lib/cron";
 import { dispatchDue } from "@/lib/scheduled";
 
 export const runtime = "nodejs";
@@ -11,11 +10,7 @@ export const dynamic = "force-dynamic";
  * Supabase (ou por qualquer agendador) com "Authorization: Bearer CRON_SECRET".
  */
 async function handle(req: Request) {
-  const got = req.headers.get("authorization") ?? "";
-  const want = `Bearer ${env("CRON_SECRET")}`;
-  if (got.length !== want.length || !timingSafeEqual(Buffer.from(got), Buffer.from(want))) {
-    return new Response("unauthorized", { status: 401 });
-  }
+  if (!isCronRequest(req)) return new Response("unauthorized", { status: 401 });
   try {
     const total = { claimed: 0, sent: 0, retried: 0, failed: 0 };
     // Até 4 lotes por chamada (200 mensagens/minuto); para quando esvaziar
