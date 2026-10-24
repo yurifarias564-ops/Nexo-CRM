@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
+import { assertCanSee } from "@/lib/access";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
@@ -31,11 +32,13 @@ export async function POST(req: Request) {
     let phone = b.phone ?? null;
     let name: string | null = null;
     if (conversationId) {
+      await assertCanSee("conversation", conversationId);
       const { data: c } = await db.from("conversations").select("id, organization_id, wa_id, lead_id, contact_name").eq("id", conversationId).maybeSingle();
       if (!c || c.organization_id !== ctx.org.id) throw new HttpError(404, "Conversa não encontrada");
       leadId = leadId ?? c.lead_id; phone = phone ?? c.wa_id; name = c.contact_name;
     }
     if (leadId) {
+      await assertCanSee("lead", leadId);
       const { data: l } = await db.from("leads").select("id, organization_id, name, phone").eq("id", leadId).maybeSingle();
       if (!l || l.organization_id !== ctx.org.id) throw new HttpError(404, "Lead não encontrado");
       phone = phone ?? l.phone; name = l.name ?? name;

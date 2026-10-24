@@ -13,14 +13,14 @@ import { CallProvider } from "@/components/calls/call-provider";
 import { VoipProvider } from "@/components/calls/voip-provider";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boolean }[] = [
   { href: "/dashboard", label: "Painel", icon: BarChart3 },
-  { href: "/pipeline", label: "Funil", icon: KanbanSquare },
-  { href: "/inbox", label: "Conversas", icon: MessageCircle },
+  { seller: true, href: "/pipeline", label: "Funil", icon: KanbanSquare },
+  { seller: true, href: "/inbox", label: "Conversas", icon: MessageCircle },
   { href: "/ligacoes", label: "Ligações", icon: PhoneCall },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/agendadas", label: "Agendadas", icon: CalendarClock },
-  { href: "/time", label: "Time comercial", icon: UsersRound },
+  { seller: true, href: "/time", label: "Time comercial", icon: UsersRound },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart },
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
@@ -48,6 +48,7 @@ function useUnread(orgId: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const ws = useWorkspace();
+  const nav = ws.role === "agent" ? NAV.filter((n) => n.seller) : NAV;
   const path = usePathname();
   const router = useRouter();
   const unread = useUnread(ws.orgId);
@@ -88,7 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="mt-6 flex-1 space-y-1 px-3">
-          {NAV.map(({ href, label, icon: I }) => {
+          {nav.map(({ href, label, icon: I }) => {
             const active = path.startsWith(href);
             return (
               <Link key={href} href={href} prefetch
@@ -109,7 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Avatar name={ws.userName} className="h-8 w-8" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-slate-100">{ws.userName}</p>
-              <p className="text-xs capitalize text-slate-500">{ws.role === "owner" ? "Proprietário" : ws.role === "admin" ? "Administrador" : "Atendente"}</p>
+              <p className="text-xs capitalize text-slate-500">{ws.role === "owner" ? "Proprietário" : ws.role === "admin" ? "Administrador" : "Vendedor"}</p>
             </div>
             <button onClick={logout} className="rounded-md p-1.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200" aria-label="Sair" title="Sair">
               <LogOut className="h-4 w-4" />
@@ -122,7 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-ink-950/60 px-4 backdrop-blur md:px-6">
           <div className="md:hidden"><Logo compact /></div>
           <nav className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] md:hidden">
-            {NAV.map(({ href, icon: I, label }) => (
+            {nav.map(({ href, icon: I, label }) => (
               <Link key={href} href={href} aria-label={label} className={cn("shrink-0 rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>
                 <I className="h-4 w-4" />
               </Link>

@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, BarChart3, RefreshCw } from "lucide-react";
+import { ArrowDownLeft, ArrowDownRight, ArrowUpRight, BarChart3, Minus, RefreshCw } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ type Stats = {
   by_stage: { id: string; name: string; color: string; kind: string; pipeline: string; count: number; value: number }[];
   by_source: { name: string; count: number }[];
   by_tag: { name: string; color: string; count: number }[];
-  by_owner: { user_id: string | null; won_count: number; won_value: number }[];
+  by_owner: { user_id: string | null; won_count: number; won_value: number; lost_count?: number; new_leads?: number; open_value?: number }[];
   messages: { day: string; in: number; out: number }[];
 };
 
@@ -31,6 +31,7 @@ const PERIODS = [
   { id: "30", label: "30 dias" },
   { id: "90", label: "90 dias" },
   { id: "month", label: "Este mês" },
+  { id: "last", label: "Mês passado" },
 ] as const;
 type PeriodId = (typeof PERIODS)[number]["id"];
 
@@ -41,9 +42,26 @@ function range(p: PeriodId): [Date, Date] {
   const from = new Date();
   from.setHours(0, 0, 0, 0);
   if (p === "month") from.setDate(1);
-  else from.setDate(from.getDate() - (Number(p) - 1));
+  else if (p === "last") {
+    from.setDate(1); from.setMonth(from.getMonth() - 1);
+    const end2 = new Date(from); end2.setMonth(end2.getMonth() + 1);
+    return [from, end2];
+  } else from.setDate(from.getDate() - (Number(p) - 1));
   return [from, to];
 }
+
+/** Este mês até hoje × mesmo trecho do mês passado (do dia 1 até o mesmo dia) × mês passado inteiro. */
+function monthRanges(): { cur: [Date, Date]; prevSame: [Date, Date]; prevFull: [Date, Date] } {
+  const now = new Date();
+  const curFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+  const curTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const prevFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevFullTo = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastDayPrev = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+  const prevSameTo = new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), lastDayPrev) + 1);
+  return { cur: [curFrom, curTo], prevSame: [prevFrom, prevSameTo], prevFull: [prevFrom, prevFullTo] };
+}
+const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
 
 const compactBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: v >= 100000 ? "compact" : "standard", maximumFractionDigits: v >= 100000 ? 1 : 0 }).format(v);
@@ -51,27 +69,32 @@ const compactBRL = (v: number) =>
 export function Dashboard() {
   const ws = useWorkspace();
   const [period, setPeriod] = useState<PeriodId>("30");
+  const [seller, setSeller] = useState<string>("");
   const [stats, setStats] = useState<Stats | null>(null);
+  const [cmp, setCmp] = useState<{ cur: Stats; prevSame: Stats; prevFull: Stats } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (p: PeriodId) => {
+  const load = useCallback(async (p: PeriodId, who: string) => {
     setLoading(true);
-    const [from, to] = range(p);
-    const { data, error: err } = await supabaseBrowser().rpc("dashboard_stats", {
-      org: ws.orgId, p_from: from.toISOString(), p_to: to.toISOString(),
-      p_tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo",
+    const sb = supabaseBrowser();
+    const call = ([from, to]: [Date, Date]) => sb.rpc("dashboard_stats", {
+      org: ws.orgId, p_from: from.toISOString(), p_to: to.toISOString(), p_tz: tz(), p_seller: who || null,
     });
+    const m = monthRanges();
+    const [main, c1, c2, c3] = await Promise.all([call(range(p)), call(m.cur), call(m.prevSame), call(m.prevFull)]);
     setLoading(false);
-    if (err) { setError("Não foi possível carregar as métricas."); return; }
+    if (main.error) { setError("Não foi possível carregar as métricas."); return; }
     setError(null);
-    setStats(data as Stats);
+    setStats(main.data as Stats);
+    setCmp(c1.error || c2.error || c3.error ? null : { cur: c1.data as Stats, prevSame: c2.data as Stats, prevFull: c3.data as Stats });
   }, [ws.orgId]);
 
   useEffect(() => {
-    const t = setTimeout(() => void load(period), 0);
+    const t = setTimeout(() => void load(period, seller), 0);
     return () => clearTimeout(t);
-  }, [load, period]);
+  }, [load, period, seller]);
+  const sellerName = (id: string | null) => { const m = id ? ws.memberById.get(id) : null; return m?.full_name ?? m?.email ?? "Sem responsável"; };
 
   const conversion = stats && stats.won_count + stats.lost_count > 0
     ? Math.round((stats.won_count / (stats.won_count + stats.lost_count)) * 100) : null;
@@ -90,7 +113,11 @@ export function Dashboard() {
               </button>
             ))}
           </div>
-          <Button variant="ghost" size="sm" onClick={() => load(period)} loading={loading} aria-label="Atualizar">
+          <select className="field h-9 w-auto text-sm" value={seller} onChange={(e) => setSeller(e.target.value)} aria-label="Vendedor">
+            <option value="">Todos os vendedores (geral)</option>
+            {ws.members.map((m) => <option key={m.user_id} value={m.user_id}>{m.full_name || m.email}</option>)}
+          </select>
+          <Button variant="ghost" size="sm" onClick={() => load(period, seller)} loading={loading} aria-label="Atualizar">
             {!loading && <RefreshCw className="h-3.5 w-3.5" />} Atualizar
           </Button>
         </div>
@@ -108,6 +135,8 @@ export function Dashboard() {
               <Tile label="Mensagens" value={(msgIn + msgOut).toLocaleString("pt-BR")}
                 sub={<span className="inline-flex gap-3"><span className="inline-flex items-center gap-1"><ArrowDownLeft className="h-3 w-3" />{msgIn.toLocaleString("pt-BR")}</span><span className="inline-flex items-center gap-1"><ArrowUpRight className="h-3 w-3" />{msgOut.toLocaleString("pt-BR")}</span></span>} />
             </section>
+
+            {cmp && <MonthCompare cmp={cmp} who={seller ? sellerName(seller) : "Todos os vendedores"} />}
 
             <div className="grid gap-4 lg:grid-cols-5">
               <Card title="Funil por etapa" className="lg:col-span-3" hint="Leads em cada etapa agora">
@@ -129,18 +158,19 @@ export function Dashboard() {
               <Card title="Tags mais usadas" hint="Entre os leads novos do período">
                 <HBars rows={stats.by_tag.map((t) => ({ key: t.name, label: t.name, value: t.count, detail: `${t.count} leads`, dot: t.color }))} empty="Nenhuma tag nos leads novos" />
               </Card>
-              <Card title="Vendas por responsável" hint="Ganhos no período">
+              <Card title="Resultado por vendedor" hint="No período · clique para ver só os dados dele">
                 {stats.by_owner.length ? (
                   <table className="w-full text-sm">
                     <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
-                      <tr><th className="pb-2 font-medium">Responsável</th><th className="pb-2 text-right font-medium">Vendas</th><th className="pb-2 text-right font-medium">Valor</th></tr>
+                      <tr><th className="pb-2 font-medium">Vendedor</th><th className="pb-2 text-right font-medium">Leads</th><th className="pb-2 text-right font-medium">Vendas</th><th className="pb-2 text-right font-medium">Valor</th></tr>
                     </thead>
                     <tbody>
                       {stats.by_owner.map((o) => {
-                        const m = o.user_id ? ws.memberById.get(o.user_id) : null;
                         return (
-                          <tr key={o.user_id ?? "none"} className="border-t border-line/60">
-                            <td className="py-2 text-slate-200">{m?.full_name ?? m?.email ?? "Sem responsável"}</td>
+                          <tr key={o.user_id ?? "none"} className={cn("border-t border-line/60", o.user_id && "cursor-pointer hover:bg-white/[.03]")}
+                            onClick={() => o.user_id && setSeller(o.user_id)} title={o.user_id ? "Ver só este vendedor" : undefined}>
+                            <td className="py-2 text-slate-200">{sellerName(o.user_id)}</td>
+                            <td className="py-2 text-right tabular-nums text-slate-300">{o.new_leads ?? "—"}</td>
                             <td className="py-2 text-right tabular-nums text-slate-300">{o.won_count}</td>
                             <td className="py-2 text-right tabular-nums text-slate-100">{formatBRL(Number(o.won_value))}</td>
                           </tr>
@@ -148,13 +178,69 @@ export function Dashboard() {
                       })}
                     </tbody>
                   </table>
-                ) : <Empty icon={<BarChart3 className="h-5 w-5" />} title="Nenhuma venda ganha no período" text="Mova leads para uma etapa marcada como Ganho." />}
+                ) : <Empty icon={<BarChart3 className="h-5 w-5" />} title="Nenhum resultado no período" text="Leads novos e vendas ganhas de cada vendedor aparecem aqui." />}
               </Card>
             </div>
           </>
         )}
       </div>
     </div>
+  );
+}
+
+type Cmp = { cur: Stats; prevSame: Stats; prevFull: Stats };
+
+function MonthCompare({ cmp, who }: { cmp: Cmp; who: string }) {
+  const now = new Date();
+  const mName = (d: Date) => d.toLocaleDateString("pt-BR", { month: "long" });
+  const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const conv = (s: Stats) => (s.won_count + s.lost_count ? Math.round((s.won_count / (s.won_count + s.lost_count)) * 100) : null);
+  const rows: { label: string; cur: number | null; same: number | null; full: number | null; fmt: (v: number) => string }[] = [
+    { label: "Leads novos", cur: cmp.cur.new_leads, same: cmp.prevSame.new_leads, full: cmp.prevFull.new_leads, fmt: (v) => v.toLocaleString("pt-BR") },
+    { label: "Vendas (qtd.)", cur: cmp.cur.won_count, same: cmp.prevSame.won_count, full: cmp.prevFull.won_count, fmt: (v) => v.toLocaleString("pt-BR") },
+    { label: "Vendas (R$)", cur: Number(cmp.cur.won_value), same: Number(cmp.prevSame.won_value), full: Number(cmp.prevFull.won_value), fmt: (v) => formatBRL(v) },
+    { label: "Conversão", cur: conv(cmp.cur), same: conv(cmp.prevSame), full: conv(cmp.prevFull), fmt: (v) => `${v}%` },
+  ];
+  return (
+    <Card title={`${mName(now)[0]!.toUpperCase()}${mName(now).slice(1)} × ${mName(prev)}`} hint={`${who} · comparação justa: do dia 1 até hoje nos dois meses`}>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="pb-2 font-medium">Indicador</th>
+              <th className="pb-2 text-right font-medium">Este mês (até hoje)</th>
+              <th className="pb-2 text-right font-medium">Mês passado (até o mesmo dia)</th>
+              <th className="pb-2 text-right font-medium">Variação</th>
+              <th className="pb-2 text-right font-medium">Mês passado inteiro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-t border-line/60">
+                <td className="py-2 text-slate-300">{r.label}</td>
+                <td className="py-2 text-right font-semibold tabular-nums text-white">{r.cur === null ? "—" : r.fmt(r.cur)}</td>
+                <td className="py-2 text-right tabular-nums text-slate-300">{r.same === null ? "—" : r.fmt(r.same)}</td>
+                <td className="py-2 text-right"><Delta cur={r.cur} prev={r.same} points={r.label === "Conversão"} /></td>
+                <td className="py-2 text-right tabular-nums text-slate-500">{r.full === null ? "—" : r.fmt(r.full)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function Delta({ cur, prev, points }: { cur: number | null; prev: number | null; points?: boolean }) {
+  if (cur === null || prev === null) return <span className="text-xs text-slate-500">—</span>;
+  const diff = cur - prev;
+  if (diff === 0) return <span className="inline-flex items-center gap-1 text-xs text-slate-400"><Minus className="h-3 w-3" /> igual</span>;
+  const up = diff > 0;
+  const label = points ? `${up ? "+" : ""}${diff} p.p.` : prev === 0 ? (up ? "novo" : "—") : `${up ? "+" : ""}${Math.round((diff / prev) * 100)}%`;
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums", up ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300")}>
+      {up ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />} {label}
+    </span>
   );
 }
 

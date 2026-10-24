@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
+import { assertCanSee } from "@/lib/access";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
@@ -21,6 +22,7 @@ export async function GET(req: Request) {
   try {
     const ctx = await requireApiContext();
     const conversationId = UUID.parse(new URL(req.url).searchParams.get("conversationId"));
+    await assertCanSee("conversation", conversationId);
     const t = await callTarget(ctx.org.id, conversationId);
     await rateLimit(`call-perm:${ctx.userId}`, 60, 60);
     const p = await mc.getPermission(t.pnid, t.token, t.conv.wa_id);
@@ -42,6 +44,7 @@ export async function POST(req: Request) {
     const ctx = await requireApiContext();
     const b = Body.parse(await readJson(req, 8_000));
     await rateLimit(`call-perm-req:${ctx.userId}`, 20, 3600, "Muitos pedidos de permissão nesta hora.");
+    await assertCanSee("conversation", b.conversationId);
     const t = await callTarget(ctx.org.id, b.conversationId);
     if (!(await windowOpen(b.conversationId))) {
       throw new HttpError(409, "Pela regra da Meta, o pedido de permissão só pode ser enviado até 24h depois da última mensagem do cliente. Peça para ele responder qualquer coisa e tente de novo.");

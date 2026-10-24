@@ -47,9 +47,18 @@ export function TeamPage() {
             : empty && tab === "checklist" ? (
               <div className="card flex flex-col items-center gap-3 px-6 py-14 text-center">
                 <UsersRound className="h-8 w-8 text-brand-300" />
-                <p className="font-medium text-white">Cadastre o time e as metas</p>
-                <p className="max-w-md text-sm text-slate-400">Pessoas (SDR ou Closer), lojas, e o que cada função precisa bater por dia, semana e mês. Tem modelos prontos para começar em 1 clique.</p>
-                {ws.canManage ? <Button onClick={() => setTab("setup")}>Configurar agora</Button> : <p className="text-sm text-slate-500">Peça para um administrador configurar.</p>}
+                {ws.canManage ? (
+                  <>
+                    <p className="font-medium text-white">Cadastre o time e as metas</p>
+                    <p className="max-w-md text-sm text-slate-400">Pessoas (SDR ou Closer), lojas, e o que cada função precisa bater por dia, semana e mês. Tem modelos prontos para começar em 1 clique.</p>
+                    <Button onClick={() => setTab("setup")}>Configurar agora</Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-white">Seu acompanhamento ainda não foi ligado</p>
+                    <p className="max-w-md text-sm text-slate-400">Peça ao administrador para, em Time comercial → Configurar, escolher o seu login na sua linha. Aí suas metas e resultados aparecem aqui.</p>
+                  </>
+                )}
               </div>
             )
               : tab === "checklist" ? <Checklist base={base} reloadBase={reload} />

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
+import { assertCanSee } from "@/lib/access";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
@@ -20,6 +21,7 @@ export async function POST(req: Request) {
     const ctx = await requireApiContext();
     const b = Body.parse(await readJson(req, 40_000));
     await rateLimit(`call-start:${ctx.userId}`, 30, 3600, "Muitas ligações nesta hora. Aguarde um pouco.");
+    await assertCanSee("conversation", b.conversationId);
     const t = await callTarget(ctx.org.id, b.conversationId);
     const db = supabaseAdmin();
     await expireStale(ctx.org.id);

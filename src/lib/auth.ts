@@ -76,6 +76,13 @@ export async function requireAppContext() {
   return ctx as SessionContext & { org: Organization; role: Role };
 }
 
+/** Páginas só de dono/administrador: o vendedor volta para o Funil. */
+export async function requireManagerPage() {
+  const ctx = await requireAppContext();
+  if (ctx.role === "agent") redirect("/pipeline");
+  return ctx;
+}
+
 /** Para rotas de API: mesmas regras, mas lança erro HTTP em vez de redirecionar. */
 export async function requireApiContext(opts: { manage?: boolean; allowInactive?: boolean } = {}) {
   const ctx = await getSessionContext();
