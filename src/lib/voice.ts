@@ -135,10 +135,24 @@ export async function interpret(
     `Agora é ${context.now}, fuso ${context.timeZone}. Converta datas faladas para esse fuso: "amanhã às 10 horas" = dia seguinte 10:00; "sexta às 15h30" = próxima sexta 15:30; "meio-dia" = 12:00; "10 da noite" = 22:00; só a hora sem dia = hoje se ainda não passou, senão amanhã.`,
     "Agendamento: quando o usuário falar em agendar/agendamento/marcar com um horário, chame schedule_meeting. O sistema já move o lead para a etapa de agendamento sozinho, então NÃO chame move_lead para essa etapa junto.",
     "Mensagem agendada: quando o usuário quiser que uma mensagem seja ENVIADA ao cliente no futuro (\"entrar em contato dia 31\", \"mande para ele na segunda\", \"retomar contato no fim do mês\"), chame schedule_message com o texto que o cliente vai receber. Data sem horário = 09:00; \"final do mês\" sem dia = último dia do mês às 09:00. Não confunda com schedule_meeting, que é compromisso na agenda do vendedor.",
-    "O texto vem de reconhecimento de voz e pode ter palavras trocadas por som parecido (\"feed\"/\"lide\" = lead, \"AirTag\"/\"a tag\" = tag, \"etapa\"/\"coluna\" = etapa). Interprete pela intenção. Sempre chame frase_entendida primeiro com a frase corrigida.",
+    "O texto vem de reconhecimento de voz e pode ter palavras trocadas por som parecido (\"feed\"/\"lide\" = lead, \"AirTag\"/\"a tag\" = tag, \"etapa\"/\"coluna\" = etapa). Interprete pela intenção. Sempre chame frase_entendida primeiro com a frase corrigida e, na MESMA resposta, chame também as ferramentas de cada ação pedida.",
     "Se o comando não for uma ação de CRM, chame só frase_entendida e responda em uma frase curta.",
   ].join("\n");
 
+  const first = await askClaude(system, TOOLS, transcript);
+  let { calls, reply } = first;
+  const heard = first.heard;
+  // Às vezes o modelo só devolve a frase corrigida e para. Repete com a frase já corrigida,
+  // sem a ferramenta de correção, para obter as ações.
+  if (calls.length === 0 && heard) {
+    const second = await askClaude(system, TOOLS.filter((t) => t.name !== "frase_entendida"), heard);
+    calls = second.calls;
+    reply = second.reply ?? reply;
+  }
+  return { calls, reply, heard };
+}
+
+async function askClaude(system: string, tools: typeof TOOLS, text: string) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -150,9 +164,9 @@ export async function interpret(
       model: envOptional("ANTHROPIC_MODEL", "claude-haiku-5-5"),
       max_tokens: 1024,
       system,
-      tools: TOOLS,
+      tools,
       tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: transcript }],
+      messages: [{ role: "user", content: text }],
     }),
     signal: AbortSignal.timeout(30_000),
   });
