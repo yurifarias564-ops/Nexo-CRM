@@ -184,65 +184,36 @@ export const PIX_MIME = "application/x-pix";
  *  - API oficial: cartão de pagamento Pix da Meta quando a conta tem o recurso; senão, mensagens de texto.
  * Se o formato especial falhar, cai para texto (resumo + código Copia e Cola), que sempre funciona.
  */
-/**
- * Código Copia e Cola como mensagem de texto (botões de "copiar" nem sempre são entregues
- * pelo WhatsApp em conexões por QR Code). Primeiro a explicação, depois só o código.
- */
-async function sendPixCode(r: Resolved, p: PixInput, brl: string, userId: string, out: string[]) {
-  const head = [`💠 *Pix de ${brl}*`, p.description ? `Referente a: ${p.description}` : null,
-    "Copie o código da próxima mensagem e cole no app do banco em *Pix Copia e Cola*."].filter(Boolean).join("\n");
-  const a = await sendTextVia(r.channel, r.sendTo, head);
-  out.push(await record(r, a, "text", head, null, null, userId));
-  const b = await sendTextVia(r.channel, r.sendTo, p.code);
-  out.push(await record(r, b, "text", `💠 Pix Copia e Cola — ${brl}\n${p.code}`, null, PIX_MIME, userId));
-}
-
 export async function sendPix(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, p: PixInput) {
   const r = await resolveTarget(sb, orgId, t);
   if (!(await isWindowOpen(r))) throw new WindowClosedError();
   const brl = p.amount ? p.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
   const label = `${{ cpf: "CPF", cnpj: "CNPJ", phone: "Celular", email: "E-mail", random: "Chave aleatória" }[p.keyType]}: ${p.keyDisplay}`;
   const cardBody = ["💠 Pix", label, brl ? `Valor: ${brl}` : null, p.description ? `Ref.: ${p.description}` : null].filter(Boolean).join("\n");
-  const out: string[] = [];
-  let native = false;
-
+  // Uma mensagem só: o cartão Pix do WhatsApp com a chave cadastrada (e o valor no título)
+  const title = (brl ? `${p.holderName} · ${brl}` : p.holderName).slice(0, 60);
+  let id: string | null = null;
   try {
-    if (r.channel.provider === "meta") {
-      if (p.amount) {
-        const { auth, pid } = metaAuth(r);
-        const id = await meta.sendPixOrder(pid, auth, r.sendTo, {
-          referenceId: p.txid, amountCents: Math.round(p.amount * 100), description: p.description || `Pagamento para ${p.holderName}`,
-          code: p.code, merchantName: p.holderName, key: p.key, keyType: META_KEY_TYPE[p.keyType],
-        });
-        out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
-        native = true;
-      }
-    } else if (r.channel.provider === "zapi") {
-      const c = zapiCreds(r.channel);
-      const id = await zapi.sendPixCard(c, r.sendTo, { name: p.holderName, keyType: p.keyType, key: p.key });
-      out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
-      if (p.amount) await sendPixCode(r, p, brl!, userId, out);
-      native = true;
-    } else {
-      const inst = r.channel.evolution_instance!;
-      const id = await evo.sendPixCard(inst, r.sendTo, { name: p.holderName, keyType: p.keyType, key: p.key });
-      out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
-      if (p.amount) await sendPixCode(r, p, brl!, userId, out);
-      native = true;
+    if (r.channel.provider === "zapi") {
+      id = await zapi.sendPixCard(zapiCreds(r.channel), r.sendTo, { name: title, keyType: p.keyType, key: p.key });
+    } else if (r.channel.provider === "evolution") {
+      id = await evo.sendPixCard(r.channel.evolution_instance!, r.sendTo, { name: title, keyType: p.keyType, key: p.key });
+    } else if (p.amount) {
+      const { auth, pid } = metaAuth(r);
+      id = await meta.sendPixOrder(pid, auth, r.sendTo, {
+        referenceId: p.txid, amountCents: Math.round(p.amount * 100), description: p.description || `Pagamento para ${p.holderName}`,
+        code: p.code, merchantName: p.holderName, key: p.key, keyType: META_KEY_TYPE[p.keyType],
+      });
     }
   } catch {
-    native = false;
+    id = null;
   }
+  if (id) return { ids: [await record(r, id, "text", cardBody, null, PIX_MIME, userId)], native: true };
 
-  if (!native || (r.channel.provider === "meta" && !p.amount)) {
-    const summary = ["💠 *Pix*", label, `Favorecido: ${p.holderName}`, brl ? `Valor: *${brl}*` : null, p.description ? `Referente a: ${p.description}` : null,
-      "", "Copie o código da próxima mensagem e cole no app do banco em *Pix Copia e Cola*."].filter((l) => l !== null).join("\n");
-    const a = await sendTextVia(r.channel, r.sendTo, summary);
-    out.push(await record(r, a, "text", summary, null, null, userId));
-    const b = await sendTextVia(r.channel, r.sendTo, p.code);
-    out.push(await record(r, b, "text", p.code, null, null, userId));
-  }
-  return { ids: out, native };
+  // Sem cartão (API oficial sem o recurso): uma mensagem de texto com a chave
+  const text = ["💠 *Pix*", label, `Favorecido: ${p.holderName}`, brl ? `Valor: *${brl}*` : null, p.description ? `Referente a: ${p.description}` : null].filter(Boolean).join("\n");
+  const ext = await sendTextVia(r.channel, r.sendTo, text);
+  return { ids: [await record(r, ext, "text", cardBody, null, PIX_MIME, userId)], native: false };
 }
 
 export interface LocationInput { latitude: number; longitude: number; name?: string; address?: string }
