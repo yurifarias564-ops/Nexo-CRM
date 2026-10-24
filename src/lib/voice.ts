@@ -18,7 +18,10 @@ export async function transcribe(file: Blob, filename: string): Promise<string> 
     signal: AbortSignal.timeout(45_000),
   });
   const body = (await res.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
-  if (!res.ok) throw new HttpError(502, `Transcrição falhou: ${body.error?.message ?? res.status}`);
+  if (!res.ok) {
+    console.error("[voz] transcrição OpenAI", res.status, body.error?.message);
+    throw new HttpError(502, "Não consegui entender o áudio. Recarregue a página (Ctrl+Shift+R) e fale de novo pelo Chrome, ou use “Digitar comando”.");
+  }
   return (body.text ?? "").trim();
 }
 
