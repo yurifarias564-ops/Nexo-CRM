@@ -62,17 +62,21 @@ export function Modal({
   open, onClose, title, children, wide, footer,
 }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  // Só ao abrir: foca o primeiro campo (não roubar o foco a cada digitação)
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     document.addEventListener("keydown", onKey);
-    ref.current?.querySelector<HTMLElement>("input,textarea,select,button")?.focus();
+    const body = ref.current?.querySelector<HTMLElement>("[data-modal-body]");
+    (body?.querySelector<HTMLElement>("input,textarea,select") ?? ref.current?.querySelector<HTMLElement>("input,textarea,select,button"))?.focus();
     return () => {
       document.removeEventListener("keydown", onKey);
       prev?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <Portal>
@@ -85,7 +89,7 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 py-4">{children}</div>
+        <div data-modal-body className="overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
       </div>
     </div>
