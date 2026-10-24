@@ -184,6 +184,19 @@ export const PIX_MIME = "application/x-pix";
  *  - API oficial: cartão de pagamento Pix da Meta quando a conta tem o recurso; senão, mensagens de texto.
  * Se o formato especial falhar, cai para texto (resumo + código Copia e Cola), que sempre funciona.
  */
+/**
+ * Código Copia e Cola como mensagem de texto (botões de "copiar" nem sempre são entregues
+ * pelo WhatsApp em conexões por QR Code). Primeiro a explicação, depois só o código.
+ */
+async function sendPixCode(r: Resolved, p: PixInput, brl: string, userId: string, out: string[]) {
+  const head = [`💠 *Pix de ${brl}*`, p.description ? `Referente a: ${p.description}` : null,
+    "Copie o código da próxima mensagem e cole no app do banco em *Pix Copia e Cola*."].filter(Boolean).join("\n");
+  const a = await sendTextVia(r.channel, r.sendTo, head);
+  out.push(await record(r, a, "text", head, null, null, userId));
+  const b = await sendTextVia(r.channel, r.sendTo, p.code);
+  out.push(await record(r, b, "text", `💠 Pix Copia e Cola — ${brl}\n${p.code}`, null, PIX_MIME, userId));
+}
+
 export async function sendPix(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, p: PixInput) {
   const r = await resolveTarget(sb, orgId, t);
   if (!(await isWindowOpen(r))) throw new WindowClosedError();
@@ -208,25 +221,13 @@ export async function sendPix(sb: SupabaseClient, orgId: string, userId: string,
       const c = zapiCreds(r.channel);
       const id = await zapi.sendPixCard(c, r.sendTo, { name: p.holderName, keyType: p.keyType, key: p.key });
       out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
-      if (p.amount) {
-        const id2 = await zapi.sendCopyButton(c, r.sendTo, {
-          message: `*Pix de ${brl}*${p.description ? `\nReferente a: ${p.description}` : ""}\n\nToque em copiar e cole no app do banco (Pix Copia e Cola).`,
-          code: p.code, buttonText: "Copiar código Pix",
-        });
-        out.push(await record(r, id2, "text", `💠 Pix Copia e Cola — ${brl}\n${p.code}`, null, PIX_MIME, userId));
-      }
+      if (p.amount) await sendPixCode(r, p, brl!, userId, out);
       native = true;
     } else {
       const inst = r.channel.evolution_instance!;
       const id = await evo.sendPixCard(inst, r.sendTo, { name: p.holderName, keyType: p.keyType, key: p.key });
       out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
-      if (p.amount) {
-        const id2 = await evo.sendCopyButton(inst, r.sendTo, {
-          title: `Pix de ${brl}`, description: p.description ? `Referente a: ${p.description}` : undefined,
-          footer: "Toque em copiar e cole no app do banco (Pix Copia e Cola)", displayText: "Copiar código Pix", copyCode: p.code,
-        });
-        out.push(await record(r, id2, "text", `💠 Pix Copia e Cola — ${brl}\n${p.code}`, null, PIX_MIME, userId));
-      }
+      if (p.amount) await sendPixCode(r, p, brl!, userId, out);
       native = true;
     }
   } catch {
