@@ -80,6 +80,17 @@ export async function sendMedia(phoneNumberId: string, token: string, to: string
   return id;
 }
 
+/** Localização (pino no mapa). */
+export async function sendLocation(phoneNumberId: string, token: string, to: string, loc: { latitude: number; longitude: number; name?: string; address?: string }): Promise<string> {
+  const r = await call<{ messages?: { id: string }[] }>(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to, type: "location", location: loc }),
+  });
+  const id = r.messages?.[0]?.id;
+  if (!id) throw new HttpError(502, "WhatsApp não retornou o id da mensagem");
+  return id;
+}
+
 export interface MetaTemplate {
   name: string;
   language: string;

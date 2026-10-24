@@ -159,6 +159,26 @@ export async function createEvent(userId: string, ev: CalendarEventInput): Promi
   return { id: r.id, link: r.htmlLink ?? null, calendarId: acc.calendarId };
 }
 
+/** Cria uma reunião do Google Meet começando agora. null = usuário sem Google conectado. */
+export async function createMeetNow(userId: string, title: string, timeZone: string): Promise<string | null> {
+  const acc = await accessFor(userId);
+  if (!acc) return null;
+  const start = new Date();
+  const end = new Date(start.getTime() + 30 * 60_000);
+  const r = await calendarCall<{ hangoutLink?: string; conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] } }>(
+    acc.bearer, `/calendars/${encodeURIComponent(acc.calendarId)}/events?conferenceDataVersion=1`, {
+      method: "POST",
+      body: JSON.stringify({
+        summary: title,
+        start: { dateTime: start.toISOString(), timeZone },
+        end: { dateTime: end.toISOString(), timeZone },
+        conferenceData: { createRequest: { requestId: crypto.randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } } },
+        source: { title: "Nexo CRM", url: appUrl() },
+      }),
+    });
+  return r.hangoutLink ?? r.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ?? null;
+}
+
 export async function cancelEvent(userId: string, calendarId: string, eventId: string) {
   const acc = await accessFor(userId);
   if (!acc) return;

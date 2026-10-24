@@ -120,11 +120,13 @@ export function mediaKind(mime: string): "image" | "video" | "audio" | "document
 
 export const MAX_MEDIA_BYTES = 16 * 1024 * 1024;
 
-export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, file: File, caption: string) {
+export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, file: File, caption: string, opts: { ptv?: boolean } = {}) {
   if (file.size === 0) throw new HttpError(422, "Arquivo vazio");
   if (file.size > MAX_MEDIA_BYTES) throw new HttpError(413, "Arquivo maior que 16 MB");
   const mime = (file.type || "application/octet-stream").split(";")[0]!.toLowerCase();
   const kind = mediaKind(mime);
+  const ptv = Boolean(opts.ptv) && kind === "video";
+  if (opts.ptv && !ptv) throw new HttpError(422, "O vídeo bolinha precisa ser MP4. Atualize o navegador (Chrome ou Safari recentes) e grave de novo.");
   const filename = file.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120) || "arquivo";
   const r = await resolveTarget(sb, orgId, t);
   if (!(await isWindowOpen(r))) throw new WindowClosedError();
@@ -134,15 +136,37 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
   if (r.channel.provider === "meta") {
     const { auth, pid } = metaAuth(r);
     mediaRef = await meta.uploadMedia(pid, auth, file, mime, filename);
-    externalId = await meta.sendMedia(pid, auth, r.waId, kind, mediaRef, caption || undefined, filename);
+    // A API oficial não tem vídeo "bolinha": vai como vídeo comum.
+    externalId = await meta.sendMedia(pid, auth, r.waId, kind, mediaRef, ptv ? undefined : caption || undefined, filename);
   } else {
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-    externalId = await evo.sendMedia(r.channel.evolution_instance!, r.waId, kind, mime, b64, filename, caption || undefined);
+    externalId = ptv
+      ? await evo.sendPtv(r.channel.evolution_instance!, r.waId, b64)
+      : await evo.sendMedia(r.channel.evolution_instance!, r.waId, kind, mime, b64, filename, caption || undefined);
     mediaRef = externalId; // baixado sob demanda pelo id da mensagem
   }
-  const body = caption || (kind === "document" ? filename : null);
-  const id = await record(r, externalId, kind, body, mediaRef, mime, userId);
+  const body = ptv ? null : caption || (kind === "document" ? filename : null);
+  const id = await record(r, externalId, kind, body, mediaRef, ptv && r.channel.provider !== "meta" ? `${mime};ptv` : mime, userId);
   return { id, externalId };
+}
+
+export interface LocationInput { latitude: number; longitude: number; name?: string; address?: string }
+
+/** Envia um pino de localização (como no WhatsApp). */
+export async function sendLocation(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, loc: LocationInput) {
+  const r = await resolveTarget(sb, orgId, t);
+  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  const clean = { latitude: loc.latitude, longitude: loc.longitude, ...(loc.name ? { name: loc.name } : {}), ...(loc.address ? { address: loc.address } : {}) };
+  let externalId: string;
+  if (r.channel.provider === "meta") {
+    const { auth, pid } = metaAuth(r);
+    externalId = await meta.sendLocation(pid, auth, r.waId, clean);
+  } else {
+    externalId = await evo.sendLocation(r.channel.evolution_instance!, r.waId, clean);
+  }
+  const body = [loc.name, loc.address, `${loc.latitude},${loc.longitude}`].filter(Boolean).join(" — ");
+  const id = await record(r, externalId, "location", body, null, null, userId);
+  return { id, externalId, body };
 }
 
 /** Qual canal/provedor seria usado para este alvo (para avisos ao agendar). */

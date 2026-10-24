@@ -88,6 +88,26 @@ export async function sendMedia(
   return r.key.id;
 }
 
+/** Vídeo "bolinha" (recado de vídeo redondo do WhatsApp). */
+export async function sendPtv(instance: string, to: string, base64: string): Promise<string> {
+  const number = to.includes("@") ? to : to.replace(/\D/g, "");
+  const r = await call<{ key?: { id?: string } }>(`/message/sendPtv/${encodeURIComponent(instance)}`, {
+    method: "POST", body: JSON.stringify({ number, video: base64 }),
+  }, 60_000);
+  if (!r.key?.id) throw new HttpError(502, "WhatsApp (QR) não retornou o id da mensagem");
+  return r.key.id;
+}
+
+/** Localização (pino no mapa). */
+export async function sendLocation(instance: string, to: string, loc: { latitude: number; longitude: number; name?: string; address?: string }): Promise<string> {
+  const number = to.includes("@") ? to : to.replace(/\D/g, "");
+  const r = await call<{ key?: { id?: string } }>(`/message/sendLocation/${encodeURIComponent(instance)}`, {
+    method: "POST", body: JSON.stringify({ number, ...loc }),
+  });
+  if (!r.key?.id) throw new HttpError(502, "WhatsApp (QR) não retornou o id da mensagem");
+  return r.key.id;
+}
+
 /** Grupos do número conectado por QR Code (para enviar relatórios). */
 export async function fetchGroups(instance: string): Promise<{ id: string; subject: string; size: number | null }[]> {
   const r = await call<unknown>(`/group/fetchAllGroups/${encodeURIComponent(instance)}?getParticipants=false`, {}, 60_000);
@@ -169,6 +189,7 @@ function content(msg: Rec["message"]): Pick<NormalizedMessage, "type" | "body" |
   if (o("imageMessage")) return media("image", "imageMessage");
   if (o("audioMessage")) return media("audio", "audioMessage");
   if (o("videoMessage")) return media("video", "videoMessage");
+  if (o("ptvMessage")) { const v = media("video", "ptvMessage"); return { ...v, media_mime: `${(v.media_mime ?? "video/mp4").split(";")[0]};ptv` }; }
   if (o("documentMessage")) return media("document", "documentMessage");
   if (o("documentWithCaptionMessage")) {
     const inner2 = (o("documentWithCaptionMessage")!.message ?? null) as Rec["message"];

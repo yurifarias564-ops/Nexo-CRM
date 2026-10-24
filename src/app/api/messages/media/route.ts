@@ -13,6 +13,7 @@ const Fields = z
     conversationId: z.string().uuid().optional(),
     leadId: z.string().uuid().optional(),
     caption: z.string().max(1024, "Legenda muito longa").default(""),
+    ptv: z.boolean().default(false),
   })
   .refine((b) => b.conversationId || b.leadId, "Informe a conversa ou o lead");
 
@@ -29,8 +30,9 @@ export async function POST(req: Request) {
       conversationId: form.get("conversationId") || undefined,
       leadId: form.get("leadId") || undefined,
       caption: String(form.get("caption") ?? "").trim(),
+      ptv: form.get("ptv") === "1",
     });
-    const r = await sendMediaFile(await supabaseServer(), ctx.org.id, ctx.userId, { conversationId: f.conversationId, leadId: f.leadId }, file, f.caption);
+    const r = await sendMediaFile(await supabaseServer(), ctx.org.id, ctx.userId, { conversationId: f.conversationId, leadId: f.leadId }, file, f.caption, { ptv: f.ptv });
     return ok(r, 201);
   } catch (e) {
     return fail(e);

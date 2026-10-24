@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarClock, Check, CheckCheck, Clock, FileText, Lock, MapPin, MessageCircle, Paperclip, Search, Send, UserRound, X, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, Check, CheckCheck, CircleUserRound, Clock, FileText, Lock, MapPin, MessageCircle, Paperclip, Plus, Search, Send, UserRound, Video, X, Zap, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar, Empty, Spinner, TagPill } from "@/components/ui/misc";
 import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-replies";
 import { TemplateModal } from "./template-modal";
+import { VideoNoteModal } from "./video-note";
+import { LocationModal, type LocationPick } from "./location-modal";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { cn, formatPhone } from "@/lib/utils";
 import { CallButton, CallEntry, type ChatCall } from "@/components/calls/call-button";
@@ -194,6 +196,10 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const [file, setFile] = useState<File | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
   const [schedOpen, setSchedOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [locOpen, setLocOpen] = useState(false);
+  const [videoBusy, setVideoBusy] = useState(false);
   const [calls, setCalls] = useState<ChatCall[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -290,16 +296,15 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  async function sendFile(f: File) {
+  async function sendFile(f: File, ptv = false) {
     if (sending) return;
     setSending(true);
-    const caption = text.trim();
+    const caption = ptv ? "" : text.trim();
     const tempId = `tmp-${Date.now()}`;
     const kind = kindOf(f.type || "");
-    const temp: Message = { id: tempId, conversation_id: conv.id, channel_id: conv.channel_id, external_id: tempId, direction: "out", type: kind, body: caption || (kind === "document" ? f.name : `📎 ${f.name}`), media_ref: null, media_mime: f.type, status: "pending", sent_by: ws.userId, sent_at: new Date().toISOString() };
+    const temp: Message = { id: tempId, conversation_id: conv.id, channel_id: conv.channel_id, external_id: tempId, direction: "out", type: kind, body: ptv ? "🎥 Vídeo bolinha" : caption || (kind === "document" ? f.name : `📎 ${f.name}`), media_ref: null, media_mime: ptv ? `${f.type};ptv` : f.type, status: "pending", sent_by: ws.userId, sent_at: new Date().toISOString() };
     setMessages((cur) => [...cur, temp]);
-    setText("");
-    setFile(null);
+    if (!ptv) { setText(""); setFile(null); }
     stickToBottom.current = true;
     scrollToBottom();
     try {
@@ -307,19 +312,51 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       fd.append("file", f);
       fd.append("conversationId", conv.id);
       fd.append("caption", caption);
+      if (ptv) fd.append("ptv", "1");
       const res = await fetch("/api/messages/media", { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); throw new Error(data.error); }
       setMessages((cur) => cur.some((m) => m.id === data.id)
         ? cur.filter((m) => m.id !== tempId)
-        : cur.map((m) => (m.id === tempId ? { ...m, id: data.id, external_id: data.externalId, status: "sent", media_ref: "sent" } : m)));
+        : cur.map((m) => (m.id === tempId ? { ...m, id: data.id, external_id: data.externalId, status: "sent", media_ref: "sent", body: ptv ? null : m.body } : m)));
     } catch (e) {
       setMessages((cur) => cur.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m)));
-      setFile(f);
-      setText(caption);
+      if (!ptv) { setFile(f); setText(caption); }
       toast.error(e instanceof Error ? e.message : "Falha ao enviar arquivo");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function sendLocationPin(l: LocationPick) {
+    const res = await fetch("/api/messages/location", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conv.id, ...l }) });
+    const data = await res.json();
+    if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); toast.error(data.error ?? "Falha ao enviar localização"); throw new Error(data.error); }
+    const msg: Message = { id: data.id, conversation_id: conv.id, channel_id: conv.channel_id, external_id: data.externalId, direction: "out", type: "location", body: data.body, media_ref: null, media_mime: null, status: "sent", sent_by: ws.userId, sent_at: new Date().toISOString() };
+    setMessages((cur) => (cur.some((m) => m.id === data.id) ? cur : [...cur, msg]));
+    stickToBottom.current = true;
+    scrollToBottom();
+  }
+
+  async function startVideoCall() {
+    if (videoBusy) return;
+    if (windowClosed) return toast.error("A janela de 24h está fechada: envie um modelo antes de mandar o link da chamada.");
+    // Abre a aba já no clique (senão o navegador bloqueia a janela)
+    const tab = window.open("about:blank", "_blank");
+    setVideoBusy(true);
+    try {
+      const res = await fetch("/api/videocall", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: conv.id, name, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      if (tab) tab.location.href = data.link; else window.open(data.link, "_blank");
+      toast.success("Link da chamada de vídeo enviado no WhatsApp. Quando o cliente tocar, ele entra na sala.",
+        { description: data.provider === "jitsi" ? "Dica: conecte o Google Agenda em Configurações para usar o Google Meet." : undefined, duration: 8000 });
+    } catch (e) {
+      tab?.close();
+      toast.error(e instanceof Error ? e.message : "Não consegui criar a chamada de vídeo");
+    } finally {
+      setVideoBusy(false);
     }
   }
 
@@ -403,6 +440,9 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
           </div>
         </div>
         <VoipCallButton conversationId={conv.id} leadId={conv.lead_id} name={name} phone={conv.wa_id} compact />
+        <Button variant="outline" size="sm" onClick={startVideoCall} loading={videoBusy} title="Chamada de vídeo: manda o link para o cliente entrar pelo celular">
+          {!videoBusy && <Video className="h-3.5 w-3.5" />} <span className="hidden sm:inline">Vídeo</span>
+        </Button>
         {(!voip.ready || (provider === "meta" && !coexist)) && <CallButton conversationId={conv.id} name={name} phone={conv.wa_id} provider={provider} />}
         {conv.lead_id && (
           <Button variant="outline" size="sm" onClick={() => onOpenLead(conv.lead_id!)}><UserRound className="h-3.5 w-3.5" /> Lead</Button>
@@ -464,9 +504,28 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
               <button onClick={() => fileInput.current?.click()} className="mb-0.5 rounded-lg p-2.5 text-slate-400 transition hover:bg-ink-800 hover:text-brand-200" title="Anexar foto, vídeo, áudio ou documento" aria-label="Anexar arquivo">
                 <Paperclip className="h-5 w-5" />
               </button>
-              <button onClick={() => setSchedOpen(true)} className="mb-0.5 rounded-lg p-2.5 text-slate-400 transition hover:bg-ink-800 hover:text-brand-200" title="Agendar mensagem para depois" aria-label="Agendar mensagem">
-                <CalendarClock className="h-5 w-5" />
-              </button>
+              <div className="relative">
+                <button onClick={() => setMoreOpen((v) => !v)} aria-expanded={moreOpen} className={cn("mb-0.5 rounded-lg p-2.5 transition", moreOpen ? "bg-brand-500/20 text-brand-200" : "text-slate-400 hover:bg-ink-800 hover:text-brand-200")} title="Mais: vídeo bolinha, localização, agendar" aria-label="Mais opções">
+                  <Plus className="h-5 w-5" />
+                </button>
+                {moreOpen && (
+                  <>
+                    <div className="fixed inset-0 z-20" onClick={() => setMoreOpen(false)} aria-hidden />
+                    <div className="absolute bottom-12 left-0 z-30 w-56 overflow-hidden rounded-xl border border-line bg-ink-850 py-1 shadow-card" role="menu">
+                      {[
+                        { icon: CircleUserRound, label: "Vídeo bolinha", act: () => setNoteOpen(true) },
+                        { icon: MapPin, label: "Localização", act: () => setLocOpen(true) },
+                        { icon: CalendarClock, label: "Agendar mensagem", act: () => setSchedOpen(true) },
+                      ].map(({ icon: I, label, act }) => (
+                        <button key={label} role="menuitem" onClick={() => { setMoreOpen(false); act(); }}
+                          className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-ink-700">
+                          <I className="h-4 w-4 text-brand-300" /> {label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <input ref={fileInput} type="file" className="hidden"
                 accept="image/jpeg,image/png,video/mp4,video/3gpp,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
                 onChange={(e) => { pickFile(e.target.files?.[0]); e.target.value = ""; }} />
@@ -488,6 +547,8 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
           </div>
         )}
       </footer>
+      <VideoNoteModal open={noteOpen} onClose={() => setNoteOpen(false)} onSend={(f) => void sendFile(f, true)} />
+      <LocationModal open={locOpen} onClose={() => setLocOpen(false)} onSend={sendLocationPin} />
       <ScheduleMessageModal open={schedOpen} onClose={() => setSchedOpen(false)} conversationId={conv.id} leadId={conv.lead_id} contactName={name} />
       <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ conversationId: conv.id }} channelId={conv.channel_id}
         defaultFirstParam={(conv.leads?.name ?? conv.contact_name ?? "").split(" ")[0]} />
@@ -521,18 +582,35 @@ function Bubble({ m }: { m: Message }) {
           <img src={media} alt="Figurinha" loading="lazy" className="h-32 w-32 object-contain" />
         )}
         {media && m.type === "audio" && <audio controls preload="none" src={media} className="mb-1 h-10 w-64 max-w-full" />}
-        {media && m.type === "video" && <video controls preload="none" src={media} className="mb-1 max-h-72 rounded-lg" />}
+        {media && m.type === "video" && (m.media_mime?.includes("ptv")
+          ? <video controls playsInline preload="metadata" src={media} className="mb-1 h-56 w-56 rounded-full object-cover" />
+          : <video controls preload="none" src={media} className="mb-1 max-h-72 rounded-lg" />)}
         {media && m.type === "document" && (
           <a href={media} target="_blank" rel="noopener noreferrer" className="mb-1 flex items-center gap-2 rounded-lg bg-black/20 p-2 hover:bg-black/30">
             <FileText className="h-5 w-5 shrink-0" /> <span className="truncate">{m.body ?? "Documento"}</span>
           </a>
         )}
-        {m.type === "location" && <MapPin className="mb-1 h-4 w-4 opacity-70" />}
-        {m.body && !(m.type === "document" && media) && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+        {m.type === "location" ? <LocationBody body={m.body} />
+          : m.body && !(m.type === "document" && media) && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
         <div className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", out ? "text-blue-100/70" : "text-slate-500")}>
           {time} {out && <StatusIcon s={m.status} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+function LocationBody({ body }: { body: string | null }) {
+  const parts = (body ?? "").split(" — ");
+  const coords = parts[parts.length - 1]?.match(/^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
+  const label = coords ? parts.slice(0, -1).join(" — ") : body;
+  return (
+    <div>
+      <p className="flex items-start gap-1.5"><MapPin className="mt-0.5 h-4 w-4 shrink-0 opacity-80" /> <span className="whitespace-pre-wrap break-words">{label || "Localização"}</span></p>
+      {coords && (
+        <a href={`https://www.google.com/maps?q=${coords[1]},${coords[2]}`} target="_blank" rel="noopener noreferrer"
+          className="mt-1 inline-block rounded-md bg-black/20 px-2 py-1 text-xs font-medium underline-offset-2 hover:underline">Abrir no mapa</a>
+      )}
     </div>
   );
 }

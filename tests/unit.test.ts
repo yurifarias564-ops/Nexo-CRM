@@ -468,3 +468,18 @@ test("Api4Com: só baixa gravação de endereço público com HTTPS", () => {
   assert.ok(!trustedRecordingUrl("http://records.api4com.com/x.mp3"));
   assert.ok(!trustedRecordingUrl("https://user:pw@records.api4com.com/x"));
 });
+
+test("Localização: lê coordenadas de link do Google Maps e de texto", async () => {
+  const { parseCoords } = await import("@/lib/geo");
+  assert.deepEqual(parseCoords("-3.8765, -38.6254"), { latitude: -3.8765, longitude: -38.6254 });
+  assert.deepEqual(parseCoords("https://www.google.com/maps/place/Loja/@-3.8765,-38.6254,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d-3.8770!4d-38.6260"), { latitude: -3.877, longitude: -38.626 });
+  assert.deepEqual(parseCoords("https://maps.google.com/?q=-3.87,-38.62"), { latitude: -3.87, longitude: -38.62 });
+  assert.equal(parseCoords("https://maps.app.goo.gl/abc123"), null);
+  assert.equal(parseCoords("999, 10"), null);
+});
+
+test("Evolution: vídeo bolinha (ptv) recebido vira vídeo marcado como bolinha", () => {
+  const r = normalizeRecord({ key: { remoteJid: "5585999998888@s.whatsapp.net", id: "PTV1" }, message: { ptvMessage: { mimetype: "video/mp4" } }, messageTimestamp: "1700000000" });
+  assert.equal(r?.type, "video");
+  assert.equal(r?.media_mime, "video/mp4;ptv");
+});
