@@ -1,3 +1,4 @@
+-- @supabase-only (a extensão unaccent não existe no banco de teste local)
 -- Busca de lead por voz ignora acentos e maiúsculas (nomes vindos do WhatsApp: "Vitória", "JOÃO 🌸"...)
 create extension if not exists unaccent with schema extensions;
 
