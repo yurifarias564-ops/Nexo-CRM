@@ -1,9 +1,10 @@
 import { after } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { parseWebhook } from "@/lib/whatsapp/zapi";
-import { applyStatuses, ingestBatch } from "@/lib/whatsapp";
+import { lidOf, parseWebhook } from "@/lib/whatsapp/zapi";
+import { applyStatuses, ingestBatch, loadChannel, zapiCreds } from "@/lib/whatsapp";
 import { markDown, markUp, tryReconnect } from "@/lib/whatsapp/watchdog";
+import { linkLidsAfter, mapLidsBefore } from "@/lib/whatsapp/zapi-lid";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -45,7 +46,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
       await markDown(channelId);
       after(() => tryReconnect(channelId).then(() => undefined));
     }
-    if (evt.messages.length) await ingestBatch(channelId, evt.messages, false);
+    if (evt.messages.length) {
+      await mapLidsBefore(channelId, evt.messages);
+      await ingestBatch(channelId, evt.messages, false);
+      const creds = await loadChannel(channelId).then(zapiCreds).catch(() => null);
+      await linkLidsAfter(channelId, evt.messages, creds ? (phone) => lidOf(creds, phone) : undefined);
+    }
     if (evt.statuses.length) await applyStatuses(channelId, evt.statuses);
     return new Response("ok");
   } catch (e) {

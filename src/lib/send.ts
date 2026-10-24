@@ -23,6 +23,8 @@ export interface SendTarget {
 export interface Resolved {
   channel: ChannelWithSecrets;
   waId: string;
+  /** Para quem enviar (igual ao waId; na Z-API pode ser o identificador @lid do contato). */
+  sendTo: string;
   contactName: string | null;
   conversationId: string | null;
 }
@@ -34,24 +36,27 @@ export async function resolveTarget(sb: SupabaseClient, orgId: string, t: SendTa
   let waId: string;
   let contactName: string | null = null;
   let conversationId: string | null = null;
+  let lid: string | null = null;
 
   if (t.conversationId) {
-    const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id").eq("id", t.conversationId).eq("organization_id", orgId).maybeSingle();
+    const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id, wa_lid").eq("id", t.conversationId).eq("organization_id", orgId).maybeSingle();
     if (!conv) throw new HttpError(404, "Conversa não encontrada");
     channelId = conv.channel_id;
     waId = conv.wa_id;
     conversationId = conv.id;
+    if (conv.wa_lid && conv.wa_lid === conv.wa_id) lid = conv.wa_lid;
   } else if (t.leadId) {
     const { data: lead } = await sb.from("leads").select("id, name, phone").eq("id", t.leadId).eq("organization_id", orgId).maybeSingle();
     if (!lead) throw new HttpError(404, "Lead não encontrado");
     if (!lead.phone) throw new HttpError(422, `O lead "${lead.name}" não tem telefone`);
     // Prefere o canal da conversa que já existe com esse lead
-    const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id")
+    const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id, wa_lid")
       .eq("lead_id", lead.id).eq("organization_id", orgId).order("last_message_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
     if (conv && (!t.channelId || conv.channel_id === t.channelId)) {
       channelId = conv.channel_id;
       waId = conv.wa_id;
       conversationId = conv.id;
+      if (conv.wa_lid && conv.wa_lid === conv.wa_id) lid = conv.wa_lid;
     } else {
       let q = sb.from("whatsapp_channels").select("id").eq("organization_id", orgId).eq("status", "connected").order("created_at").limit(1);
       if (t.channelId) q = q.eq("id", t.channelId);
@@ -68,7 +73,9 @@ export async function resolveTarget(sb: SupabaseClient, orgId: string, t: SendTa
   const channel = await loadChannel(channelId);
   if (channel.organization_id !== orgId) throw new HttpError(404, "Canal não encontrado");
   if (channel.status !== "connected") throw new HttpError(409, `O canal "${channel.name}" não está conectado`);
-  return { channel, waId, contactName, conversationId };
+  // Contato que o WhatsApp só identificou pelo @lid (sem número): a Z-API envia pelo @lid
+  const sendTo = lid && channel.provider === "zapi" ? `${lid}@lid` : waId;
+  return { channel, waId, sendTo, contactName, conversationId };
 }
 
 /** API oficial: só aceita mensagem livre até 24h após a última mensagem do cliente. */
@@ -107,7 +114,7 @@ function metaAuth(r: Resolved) {
 export async function sendText(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, text: string) {
   const r = await resolveTarget(sb, orgId, t);
   if (!(await isWindowOpen(r))) throw new WindowClosedError();
-  const externalId = await sendTextVia(r.channel, r.waId, text);
+  const externalId = await sendTextVia(r.channel, r.sendTo, text);
   const id = await record(r, externalId, "text", text, null, null, userId);
   return { id, externalId };
 }
@@ -138,18 +145,18 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
     const { auth, pid } = metaAuth(r);
     mediaRef = await meta.uploadMedia(pid, auth, file, mime, filename);
     // A API oficial não tem vídeo "bolinha": vai como vídeo comum.
-    externalId = await meta.sendMedia(pid, auth, r.waId, kind, mediaRef, ptv ? undefined : caption || undefined, filename);
+    externalId = await meta.sendMedia(pid, auth, r.sendTo, kind, mediaRef, ptv ? undefined : caption || undefined, filename);
   } else if (r.channel.provider === "zapi") {
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     const c = zapiCreds(r.channel);
-    externalId = ptv ? await zapi.sendPtv(c, r.waId, b64) : await zapi.sendMedia(c, r.waId, kind, mime, b64, filename, caption || undefined);
+    externalId = ptv ? await zapi.sendPtv(c, r.sendTo, b64) : await zapi.sendMedia(c, r.sendTo, kind, mime, b64, filename, caption || undefined);
     // A Z-API devolve o link da mídia só no webhook; até lá, o CRM mostra a mensagem sem pré-visualização
     mediaRef = "";
   } else {
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     externalId = ptv
-      ? await evo.sendPtv(r.channel.evolution_instance!, r.waId, b64)
-      : await evo.sendMedia(r.channel.evolution_instance!, r.waId, kind, mime, b64, filename, caption || undefined);
+      ? await evo.sendPtv(r.channel.evolution_instance!, r.sendTo, b64)
+      : await evo.sendMedia(r.channel.evolution_instance!, r.sendTo, kind, mime, b64, filename, caption || undefined);
     mediaRef = externalId; // baixado sob demanda pelo id da mensagem
   }
   const body = ptv ? null : caption || (kind === "document" ? filename : null);
@@ -190,7 +197,7 @@ export async function sendPix(sb: SupabaseClient, orgId: string, userId: string,
     if (r.channel.provider === "meta") {
       if (p.amount) {
         const { auth, pid } = metaAuth(r);
-        const id = await meta.sendPixOrder(pid, auth, r.waId, {
+        const id = await meta.sendPixOrder(pid, auth, r.sendTo, {
           referenceId: p.txid, amountCents: Math.round(p.amount * 100), description: p.description || `Pagamento para ${p.holderName}`,
           code: p.code, merchantName: p.holderName, key: p.key, keyType: META_KEY_TYPE[p.keyType],
         });
@@ -199,10 +206,10 @@ export async function sendPix(sb: SupabaseClient, orgId: string, userId: string,
       }
     } else if (r.channel.provider === "zapi") {
       const c = zapiCreds(r.channel);
-      const id = await zapi.sendPixCard(c, r.waId, { name: p.holderName, keyType: p.keyType, key: p.key });
+      const id = await zapi.sendPixCard(c, r.sendTo, { name: p.holderName, keyType: p.keyType, key: p.key });
       out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
       if (p.amount) {
-        const id2 = await zapi.sendCopyButton(c, r.waId, {
+        const id2 = await zapi.sendCopyButton(c, r.sendTo, {
           message: `*Pix de ${brl}*${p.description ? `\nReferente a: ${p.description}` : ""}\n\nToque em copiar e cole no app do banco (Pix Copia e Cola).`,
           code: p.code, buttonText: "Copiar código Pix",
         });
@@ -211,10 +218,10 @@ export async function sendPix(sb: SupabaseClient, orgId: string, userId: string,
       native = true;
     } else {
       const inst = r.channel.evolution_instance!;
-      const id = await evo.sendPixCard(inst, r.waId, { name: p.holderName, keyType: p.keyType, key: p.key });
+      const id = await evo.sendPixCard(inst, r.sendTo, { name: p.holderName, keyType: p.keyType, key: p.key });
       out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
       if (p.amount) {
-        const id2 = await evo.sendCopyButton(inst, r.waId, {
+        const id2 = await evo.sendCopyButton(inst, r.sendTo, {
           title: `Pix de ${brl}`, description: p.description ? `Referente a: ${p.description}` : undefined,
           footer: "Toque em copiar e cole no app do banco (Pix Copia e Cola)", displayText: "Copiar código Pix", copyCode: p.code,
         });
@@ -229,9 +236,9 @@ export async function sendPix(sb: SupabaseClient, orgId: string, userId: string,
   if (!native || (r.channel.provider === "meta" && !p.amount)) {
     const summary = ["💠 *Pix*", label, `Favorecido: ${p.holderName}`, brl ? `Valor: *${brl}*` : null, p.description ? `Referente a: ${p.description}` : null,
       "", "Copie o código da próxima mensagem e cole no app do banco em *Pix Copia e Cola*."].filter((l) => l !== null).join("\n");
-    const a = await sendTextVia(r.channel, r.waId, summary);
+    const a = await sendTextVia(r.channel, r.sendTo, summary);
     out.push(await record(r, a, "text", summary, null, null, userId));
-    const b = await sendTextVia(r.channel, r.waId, p.code);
+    const b = await sendTextVia(r.channel, r.sendTo, p.code);
     out.push(await record(r, b, "text", p.code, null, null, userId));
   }
   return { ids: out, native };
@@ -247,11 +254,11 @@ export async function sendLocation(sb: SupabaseClient, orgId: string, userId: st
   let externalId: string;
   if (r.channel.provider === "meta") {
     const { auth, pid } = metaAuth(r);
-    externalId = await meta.sendLocation(pid, auth, r.waId, clean);
+    externalId = await meta.sendLocation(pid, auth, r.sendTo, clean);
   } else if (r.channel.provider === "zapi") {
-    externalId = await zapi.sendLocation(zapiCreds(r.channel), r.waId, clean);
+    externalId = await zapi.sendLocation(zapiCreds(r.channel), r.sendTo, clean);
   } else {
-    externalId = await evo.sendLocation(r.channel.evolution_instance!, r.waId, clean);
+    externalId = await evo.sendLocation(r.channel.evolution_instance!, r.sendTo, clean);
   }
   const body = [loc.name, loc.address, `${loc.latitude},${loc.longitude}`].filter(Boolean).join(" — ");
   const id = await record(r, externalId, "location", body, null, null, userId);
@@ -283,7 +290,7 @@ export async function sendTemplateMessage(sb: SupabaseClient, orgId: string, use
   if (!tpl) throw new HttpError(404, "Modelo não encontrado ou não aprovado");
   if (params.length !== tpl.params || params.some((p) => !p.trim())) throw new HttpError(422, `Preencha os ${tpl.params} campos do modelo`);
   const clean = params.map((p) => p.replace(/[\n\t]+/g, " ").replace(/ {5,}/g, "    ").trim());
-  const externalId = await meta.sendTemplate(pid, auth, r.waId, name, language, clean);
+  const externalId = await meta.sendTemplate(pid, auth, r.sendTo, name, language, clean);
   const id = await record(r, externalId, "text", meta.renderTemplate(tpl.body, clean), null, null, userId);
   return { id, externalId };
 }

@@ -12,10 +12,11 @@ import { cn } from "@/lib/utils";
 interface PixKey { id: string; key_type: PixKeyType; key: string; holder_name: string; city: string; label: string | null }
 
 export function PixIcon({ className }: { className?: string }) {
-  // Losango do Pix (desenho simples, sem a marca oficial)
+  // Losango nítido (ícone genérico de pagamento instantâneo)
   return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden fill="currentColor">
-      <path d="M12 2.5 6.6 7.9l2.1 2.1a1.9 1.9 0 0 0 2.7 0L12 9.4l.6.6a1.9 1.9 0 0 0 2.7 0l2.1-2.1L12 2.5Zm-6.9 6.9L2.5 12l2.6 2.6 2.4-2.4a.3.3 0 0 0 0-.4L5.1 9.4Zm13.8 0-2.4 2.4a.3.3 0 0 0 0 .4l2.4 2.4 2.6-2.6-2.6-2.6ZM12 14.6l-.6.6a1.9 1.9 0 0 1-2.7 0l-2.1-2.1L12 21.5l5.4-5.4-2.1-2.1a1.9 1.9 0 0 0-2.7 0l-.6.6Z" />
+    <svg viewBox="0 0 24 24" className={className} aria-hidden fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinejoin="round" shapeRendering="geometricPrecision">
+      <path d="M12 2.8 21.2 12 12 21.2 2.8 12Z" />
+      <path d="M12 8.2 15.8 12 12 15.8 8.2 12Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }

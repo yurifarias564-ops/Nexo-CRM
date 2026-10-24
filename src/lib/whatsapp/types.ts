@@ -12,6 +12,8 @@ export interface NormalizedMessage {
   media_mime: string | null;
   status: MsgStatus;
   sent_at: string; // ISO
+  /** Z-API: identificador @lid do contato (só os dígitos), quando o WhatsApp manda. */
+  lid?: string | null;
 }
 
 export interface StatusUpdate {

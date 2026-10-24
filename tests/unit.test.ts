@@ -531,3 +531,15 @@ test("Z-API: mensagens recebidas, enviadas pelo celular, status e conexão", asy
   assert.equal(parseZ({ type: "DisconnectedCallback", disconnected: true }).connection, "close");
   assert.equal(parseZ({ type: "ConnectedCallback", connected: true, phone: "5585" }).connection, "open");
 });
+
+test("Z-API: mensagem só com @lid fica marcada para juntar na conversa do número", async () => {
+  const { parseWebhook: parseZ } = await import("@/lib/whatsapp/zapi");
+  const mine = parseZ({ type: "ReceivedCallback", messageId: "L1", phone: "222200401526959@lid", chatLid: "222200401526959@lid", fromMe: true, text: { message: "oi" } });
+  assert.equal(mine.messages[0]?.wa_id, "222200401526959");
+  assert.equal(mine.messages[0]?.lid, "222200401526959");
+  const hers = parseZ({ type: "ReceivedCallback", messageId: "L2", phone: "5585998381570", chatLid: "222200401526959@lid", text: { message: "oi" } });
+  assert.equal(hers.messages[0]?.wa_id, "5585998381570", "com número de verdade, usa o número");
+  assert.equal(hers.messages[0]?.lid, "222200401526959");
+  const noSuffix = parseZ({ type: "ReceivedCallback", messageId: "L3", phone: "222200401526959", chatLid: "222200401526959@lid", fromMe: true, text: { message: "x" } });
+  assert.equal(noSuffix.messages[0]?.wa_id, "222200401526959");
+});

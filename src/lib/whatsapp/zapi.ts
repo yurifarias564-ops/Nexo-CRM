@@ -37,7 +37,7 @@ const msgId = (r: { messageId?: string; id?: string; zaapId?: string } | null) =
   if (!id) throw new HttpError(502, "Z-API não retornou o id da mensagem");
   return id;
 };
-const phoneOf = (to: string) => to.replace(/\D/g, "");
+const phoneOf = (to: string) => (to.endsWith("@lid") ? to : to.replace(/\D/g, ""));
 
 export async function status(c: ZapiCreds): Promise<{ connected: boolean; error: string | null; smartphoneConnected: boolean }> {
   const r = await call<{ connected?: boolean; error?: string; smartphoneConnected?: boolean }>(c, "status");
@@ -51,6 +51,20 @@ export async function phoneNumber(c: ZapiCreds): Promise<string | null> {
   const r = await call<{ phone?: string }>(c, "device").catch(() => null);
   return r?.phone ? r.phone.replace(/\D/g, "") : null;
 }
+/** @lid de um número (para juntar conversas que o WhatsApp mandou só pelo @lid). */
+export async function lidOf(c: ZapiCreds, phone: string): Promise<string | null> {
+  const digits = phone.replace(/\D/g, "");
+  const pick = (v: unknown) => {
+    const r = Array.isArray(v) ? v[0] : v;
+    const lid = (r as { lid?: unknown } | null)?.lid;
+    return typeof lid === "string" && lid.endsWith("@lid") ? lid.replace(/\D/g, "") || null : null;
+  };
+  const a = await call<unknown>(c, `phone-exists/${digits}`).catch(() => null);
+  if (pick(a)) return pick(a);
+  const b = await call<unknown>(c, "phone-exists-batch", { method: "POST", body: { phones: [digits] } }).catch(() => null);
+  return pick(b);
+}
+
 export async function restart(c: ZapiCreds) { await call(c, "restart"); }
 export async function setWebhooks(c: ZapiCreds, url: string) {
   await call(c, "update-every-webhooks", { method: "PUT", body: { value: url, notifySentByMe: true } });
@@ -121,7 +135,14 @@ export function parseWebhook(payload: unknown): ZapiEvent {
   const type = String(p.type ?? "");
   if (type === "ReceivedCallback") {
     if (p.isGroup || p.isNewsletter || p.broadcast || p.isStatusReply) return out;
-    const phone = s(p.phone)?.replace(/\D/g, "");
+    // O WhatsApp às vezes identifica o contato só pelo @lid (sem o número), principalmente
+    // nas mensagens que você manda pelo celular. Guardamos o @lid para juntar na conversa certa.
+    const rawPhone = s(p.phone) ?? "";
+    const lidRaw = [s(p.chatLid), rawPhone].find((v) => v?.endsWith("@lid")) ?? null;
+    const lid = lidRaw ? lidRaw.replace(/\D/g, "") || null : null;
+    const phoneDigits = rawPhone.replace(/\D/g, "");
+    const phoneIsLid = rawPhone.endsWith("@lid") || (lid !== null && phoneDigits === lid);
+    const phone = phoneIsLid ? lid : phoneDigits;
     const id = s(p.messageId);
     const c = content(p);
     if (!phone || !id || !c) return out;
@@ -134,6 +155,7 @@ export function parseWebhook(payload: unknown): ZapiEvent {
       ...c,
       status: fromMe ? "sent" : "received",
       sent_at: tsToIso(Number(p.momment) || Date.now()),
+      lid,
     } as NormalizedMessage);
   } else if (type === "MessageStatusCallback") {
     const st = STATUS[String(p.status ?? "").toUpperCase()];
