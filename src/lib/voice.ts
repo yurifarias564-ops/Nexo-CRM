@@ -205,7 +205,7 @@ async function askClaude(system: string, tools: typeof TOOLS, messages: unknown[
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: envOptional("ANTHROPIC_MODEL", "claude-haiku-5-5"),
+      model: envOptional("ANTHROPIC_VOICE_MODEL", "claude-sonnet-5-5"),
       max_tokens: 2048,
       system,
       tools,
