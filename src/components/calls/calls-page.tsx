@@ -92,7 +92,7 @@ export function CallsPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-white"><PhoneCall className="h-5 w-5 text-brand-300" /> Ligações</h2>
-            <p className="mt-1 text-sm text-slate-400">Todas as ligações pelo WhatsApp, gravadas e guardadas para sempre.</p>
+            <p className="mt-1 text-sm text-slate-400">Todas as ligações (telefone e WhatsApp), gravadas e guardadas para sempre.</p>
           </div>
           <a href={exportUrl} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-sm text-slate-200 hover:border-brand-400/40 hover:bg-ink-800"><Download className="h-4 w-4" /> Excel</a>
         </div>
