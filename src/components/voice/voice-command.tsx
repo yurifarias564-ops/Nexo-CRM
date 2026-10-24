@@ -19,6 +19,20 @@ function pickMime(): string {
   return "";
 }
 
+// Reconhecimento de fala do próprio navegador (Chrome, Edge, Safari): grátis e em tempo real
+interface SR { lang: string; continuous: boolean; interimResults: boolean; start: () => void; stop: () => void; abort: () => void;
+  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onend: (() => void) | null; onerror: ((e: { error?: string }) => void) | null }
+function makeRecognizer(): SR | null {
+  if (typeof window === "undefined") return null;
+  const W = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
+  const C = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+  if (!C) return null;
+  const r = new C();
+  r.lang = "pt-BR"; r.continuous = true; r.interimResults = true;
+  return r;
+}
+
 export function VoiceCommand() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -35,6 +49,10 @@ export function VoiceCommand() {
   const raf = useRef<number>(0);
   const tick = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const audioCtx = useRef<AudioContext | null>(null);
+  const srRef = useRef<SR | null>(null);
+  const srText = useRef({ final: "", interim: "" });
+  const srDone = useRef<Promise<void>>(Promise.resolve());
+  const [live, setLive] = useState("");
 
   const cleanup = useCallback(() => {
     cancelAnimationFrame(raf.current);
@@ -67,6 +85,7 @@ export function VoiceCommand() {
   }, []);
 
   const stop = useCallback(() => {
+    try { srRef.current?.stop(); } catch { /* já parado */ }
     if (recRef.current?.state === "recording") recRef.current.stop();
   }, []);
 
@@ -79,10 +98,17 @@ export function VoiceCommand() {
       const rec = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
       chunks.current = [];
       rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
-      rec.onstop = () => {
+      rec.onstop = async () => {
         const type = rec.mimeType || mime || "audio/webm";
         const blob = new Blob(chunks.current, { type });
         cleanup();
+        setPhase("thinking");
+        // Espera o reconhecimento do navegador fechar a última frase (máx. 1,5 s)
+        await Promise.race([srDone.current, new Promise((r) => setTimeout(r, 1500))]);
+        srRef.current = null;
+        const said = `${srText.current.final} ${srText.current.interim}`.replace(/\s+/g, " ").trim();
+        setLive("");
+        if (said.length >= 3) return void interpret({ text: said, tz: userTz() });
         if (blob.size < 1500) { setPhase("idle"); return toast.message("Gravação muito curta — segure por um instante e fale o comando."); }
         const fd = new FormData();
         fd.append("tz", userTz());
@@ -91,6 +117,27 @@ export function VoiceCommand() {
       };
       rec.start(250);
       recRef.current = rec;
+
+      // Transcrição no próprio navegador (sem custo); o áudio fica de reserva
+      srText.current = { final: "", interim: "" };
+      setLive("");
+      const sr = makeRecognizer();
+      srRef.current = sr;
+      srDone.current = sr ? new Promise<void>((resolve) => {
+        sr.onresult = (e) => {
+          let interim = "";
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const r = e.results[i]!;
+            if (r.isFinal) srText.current.final += ` ${r[0].transcript}`;
+            else interim += r[0].transcript;
+          }
+          srText.current.interim = interim;
+          setLive(`${srText.current.final} ${interim}`.trim());
+        };
+        sr.onerror = () => resolve();
+        sr.onend = () => resolve();
+        try { sr.start(); } catch { resolve(); }
+      }) : Promise.resolve();
 
       // Medidor de volume para feedback visual
       const ctx = new AudioContext();
@@ -171,6 +218,9 @@ export function VoiceCommand() {
           <span className="hidden items-center gap-2 text-xs tabular-nums text-red-300 sm:flex">
             <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" /> Ouvindo… 0:{String(seconds).padStart(2, "0")}
           </span>
+        )}
+        {recording && live && (
+          <span className="hidden max-w-[320px] truncate rounded-full bg-ink-800 px-3 py-1 text-xs text-slate-200 md:inline" title={live}>“{live}”</span>
         )}
         <button
           type="button"
