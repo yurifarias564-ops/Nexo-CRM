@@ -483,3 +483,20 @@ test("Evolution: vídeo bolinha (ptv) recebido vira vídeo marcado como bolinha"
   assert.equal(r?.type, "video");
   assert.equal(r?.media_mime, "video/mp4;ptv");
 });
+
+test("Pix: BR Code igual ao exemplo do Banco Central e chaves normalizadas", async () => {
+  const { brCode, normalizePixKey, displayPixKey } = await import("@/lib/pix");
+  assert.equal(brCode({ key: "123e4567-e12b-12d1-a456-426655440000", name: "Fulano de Tal", city: "BRASILIA" }),
+    "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D");
+  const withValue = brCode({ key: "55255981000100", name: "Yuri Farias de Araújo", city: "Maracanaú", amount: 150.5, txid: "PED-123" });
+  assert.match(withValue, /540615\d\.50|5406150\.50/);
+  assert.match(withValue, /5921Yuri Farias de Araujo/);
+  assert.match(withValue, /6009MARACANAU|6009Maracanau/);
+  assert.match(withValue, /0506PED123/);
+  assert.equal(normalizePixKey("cnpj", "55.255.981/0001-00"), "55255981000100");
+  assert.equal(displayPixKey("cnpj", "55255981000100"), "55.255.981/0001-00");
+  assert.equal(normalizePixKey("phone", "(85) 99900-3908"), "+5585999003908");
+  assert.equal(normalizePixKey("email", " Yuri@Exemplo.com "), "yuri@exemplo.com");
+  assert.throws(() => normalizePixKey("cpf", "111.111.111-11"), /CPF inválido/);
+  assert.throws(() => normalizePixKey("cnpj", "55.255.981/0001-01"), /CNPJ inválido/);
+});

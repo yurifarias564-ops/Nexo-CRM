@@ -12,6 +12,7 @@ import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-repl
 import { TemplateModal } from "./template-modal";
 import { VideoNoteModal } from "./video-note";
 import { LocationModal, type LocationPick } from "./location-modal";
+import { PixIcon, PixModal } from "./pix-modal";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { cn, formatPhone } from "@/lib/utils";
 import { CallButton, CallEntry, type ChatCall } from "@/components/calls/call-button";
@@ -199,6 +200,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const [moreOpen, setMoreOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [locOpen, setLocOpen] = useState(false);
+  const [pixOpen, setPixOpen] = useState(false);
   const [videoBusy, setVideoBusy] = useState(false);
   const [calls, setCalls] = useState<ChatCall[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -336,6 +338,14 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     setMessages((cur) => (cur.some((m) => m.id === data.id) ? cur : [...cur, msg]));
     stickToBottom.current = true;
     scrollToBottom();
+  }
+
+  async function sendPix(p: { keyId: string; amount: number | null; description?: string }) {
+    const res = await fetch("/api/pix/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conv.id, ...p }) });
+    const data = await res.json();
+    if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); throw new Error(data.error); }
+    toast.success("Pix enviado: QR Code e código Copia e Cola");
+    stickToBottom.current = true;
   }
 
   async function startVideoCall() {
@@ -515,6 +525,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
                       {[
                         { icon: CircleUserRound, label: "Vídeo bolinha", act: () => setNoteOpen(true) },
                         { icon: MapPin, label: "Localização", act: () => setLocOpen(true) },
+                        { icon: PixIcon, label: "Pix (cobrar)", act: () => setPixOpen(true) },
                         { icon: CalendarClock, label: "Agendar mensagem", act: () => setSchedOpen(true) },
                       ].map(({ icon: I, label, act }) => (
                         <button key={label} role="menuitem" onClick={() => { setMoreOpen(false); act(); }}
@@ -548,6 +559,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
         )}
       </footer>
       <VideoNoteModal open={noteOpen} onClose={() => setNoteOpen(false)} onSend={(f) => void sendFile(f, true)} />
+      <PixModal open={pixOpen} onClose={() => setPixOpen(false)} contactName={name} onSend={sendPix} />
       <LocationModal open={locOpen} onClose={() => setLocOpen(false)} onSend={sendLocationPin} />
       <ScheduleMessageModal open={schedOpen} onClose={() => setSchedOpen(false)} conversationId={conv.id} leadId={conv.lead_id} contactName={name} />
       <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ conversationId: conv.id }} channelId={conv.channel_id}

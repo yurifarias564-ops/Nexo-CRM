@@ -170,6 +170,14 @@ await su("delete from public.leads where name='Cliente do vendedor' or phone='55
 await su("delete from public.leads where id=$1", [outroLead]);
 await su("delete from public.whatsapp_channels where id=$1", [ch2]);
 
+console.log("\n# Chaves Pix");
+await su("insert into public.pix_keys (organization_id, key_type, key, holder_name, city) values ($1,'cnpj','55255981000100','Yuri','Maracanau')", [orgA]);
+ok("equipe vê as chaves Pix da empresa", (await as(C, "select key from public.pix_keys")).length === 1);
+ok("outra empresa não vê as chaves Pix", (await as(B, "select key from public.pix_keys")).length === 0);
+await expectError("ninguém cadastra chave direto no banco (só pelo servidor, que valida)", () => as(A, "insert into public.pix_keys (organization_id, key_type, key, holder_name, city) values ($1,'email','x@y.com','Y','Z')", [orgA]), "42501");
+ok("vendedor não exclui chave Pix", (await as(C, "delete from public.pix_keys returning 1")).length === 0);
+await expectError("tipo de chave inválido é recusado", () => su("insert into public.pix_keys (organization_id, key_type, key, holder_name, city) values ($1,'boleto','123','Y','Z')", [orgA]), "23514");
+
 console.log("\n# Vencimento da assinatura");
 await su("update public.subscriptions set current_period_end=now()-interval '1 day' where organization_id=$1", [orgA]);
 ok("assinatura vencida: acesso bloqueado na hora", (await as(A, "select * from public.leads")).length === 0);
