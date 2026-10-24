@@ -43,7 +43,13 @@ export async function POST(req: Request) {
       const prof = (Array.isArray(member.profiles) ? member.profiles[0] : member.profiles) as { full_name: string | null } | null;
       const [first, ...rest] = (prof?.full_name || u.user?.email?.split("@")[0] || "Vendedor").trim().split(/\s+/);
       sipPass = generateSipPass();
-      const ext = await a4.createExtension(v.api_token, { firstName: first!, lastName: rest.join(" "), email: u.user?.email ?? `${b.userId}@nexo.invalid`, sipPass });
+      // E-mail único na central (a pessoa pode já ter um usuário lá com o próprio e-mail):
+      // usa a variação "nome+crm…@dominio", que chega na mesma caixa de entrada.
+      const mail = u.user?.email ?? "";
+      const at = mail.indexOf("@");
+      const tag = `crm${b.userId.replace(/-/g, "").slice(0, 6)}`;
+      const email = at > 0 ? `${mail.slice(0, at).split("+")[0]}+${tag}${mail.slice(at)}` : `${tag}@nexo.invalid`;
+      const ext = await a4.createExtension(v.api_token, { firstName: first!, lastName: rest.join(" "), email, sipPass });
       ramal = String(ext.ramal);
       if (ext.senha) sipPass = String(ext.senha);
       if (ext.domain) domain = String(ext.domain).toLowerCase();
