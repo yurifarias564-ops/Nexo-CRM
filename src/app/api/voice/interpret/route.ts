@@ -52,7 +52,7 @@ export async function POST(req: Request) {
       return { id: m.user_id, name: p?.full_name || p?.email || "Usuário" };
     });
 
-    const { calls, reply } = await interpret(transcript, {
+    const { calls, reply, heard } = await interpret(transcript, {
       stages: stageList.map((s) => s.name),
       tags: tagList.map((t) => t.name),
       members: memberList.map((m) => m.name),
@@ -209,7 +209,7 @@ export async function POST(req: Request) {
       issues.push("Dica: diga também o dia e a hora (ex.: \"amanhã às 10 horas\") para já criar o evento no Google Agenda.");
     }
     if (!calls.length && reply) issues.push(reply);
-    return ok({ transcript, actions, issues });
+    return ok({ transcript: heard ?? transcript, raw: transcript, actions, issues });
   } catch (e) {
     return fail(e);
   }

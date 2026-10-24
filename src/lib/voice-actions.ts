@@ -42,7 +42,7 @@ export function describe(a: ResolvedAction): string {
     case "move_lead": return `Mover ${a.leadName} para "${a.stageName}"`;
     case "add_tags": return `Adicionar ${a.tags.map((t) => `#${t.name}`).join(", ")} em ${a.leadName}${a.tags.some((t) => !t.id) ? " (tag nova será criada)" : ""}`;
     case "remove_tags": return `Remover ${a.tags.map((t) => `#${t.name}`).join(", ")} de ${a.leadName}`;
-    case "create_lead": return `Criar lead "${a.name}" em "${a.stageName}"${a.phone ? ` · ${a.phone}` : ""}`;
+    case "create_lead": return `Criar lead "${a.name}" em "${a.stageName}"${a.phone ? ` · ${a.phone}` : ""}${a.value ? ` · ${a.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}${a.tags.length ? ` · tag${a.tags.length > 1 ? "s" : ""} ${a.tags.map((t) => t.name).join(", ")}` : ""}`;
     case "set_value": return `Valor de ${a.leadName}: ${a.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`;
     case "assign_lead": return `Responsável por ${a.leadName}: ${a.userName}`;
     case "add_note": return `Anotação em ${a.leadName}: "${a.note}"`;

@@ -29,6 +29,11 @@ export type ToolCall = { name: string; input: Record<string, unknown> };
 
 const TOOLS = [
   {
+    name: "frase_entendida",
+    description: "SEMPRE chame primeiro: a frase do usuário reescrita em português correto, corrigindo erros do reconhecimento de voz (ex.: 'feed' → 'lead', 'AirTag' → 'a tag', 'coluna' mantém). Não invente nada que não foi dito.",
+    input_schema: { type: "object", properties: { texto: { type: "string" } }, required: ["texto"] },
+  },
+  {
     name: "move_lead",
     description: "Move um lead para outra etapa/coluna do funil.",
     input_schema: { type: "object", properties: { lead: { type: "string", description: "Nome ou telefone do lead como foi dito" }, stage: { type: "string", description: "Nome da etapa de destino" } }, required: ["lead", "stage"] },
@@ -119,7 +124,7 @@ const TOOLS = [
 export async function interpret(
   transcript: string,
   context: { stages: string[]; tags: string[]; members: string[]; now: string; timeZone: string },
-): Promise<{ calls: ToolCall[]; reply: string | null }> {
+): Promise<{ calls: ToolCall[]; reply: string | null; heard: string | null }> {
   const system = [
     "Você converte comandos falados em português (Brasil) em ações de um CRM, usando as ferramentas.",
     "Um único comando pode gerar várias ações (ex.: mover e adicionar tag). Chame uma ferramenta por ação.",
@@ -130,7 +135,8 @@ export async function interpret(
     `Agora é ${context.now}, fuso ${context.timeZone}. Converta datas faladas para esse fuso: "amanhã às 10 horas" = dia seguinte 10:00; "sexta às 15h30" = próxima sexta 15:30; "meio-dia" = 12:00; "10 da noite" = 22:00; só a hora sem dia = hoje se ainda não passou, senão amanhã.`,
     "Agendamento: quando o usuário falar em agendar/agendamento/marcar com um horário, chame schedule_meeting. O sistema já move o lead para a etapa de agendamento sozinho, então NÃO chame move_lead para essa etapa junto.",
     "Mensagem agendada: quando o usuário quiser que uma mensagem seja ENVIADA ao cliente no futuro (\"entrar em contato dia 31\", \"mande para ele na segunda\", \"retomar contato no fim do mês\"), chame schedule_message com o texto que o cliente vai receber. Data sem horário = 09:00; \"final do mês\" sem dia = último dia do mês às 09:00. Não confunda com schedule_meeting, que é compromisso na agenda do vendedor.",
-    "Se o comando não for uma ação de CRM, responda em uma frase curta sem chamar ferramentas.",
+    "O texto vem de reconhecimento de voz e pode ter palavras trocadas por som parecido (\"feed\"/\"lide\" = lead, \"AirTag\"/\"a tag\" = tag, \"etapa\"/\"coluna\" = etapa). Interprete pela intenção. Sempre chame frase_entendida primeiro com a frase corrigida.",
+    "Se o comando não for uma ação de CRM, chame só frase_entendida e responda em uma frase curta.",
   ].join("\n");
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -157,11 +163,15 @@ export async function interpret(
   if (!res.ok) throw new HttpError(502, `Interpretação falhou: ${body.error?.message ?? res.status}`);
   const calls: ToolCall[] = [];
   let reply: string | null = null;
+  let heard: string | null = null;
   for (const b of body.content ?? []) {
-    if (b.type === "tool_use") calls.push({ name: b.name, input: b.input });
+    if (b.type === "tool_use" && b.name === "frase_entendida") {
+      const t = typeof b.input.texto === "string" ? b.input.texto.trim().slice(0, 1000) : "";
+      if (t) heard = t;
+    } else if (b.type === "tool_use") calls.push({ name: b.name, input: b.input });
     else if (b.type === "text" && b.text.trim()) reply = b.text.trim();
   }
-  return { calls, reply };
+  return { calls, reply, heard };
 }
 
 
