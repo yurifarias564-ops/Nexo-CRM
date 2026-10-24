@@ -12,6 +12,7 @@ import { useLatest } from "@/lib/hooks";
 import { TemplateModal } from "@/components/inbox/template-modal";
 import { ScheduleModal } from "./schedule-modal";
 import { CallModal } from "./call-modal";
+import { VoipCallButton } from "@/components/calls/voip-provider";
 import { callOutcomeLabel } from "@/lib/constants";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { ScheduledList } from "@/components/scheduled/scheduled-list";
@@ -340,6 +341,7 @@ export function LeadDrawer({
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="label mb-0">Histórico</span>
+                  <VoipCallButton leadId={lead.id} name={lead.name} phone={lead.phone} />
                   <Button size="sm" variant="outline" onClick={() => setCallOpen(true)}><PhoneCall className="h-3.5 w-3.5" /> Registrar ligação</Button>
                 </div>
                 <div className="mb-3 flex gap-2">

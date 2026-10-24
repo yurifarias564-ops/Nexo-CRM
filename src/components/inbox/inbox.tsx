@@ -13,6 +13,7 @@ import { TemplateModal } from "./template-modal";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { cn, formatPhone } from "@/lib/utils";
 import { CallButton, CallEntry, type ChatCall } from "@/components/calls/call-button";
+import { useVoip, VoipCallButton } from "@/components/calls/voip-provider";
 import { TimeAgo } from "@/components/ui/time-ago";
 import { useLatest } from "@/lib/hooks";
 import type { Conversation, Lead, Message, MsgType, Provider } from "@/lib/types";
@@ -186,6 +187,8 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   const [qrIndex, setQrIndex] = useState(0);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [provider, setProvider] = useState<Provider | null>(null);
+  const [coexist, setCoexist] = useState(false);
+  const voip = useVoip();
   const [lastInAt, setLastInAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [file, setFile] = useState<File | null>(null);
@@ -217,8 +220,8 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       scrollToBottom();
       if (unreadRef.current > 0) await sb.rpc("mark_conversation_read", { conv: conv.id });
     })();
-    sb.from("whatsapp_channels").select("provider").eq("id", conv.channel_id).maybeSingle()
-      .then(({ data }) => alive && setProvider((data?.provider as Provider | undefined) ?? null));
+    sb.from("whatsapp_channels").select("provider, meta_coexistence").eq("id", conv.channel_id).maybeSingle()
+      .then(({ data }) => { if (!alive) return; setProvider((data?.provider as Provider | undefined) ?? null); setCoexist(Boolean(data?.meta_coexistence)); });
     sb.from("messages").select("sent_at").eq("conversation_id", conv.id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle()
       .then(({ data }) => alive && setLastInAt(data ? new Date(data.sent_at).getTime() : null));
     if (conv.lead_id) sb.from("lead_tags").select("tag_id").eq("lead_id", conv.lead_id).then(({ data }) => alive && setTagIds((data ?? []).map((r) => r.tag_id)));
@@ -399,7 +402,8 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
             {tagIds.map((id) => { const t = ws.tagById.get(id); return t ? <TagPill key={id} name={t.name} color={t.color} className="text-[10px]" /> : null; })}
           </div>
         </div>
-        <CallButton conversationId={conv.id} name={name} phone={conv.wa_id} provider={provider} />
+        <VoipCallButton conversationId={conv.id} leadId={conv.lead_id} name={name} phone={conv.wa_id} compact />
+        {(!voip.ready || (provider === "meta" && !coexist)) && <CallButton conversationId={conv.id} name={name} phone={conv.wa_id} provider={provider} />}
         {conv.lead_id && (
           <Button variant="outline" size="sm" onClick={() => onOpenLead(conv.lead_id!)}><UserRound className="h-3.5 w-3.5" /> Lead</Button>
         )}

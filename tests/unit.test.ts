@@ -8,6 +8,7 @@ import { between, formatPhone, normalizePhone, norm } from "@/lib/utils";
 import { isValidCpfCnpj } from "@/lib/asaas";
 import { parseMoney } from "@/lib/spreadsheet";
 import { bestMatch } from "@/lib/voice";
+import { e164, parseHangup, trustedRecordingUrl } from "@/lib/voip/api4com";
 import { ResolvedAction, describe as describeAction } from "@/lib/voice-actions";
 
 test("telefone: normaliza formatos brasileiros", () => {
@@ -440,4 +441,30 @@ test("whatsapp em 1 clique: troca do código e registro do número chamam a Meta
   } finally {
     globalThis.fetch = orig;
   }
+});
+
+test("Api4Com: telefone no formato da central", () => {
+  assert.equal(e164("(85) 99900-3908"), "+5585999003908");
+  assert.equal(e164("5585999003908"), "+5585999003908");
+  assert.equal(e164("085 3333-4444"), "+558533334444");
+  assert.throws(() => e164("123"));
+});
+
+test("Api4Com: fim de ligação (webhook)", () => {
+  const ev = parseHangup({ eventType: "channel-hangup", id: "abc-1", direction: "outbound", recordUrl: "https://rec.api4com.com/a.mp3", duration: "42", startedAt: "2026-10-24T12:00:00Z", answeredAt: "2026-10-24T12:00:05Z", endedAt: "2026-10-24T12:00:47Z", hangupCause: "NORMAL_CLEARING", metadata: { gateway: "nexo-x", callRowId: "11111111-1111-1111-1111-111111111111" } });
+  assert.equal(ev?.id, "abc-1");
+  assert.equal(ev?.duration, 42);
+  assert.equal(ev?.metadata.callRowId, "11111111-1111-1111-1111-111111111111");
+  assert.equal(parseHangup({ eventType: "channel-answer", id: "x" }), null);
+  assert.equal(parseHangup({ eventType: "channel-hangup", id: "x", recordUrl: "http://inseguro/a.mp3" })?.recordUrl, null);
+  assert.equal(parseHangup("lixo"), null);
+});
+
+test("Api4Com: só baixa gravação de endereço público com HTTPS", () => {
+  assert.ok(trustedRecordingUrl("https://records.api4com.com/x.mp3"));
+  assert.ok(trustedRecordingUrl("https://bucket.s3.amazonaws.com/x.mp3"));
+  assert.ok(!trustedRecordingUrl("https://localhost/x.mp3"));
+  assert.ok(!trustedRecordingUrl("https://169.254.169.254/latest"));
+  assert.ok(!trustedRecordingUrl("http://records.api4com.com/x.mp3"));
+  assert.ok(!trustedRecordingUrl("https://user:pw@records.api4com.com/x"));
 });

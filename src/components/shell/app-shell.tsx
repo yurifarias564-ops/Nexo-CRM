@@ -10,6 +10,7 @@ import { Avatar } from "@/components/ui/misc";
 import { Logo } from "@/components/logo";
 import { VoiceCommand } from "@/components/voice/voice-command";
 import { CallProvider } from "@/components/calls/call-provider";
+import { VoipProvider } from "@/components/calls/voip-provider";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -132,7 +133,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </h1>
           <div className="ml-auto shrink-0"><VoiceCommand /></div>
         </header>
-        <main className="min-h-0 flex-1 overflow-hidden"><CallProvider>{children}</CallProvider></main>
+        <main className="min-h-0 flex-1 overflow-hidden"><CallProvider><VoipProvider>{children}</VoipProvider></CallProvider></main>
       </div>
     </div>
   );

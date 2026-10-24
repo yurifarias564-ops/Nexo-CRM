@@ -16,4 +16,4 @@ export function periodStart(p: CallPeriod, now = new Date()): string | null {
   else { d.setDate(1); d.setHours(0, 0, 0, 0); }
   return d.toISOString();
 }
-export const CALL_COLUMNS = "id, direction, status, wa_id, contact_name, lead_id, conversation_id, started_by, answered_by, duration_s, recording_path, backup_path, recording_mode, created_at, started_at, ended_at, error";
+export const CALL_COLUMNS = "id, kind, direction, status, wa_id, contact_name, lead_id, conversation_id, started_by, answered_by, duration_s, recording_path, backup_path, recording_mode, created_at, started_at, ended_at, error";

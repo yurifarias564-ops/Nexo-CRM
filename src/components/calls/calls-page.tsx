@@ -13,7 +13,7 @@ import { ANSWERED, CALL_COLUMNS, CALL_STATUS_LABEL, NOT_ANSWERED, periodStart, t
 import { fmtDuration } from "./webrtc";
 
 interface Row {
-  id: string; direction: "out" | "in"; status: string; wa_id: string; contact_name: string | null; lead_id: string | null; conversation_id: string | null;
+  id: string; kind?: "whatsapp" | "voip"; direction: "out" | "in"; status: string; wa_id: string; contact_name: string | null; lead_id: string | null; conversation_id: string | null;
   started_by: string | null; answered_by: string | null; duration_s: number | null; recording_path: string | null; backup_path: string | null;
   recording_mode: string; created_at: string; started_at: string | null; ended_at: string | null; error: string | null;
 }
@@ -155,7 +155,7 @@ export function CallsPage() {
                         <div className="min-w-0 basis-[calc(100%-3rem)] sm:flex-1 sm:basis-auto">
                           <p className="truncate font-medium text-slate-100">{name}</p>
                           <p className="truncate text-xs text-slate-500">
-                            {formatPhone(r.wa_id)} · {r.direction === "out" ? "feita" : "recebida"}{person ? ` por ${member.get(person) ?? "—"}` : ""}
+                            {r.kind === "voip" ? "Telefone" : "WhatsApp"} · {formatPhone(r.wa_id)} · {r.direction === "out" ? "feita" : "recebida"}{person ? ` por ${member.get(person) ?? "—"}` : ""}
                           </p>
                         </div>
                         <div className="ml-12 text-left sm:ml-0 sm:w-28 sm:text-right">

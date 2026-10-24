@@ -312,5 +312,24 @@ ok("início da consultoria e marco zero", (await as(A, "insert into public.team_
 await expectError("atendente não altera marco zero", () => as(C, "insert into public.team_settings (organization_id) values ($1)", [orgB]), "42501");
 ok("outra empresa não vê OS nem notas", (await as(B, "select * from public.team_sales")).length === 0 && (await as(B, "select * from public.team_notes")).length === 0);
 
+
+console.log("\n# Telefonia VoIP (Api4Com)");
+await su("insert into public.voip_settings (organization_id, domain, gateway) values ($1,'empresa.api4com.com','nexo-aaaaaaaaaaaaaaaa')", [orgA]);
+await su("insert into public.voip_secrets (organization_id, api_token, webhook_key) values ($1,'tok-12345678',repeat('k',64))", [orgA]);
+const extA = (await su("insert into public.voip_extensions (organization_id, user_id, ramal, domain) values ($1,$2,'1001','empresa.api4com.com') returning id", [orgA, A]))[0].id;
+await su("insert into public.voip_extension_secrets (extension_id, sip_password) values ($1,'senha-sip-1')", [extA]);
+ok("equipe vê que a telefonia está conectada", (await as(C, "select domain from public.voip_settings")).length === 1);
+ok("equipe vê os ramais da empresa", (await as(C, "select ramal from public.voip_extensions")).length === 1);
+ok("ninguém lê o token da central", (await as(A, "select * from public.voip_secrets")).length === 0);
+ok("ninguém lê a senha SIP pelo banco", (await as(A, "select * from public.voip_extension_secrets")).length === 0);
+ok("outra empresa não vê telefonia nem ramais", (await as(B, "select * from public.voip_settings")).length === 0 && (await as(B, "select * from public.voip_extensions")).length === 0);
+await expectError("usuário não cria ramal direto no banco", () => as(A, "insert into public.voip_extensions (organization_id, user_id, ramal) values ($1,$2,'1002')", [orgA, C]), "42501");
+await expectError("ramal duplicado na mesma empresa é recusado", () => su("insert into public.voip_extensions (organization_id, user_id, ramal) values ($1,$2,'1001')", [orgA, C]), "23505");
+await expectError("ramal com letras é recusado", () => su("insert into public.voip_extensions (organization_id, user_id, ramal) values ($1,$2,'12a')", [orgA, C]), "23514");
+const voipCall = (await su("insert into public.wa_calls (organization_id, kind, channel_id, lead_id, wa_id, direction, status, started_by, recording_mode, voip_call_id) values ($1,'voip',null,$2,'5585999990000','out','ringing',$3,'meta','c-1') returning id", [orgA, leadA, A]))[0].id;
+ok("ligação VoIP aparece em Ligações", (await as(C, "select kind from public.wa_calls where id=$1", [voipCall]))[0]?.kind === "voip");
+await expectError("mesmo id da central não duplica", () => su("insert into public.wa_calls (organization_id, kind, wa_id, direction, voip_call_id) values ($1,'voip','1','out','c-1')", [orgA]), "23505");
+await expectError("tipo de ligação inválido é recusado", () => su("insert into public.wa_calls (organization_id, kind, wa_id, direction) values ($1,'skype','1','out')", [orgA]), "23514");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

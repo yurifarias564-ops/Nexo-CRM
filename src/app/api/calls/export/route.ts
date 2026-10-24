@@ -53,7 +53,7 @@ export async function GET(req: Request) {
     const ws = wb.addWorksheet("Ligações");
     ws.columns = [
       { header: "Data", key: "d", width: 12 }, { header: "Hora", key: "h", width: 8 }, { header: "Cliente", key: "c", width: 24 }, { header: "Telefone", key: "t", width: 18 },
-      { header: "Tipo", key: "k", width: 10 }, { header: "Atendente", key: "a", width: 20 }, { header: "Situação", key: "s", width: 14 },
+      { header: "Tipo", key: "k", width: 10 }, { header: "Via", key: "v", width: 11 }, { header: "Atendente", key: "a", width: 20 }, { header: "Situação", key: "s", width: 14 },
       { header: "Duração (min)", key: "m", width: 13 }, { header: "Gravação", key: "g", width: 16 },
     ];
     for (const r of (data ?? []) as unknown as R[]) {
@@ -61,7 +61,7 @@ export async function GET(req: Request) {
       const person = r.direction === "out" ? r.started_by : r.answered_by;
       const row = ws.addRow({
         d: dt, h: dt.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
-        c: r.contact_name ?? "", t: formatPhone(r.wa_id), k: r.direction === "out" ? "Feita" : "Recebida", a: person ? names.get(person) ?? "" : "",
+        c: r.contact_name ?? "", t: formatPhone(r.wa_id), k: r.direction === "out" ? "Feita" : "Recebida", v: (r as { kind?: string }).kind === "voip" ? "Telefone" : "WhatsApp", a: person ? names.get(person) ?? "" : "",
         s: CALL_STATUS_LABEL[r.status] ?? r.status, m: r.duration_s ? Math.round((r.duration_s / 60) * 10) / 10 : 0,
         g: r.recording_path || r.backup_path ? { text: "Ouvir", hyperlink: `${base}/api/calls/${r.id}/recording` } : "",
       });

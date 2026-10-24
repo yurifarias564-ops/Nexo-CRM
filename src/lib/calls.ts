@@ -141,5 +141,5 @@ export async function handleCallBatch(channelId: string, batch: mc.CallBatch) {
 /** Ligações que ficaram "tocando" sem resposta do webhook viram falha (evita botão travado). */
 export async function expireStale(orgId: string) {
   await supabaseAdmin().from("wa_calls").update({ status: "failed", error: "Sem resposta do WhatsApp", updated_at: new Date().toISOString() })
-    .eq("organization_id", orgId).in("status", ["starting", "ringing", "accepting"]).lt("created_at", new Date(Date.now() - 3 * 60_000).toISOString());
+    .eq("organization_id", orgId).eq("kind", "whatsapp").in("status", ["starting", "ringing", "accepting"]).lt("created_at", new Date(Date.now() - 3 * 60_000).toISOString());
 }

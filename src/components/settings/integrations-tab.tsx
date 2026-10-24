@@ -7,6 +7,7 @@ import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/misc";
 import { Section } from "./section";
+import { TelephonyCard } from "./telephony-card";
 
 const MESSAGES: Record<string, [ "success" | "error" | "message", string ]> = {
   ok: ["success", "Google Agenda conectado! Os agendamentos agora vão direto para a sua agenda."],
@@ -65,6 +66,7 @@ export function IntegrationsTab({ googleStatus, googleMsg }: { googleStatus?: st
           </a>
         )}
       </div>
+      <div className="mt-4"><TelephonyCard /></div>
       <div className="mt-4 rounded-lg border border-line bg-ink-950/50 p-4 text-sm text-slate-400">
         <p className="font-medium text-slate-200">Como agendar</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">

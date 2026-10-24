@@ -22,6 +22,7 @@
     "date-fns": "^4.4.0",
     "exceljs": "^4.4.0",
     "geist": "^1.8.2",
+    "jssip": "^3.13.9",
     "lucide-react": "^1.61.0",
     "mammoth": "^1.13.0",
     "next": "^16.4.2",

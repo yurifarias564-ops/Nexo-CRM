@@ -158,6 +158,19 @@ Regra da Meta: na **API oficial**, texto livre só é entregue se o cliente falo
 4. Regras da Meta: o cliente precisa **permitir ligações** antes (botão "Pedir permissão" na conversa; só dentro de 24h da última mensagem dele; vale 7 dias ou para sempre). Limites: 1 pedido por dia e 2 por semana; até 100 ligações conectadas por dia por número; 4 ligações seguidas sem atender cancelam a permissão.
 5. Precisa de HTTPS (já é assim na Vercel) e microfone liberado no navegador.
 
+### 8c. Telefonia VoIP (ligações gravadas para o celular do lead)
+
+Funciona com **qualquer** WhatsApp (coexistência ou QR Code), porque é uma ligação telefônica comum, feita pelo navegador.
+
+1. Crie a conta na [Api4Com](https://www.api4com.com), coloque créditos (paga por minuto) e gere um **token de API sem validade** no portal.
+2. No CRM: **Configurações → Integrações → Telefonia → Conectar central**, cole o token (e o domínio SIP, ex.: `suaempresa.api4com.com`, se já souber). O CRM cadastra sozinho o webhook de fim de ligação com a gravação.
+3. Na mesma tela, clique **Criar ramal** para cada pessoa que vai ligar (ou **Já tenho ramal** para vincular um existente).
+4. A pessoa recarrega o CRM: o telefone embutido conecta na central e aparece o botão verde **Ligar** no lead e na conversa.
+
+Como funciona: o CRM pede a ligação à central → a central chama o ramal (o navegador atende sozinho) → disca para o lead. A central grava; ao terminar, o CRM baixa a gravação e guarda para sempre em **Ligações** (o navegador também guarda uma cópia de segurança).
+
+> Ligação pelo **WhatsApp** (Calling API) só existe em número 100% API oficial. Em coexistência a Meta não libera ligação pela API, e pelo QR Code o WhatsApp não permite — por isso a telefonia VoIP.
+
 ### 9. Relatórios mensais
 
 1. Usa a mesma `ANTHROPIC_API_KEY`. O modelo que escreve o relatório é `ANTHROPIC_REPORT_MODEL` (padrão `claude-sonnet-5-5`).
