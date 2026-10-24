@@ -30,7 +30,7 @@ export type ToolCall = { name: string; input: Record<string, unknown> };
 const TOOLS = [
   {
     name: "frase_entendida",
-    description: "SEMPRE chame primeiro: a frase do usuário reescrita em português correto, corrigindo erros do reconhecimento de voz (ex.: 'feed' → 'lead', 'AirTag' → 'a tag', 'coluna' mantém). Não invente nada que não foi dito.",
+    description: "SEMPRE chame primeiro: a frase do usuário reescrita em português correto, corrigindo erros do reconhecimento de voz (ex.: 'feed' → 'lead', 'AirTag' → 'a tag', 'coluna' mantém). Não invente nada que não foi dito. NUNCA troque nomes de pessoas/leads: mantenha o nome exatamente como foi falado.",
     input_schema: { type: "object", properties: { texto: { type: "string" } }, required: ["texto"] },
   },
   {
@@ -136,6 +136,7 @@ export async function interpret(
     "Agendamento: quando o usuário falar em agendar/agendamento/marcar com um horário, chame schedule_meeting. O sistema já move o lead para a etapa de agendamento sozinho, então NÃO chame move_lead para essa etapa junto.",
     "Mensagem agendada: quando o usuário quiser que uma mensagem seja ENVIADA ao cliente no futuro (\"entrar em contato dia 31\", \"mande para ele na segunda\", \"retomar contato no fim do mês\"), chame schedule_message com o texto que o cliente vai receber. Data sem horário = 09:00; \"final do mês\" sem dia = último dia do mês às 09:00. Não confunda com schedule_meeting, que é compromisso na agenda do vendedor.",
     "O texto vem de reconhecimento de voz e pode ter palavras trocadas por som parecido (\"feed\"/\"lide\" = lead, \"AirTag\"/\"a tag\" = tag, \"etapa\"/\"coluna\" = etapa). Interprete pela intenção. Sempre chame frase_entendida primeiro com a frase corrigida e, na MESMA resposta, chame também as ferramentas de cada ação pedida.",
+    "Leads que chegaram pelo WhatsApp já existem no CRM: para mover, mudar valor, tag, responsável etc. de um lead existente use as ferramentas de ação com o nome falado. Só use create_lead quando o usuário pedir para CRIAR/cadastrar um lead novo.",
     "Se o comando não for uma ação de CRM, chame só frase_entendida e responda em uma frase curta.",
   ].join("\n");
 
