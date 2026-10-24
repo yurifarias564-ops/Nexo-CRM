@@ -2,7 +2,7 @@ import { after } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { lidOf, parseWebhook } from "@/lib/whatsapp/zapi";
-import { applyStatuses, ingestBatch, loadChannel, zapiCreds } from "@/lib/whatsapp";
+import { applyChanges, applyStatuses, ingestBatch, loadChannel, saveSample, zapiCreds } from "@/lib/whatsapp";
 import { markDown, markUp, tryReconnect } from "@/lib/whatsapp/watchdog";
 import { linkLidsAfter, mapLidsBefore } from "@/lib/whatsapp/zapi-lid";
 
@@ -53,6 +53,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
       await linkLidsAfter(channelId, evt.messages, creds ? (phone) => lidOf(creds, phone) : undefined);
     }
     if (evt.statuses.length) await applyStatuses(channelId, evt.statuses);
+    if (evt.changes.length) await applyChanges(channelId, evt.changes);
+    if (evt.sample) await saveSample("zapi", evt.sample, payload);
     return new Response("ok");
   } catch (e) {
     console.error("[webhook zapi]", e);

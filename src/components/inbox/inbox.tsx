@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarClock, Check, CheckCheck, CircleUserRound, Clock, Copy, FileText, Lock, MapPin, MessageCircle, Paperclip, Plus, Search, Send, UserRound, Video, X, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, Ban, CalendarClock, Check, CheckCheck, ChevronDown, CircleUserRound, Clock, Copy, Pencil, Trash2, FileText, Lock, MapPin, MessageCircle, Paperclip, Plus, Search, Send, UserRound, Video, X, Zap, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -471,7 +471,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
                 <div className="sticky top-0 z-10 my-3 flex justify-center">
                   <span className="rounded-md border border-line bg-ink-850/95 px-3 py-1 text-[11px] font-medium text-slate-400 backdrop-blur">{g.day}</span>
                 </div>
-                <div className="space-y-1.5">{g.items.map((m) => ("kind" in m ? <CallEntry key={`call-${m.id}`} c={m} /> : <Bubble key={m.id} m={m} />))}</div>
+                <div className="space-y-1.5">{g.items.map((m) => ("kind" in m ? <CallEntry key={`call-${m.id}`} c={m} /> : <Bubble key={m.id} m={m} canChange={provider !== "meta"} />))}</div>
               </div>
             ))}
             {!messages.length && <p className="mt-10 text-center text-sm text-slate-500">Nenhuma mensagem ainda.</p>}
@@ -577,35 +577,94 @@ function StatusIcon({ s }: { s: Message["status"] }) {
   return null;
 }
 
-function Bubble({ m }: { m: Message }) {
+function Bubble({ m, canChange }: { m: Message; canChange: boolean }) {
   const out = m.direction === "out";
   const time = new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  const media = m.media_ref && !m.id.startsWith("tmp-") ? `/api/media/${m.id}` : null;
+  const media = m.media_ref && !m.id.startsWith("tmp-") && !m.deleted_at ? `/api/media/${m.id}` : null;
+  const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [now, setNowB] = useState(() => Date.now());
+  const age = now - new Date(m.sent_at).getTime();
+  const canEdit = canChange && out && !m.deleted_at && m.type === "text" && m.media_mime !== "application/x-pix" && age < 15 * 60_000 && !m.id.startsWith("tmp-");
+  const canDelete = canChange && out && !m.deleted_at && age < 48 * 3600_000 && !m.id.startsWith("tmp-");
+
+  async function change(method: "PATCH" | "DELETE", body?: unknown) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/messages/${m.id}`, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(method === "DELETE" ? "Mensagem apagada para todos" : "Mensagem editada");
+      setEditing(null);
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); setMenu(false); }
+  }
+
   return (
-    <div className={cn("flex", out ? "justify-end" : "justify-start")}>
-      <div className={cn("max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-card md:max-w-[62%]",
-        out ? "rounded-br-md bg-gradient-to-br from-brand-600 to-navy-500 text-white" : "rounded-bl-md border border-line bg-ink-800 text-slate-100")}>
-        {media && m.type === "image" && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <a href={media} target="_blank" rel="noopener noreferrer"><img src={media} alt="Imagem" loading="lazy" className="mb-1 max-h-72 rounded-lg object-cover" /></a>
+    <div className={cn("group flex", out ? "justify-end" : "justify-start")}>
+      <div className={cn("relative max-w-[78%] rounded-2xl px-3 py-2 text-sm shadow-card md:max-w-[62%]",
+        m.deleted_at ? (out ? "rounded-br-md bg-brand-900/60 text-blue-100/80" : "rounded-bl-md border border-line bg-ink-850 text-slate-400")
+          : out ? "rounded-br-md bg-gradient-to-br from-brand-600 to-navy-500 text-white" : "rounded-bl-md border border-line bg-ink-800 text-slate-100")}>
+        {(canEdit || canDelete) && (
+          <button onClick={() => { setNowB(Date.now()); setMenu((v) => !v); }} aria-label="Opções da mensagem"
+            className="absolute right-1 top-1 rounded-full bg-black/30 p-0.5 opacity-0 transition group-hover:opacity-100 focus:opacity-100">
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
         )}
-        {media && m.type === "sticker" && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={media} alt="Figurinha" loading="lazy" className="h-32 w-32 object-contain" />
+        {menu && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} aria-hidden />
+            <div className="absolute right-1 top-6 z-30 w-44 overflow-hidden rounded-xl border border-line bg-ink-850 py-1 text-sm text-slate-200 shadow-card" role="menu">
+              {canEdit && <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-2 hover:bg-ink-700" onClick={() => { setEditing(m.body ?? ""); setMenu(false); }}><Pencil className="h-3.5 w-3.5" /> Editar</button>}
+              {canDelete && <button role="menuitem" disabled={busy} className="flex w-full items-center gap-2 px-3 py-2 text-red-300 hover:bg-ink-700"
+                onClick={() => { if (confirm("Apagar esta mensagem para todos? Ela some também no WhatsApp do cliente.")) void change("DELETE"); else setMenu(false); }}><Trash2 className="h-3.5 w-3.5" /> Apagar para todos</button>}
+            </div>
+          </>
         )}
-        {media && m.type === "audio" && <audio controls preload="none" src={media} className="mb-1 h-10 w-64 max-w-full" />}
-        {media && m.type === "video" && (m.media_mime?.includes("ptv")
-          ? <video controls playsInline preload="metadata" src={media} className="mb-1 h-56 w-56 rounded-full object-cover" />
-          : <video controls preload="none" src={media} className="mb-1 max-h-72 rounded-lg" />)}
-        {media && m.type === "document" && (
-          <a href={media} target="_blank" rel="noopener noreferrer" className="mb-1 flex items-center gap-2 rounded-lg bg-black/20 p-2 hover:bg-black/30">
-            <FileText className="h-5 w-5 shrink-0" /> <span className="truncate">{m.body ?? "Documento"}</span>
-          </a>
+        {m.deleted_at ? (
+          <div>
+            <p className="flex items-center gap-1.5 italic"><Ban className="h-3.5 w-3.5" /> {out ? "Você apagou esta mensagem" : "Esta mensagem foi apagada"}</p>
+            {m.body && (showOriginal
+              ? <p className="mt-1 whitespace-pre-wrap break-words text-xs opacity-70 line-through decoration-1">{m.body}</p>
+              : <button className="mt-0.5 text-[11px] underline opacity-70 hover:opacity-100" onClick={() => setShowOriginal(true)}>ver o que estava escrito</button>)}
+          </div>
+        ) : editing !== null ? (
+          <div className="min-w-[220px]">
+            <textarea className="field min-h-[60px] w-full resize-y bg-ink-900 text-sm text-slate-100" value={editing} maxLength={4096} autoFocus
+              onChange={(e) => setEditing(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (editing.trim()) void change("PATCH", { text: editing }); } if (e.key === "Escape") setEditing(null); }} />
+            <div className="mt-1 flex justify-end gap-2 text-xs">
+              <button onClick={() => setEditing(null)} className="rounded px-2 py-1 hover:bg-black/20">Cancelar</button>
+              <button onClick={() => void change("PATCH", { text: editing })} disabled={busy || !editing.trim()} className="rounded bg-white/20 px-2 py-1 font-medium hover:bg-white/30">Salvar</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {media && m.type === "image" && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <a href={media} target="_blank" rel="noopener noreferrer"><img src={media} alt="Imagem" loading="lazy" className="mb-1 max-h-72 rounded-lg object-cover" /></a>
+            )}
+            {media && m.type === "sticker" && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={media} alt="Figurinha" loading="lazy" className="h-32 w-32 object-contain" />
+            )}
+            {media && m.type === "audio" && <audio controls preload="none" src={media} className="mb-1 h-10 w-64 max-w-full" />}
+            {media && m.type === "video" && (m.media_mime?.includes("ptv")
+              ? <video controls playsInline preload="metadata" src={media} className="mb-1 h-56 w-56 rounded-full object-cover" />
+              : <video controls preload="none" src={media} className="mb-1 max-h-72 rounded-lg" />)}
+            {media && m.type === "document" && (
+              <a href={media} target="_blank" rel="noopener noreferrer" className="mb-1 flex items-center gap-2 rounded-lg bg-black/20 p-2 hover:bg-black/30">
+                <FileText className="h-5 w-5 shrink-0" /> <span className="truncate">{m.body ?? "Documento"}</span>
+              </a>
+            )}
+            {m.media_mime === "application/x-pix" ? <PixBody body={m.body} out={out} />
+              : m.type === "location" ? <LocationBody body={m.body} />
+              : m.body && !(m.type === "document" && media) && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+          </>
         )}
-        {m.media_mime === "application/x-pix" ? <PixBody body={m.body} out={out} />
-          : m.type === "location" ? <LocationBody body={m.body} />
-          : m.body && !(m.type === "document" && media) && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
         <div className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", out ? "text-blue-100/70" : "text-slate-500")}>
+          {m.edited_at && !m.deleted_at && <span title={m.original_body ? `Antes: ${m.original_body}` : undefined}>Editada ·</span>}
           {time} {out && <StatusIcon s={m.status} />}
         </div>
       </div>

@@ -2,7 +2,7 @@ import "server-only";
 import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import type { MsgStatus, MsgType } from "@/lib/types";
-import { tsToIso, type NormalizedMessage, type StatusUpdate } from "./types";
+import { tsToIso, type MessageChange, type NormalizedMessage, type StatusUpdate } from "./types";
 
 const base = () => env("EVOLUTION_API_URL").replace(/\/+$/, "");
 
@@ -21,7 +21,7 @@ async function call<T>(path: string, init: RequestInit = {}, timeoutMs = 20_000)
   return body;
 }
 
-const EVENTS = ["MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "SEND_MESSAGE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "CONTACTS_UPSERT"];
+const EVENTS = ["MESSAGES_SET", "MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_EDITED", "MESSAGES_DELETE", "SEND_MESSAGE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "CONTACTS_UPSERT"];
 
 export async function createInstance(instanceName: string, webhookUrl: string) {
   return call<unknown>("/instance/create", {
@@ -123,6 +123,21 @@ export async function sendCopyButton(instance: string, to: string, m: { title: s
   });
   if (!r.key?.id) throw new HttpError(502, "WhatsApp (QR) não retornou o id da mensagem");
   return r.key.id;
+}
+
+const jidOf = (to: string) => (to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`);
+
+/** Edita uma mensagem de texto enviada. */
+export async function editText(instance: string, to: string, externalId: string, text: string) {
+  await call(`/chat/updateMessage/${encodeURIComponent(instance)}`, {
+    method: "POST", body: JSON.stringify({ number: to.replace(/\D/g, ""), key: { remoteJid: jidOf(to), fromMe: true, id: externalId }, text }),
+  });
+}
+/** Apaga para todos uma mensagem enviada. */
+export async function deleteForEveryone(instance: string, to: string, externalId: string) {
+  await call(`/chat/deleteMessageForEveryone/${encodeURIComponent(instance)}`, {
+    method: "DELETE", body: JSON.stringify({ id: externalId, remoteJid: jidOf(to), fromMe: true }),
+  });
 }
 
 /** Localização (pino no mapa). */
@@ -263,6 +278,7 @@ export interface EvolutionEvent {
   messages: NormalizedMessage[];
   historical: boolean;
   statuses: StatusUpdate[];
+  changes: MessageChange[];
   connection?: "open" | "connecting" | "close";
   /** Código do motivo da queda (401/403/402/406 = sessão encerrada: precisa QR de novo). */
   reason?: number;
@@ -272,7 +288,7 @@ export interface EvolutionEvent {
 export function parseWebhook(payload: unknown): EvolutionEvent {
   const p = payload as { event?: string; data?: unknown };
   const event = String(p.event ?? "").toLowerCase().replace(/_/g, ".");
-  const out: EvolutionEvent = { messages: [], historical: false, statuses: [] };
+  const out: EvolutionEvent = { messages: [], historical: false, statuses: [], changes: [] };
   const data = p.data as Record<string, unknown> | unknown[] | undefined;
 
   if (event === "messages.upsert" || event === "send.message") {
@@ -294,6 +310,19 @@ export function parseWebhook(payload: unknown): EvolutionEvent {
       const id = u?.keyId ?? u?.key?.id;
       const st = UPDATE_STATUS[String(u?.status ?? u?.update?.status ?? "")];
       if (id && st) out.statuses.push({ external_id: id, status: st });
+    }
+  } else if (event === "messages.edited") {
+    const list = Array.isArray(data) ? data : [data];
+    for (const e of list as { key?: { id?: string }; editedMessage?: { conversation?: string; extendedTextMessage?: { text?: string }; imageMessage?: { caption?: string } } }[]) {
+      const id = e?.key?.id;
+      const em = e?.editedMessage;
+      if (id) out.changes.push({ external_id: id, kind: "edit", body: em?.conversation ?? em?.extendedTextMessage?.text ?? em?.imageMessage?.caption ?? null });
+    }
+  } else if (event === "messages.delete") {
+    const list = Array.isArray(data) ? data : [data];
+    for (const d of list as { id?: string; key?: { id?: string } }[]) {
+      const id = d?.id ?? d?.key?.id;
+      if (id) out.changes.push({ external_id: id, kind: "delete" });
     }
   } else if (event === "connection.update") {
     const s = (data as { state?: string })?.state;

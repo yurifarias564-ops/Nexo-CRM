@@ -41,5 +41,6 @@ export interface Message {
   id: string; conversation_id: string; channel_id: string; external_id: string; direction: MsgDirection;
   type: MsgType; body: string | null; media_ref: string | null; media_mime: string | null; status: MsgStatus;
   sent_by: string | null; sent_at: string;
+  deleted_at?: string | null; edited_at?: string | null; original_body?: string | null;
 }
 export interface QuickReply { id: string; organization_id: string; shortcut: string; title: string; content: string }

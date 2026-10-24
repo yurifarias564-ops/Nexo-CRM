@@ -5,7 +5,7 @@ import type { Channel } from "@/lib/types";
 import * as meta from "./meta";
 import * as evo from "./evolution";
 import * as zapi from "./zapi";
-import type { NormalizedMessage } from "./types";
+import type { MessageChange, NormalizedMessage } from "./types";
 
 export interface ChannelWithSecrets extends Channel {
   secrets: { meta_access_token: string | null; webhook_secret: string; zapi_token?: string | null; zapi_client_token?: string | null };
@@ -65,4 +65,34 @@ export async function applyStatuses(channelId: string, statuses: { external_id: 
     const { error } = await db.rpc("update_message_status", { p_channel: channelId, p_external_id: s.external_id, p_status: s.status });
     if (error) throw error;
   }
+}
+
+/** Aplica no CRM as mensagens apagadas/editadas no celular (ou em outro aparelho). */
+export async function applyChanges(channelId: string, changes: MessageChange[]) {
+  const db = supabaseAdmin();
+  const now = new Date().toISOString();
+  for (const c of changes) {
+    const { data: m } = await db.from("messages").select("id, conversation_id, body, original_body, deleted_at")
+      .eq("channel_id", channelId).eq("external_id", c.external_id).maybeSingle();
+    if (!m) continue;
+    if (c.kind === "delete") {
+      if (!m.deleted_at) await db.from("messages").update({ deleted_at: now }).eq("id", m.id);
+    } else if (c.body !== undefined && c.body !== null && c.body !== m.body) {
+      await db.from("messages").update({ body: c.body, edited_at: now, original_body: m.original_body ?? m.body }).eq("id", m.id);
+    } else continue;
+    // Prévia da conversa acompanha a última mensagem
+    const { data: last } = await db.from("messages").select("id, body, type, deleted_at").eq("conversation_id", m.conversation_id)
+      .order("sent_at", { ascending: false }).limit(1).maybeSingle();
+    if (last && last.id === m.id) {
+      await db.from("conversations").update({ last_message_preview: (last.deleted_at ? "🚫 Mensagem apagada" : last.body ?? `[${last.type}]`).slice(0, 120) }).eq("id", m.conversation_id);
+    }
+  }
+}
+
+/** Guarda um exemplo do aviso (apagar/editar) para conferir o formato do provedor. Mantém só os últimos. */
+export async function saveSample(provider: string, kind: string, payload: unknown) {
+  const db = supabaseAdmin();
+  await db.from("webhook_samples").insert({ provider, kind, payload: payload as object }).then(() => undefined, () => undefined);
+  const { data } = await db.from("webhook_samples").select("id").order("id", { ascending: false }).range(50, 50);
+  if (data?.[0]) await db.from("webhook_samples").delete().lte("id", data[0].id);
 }

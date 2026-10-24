@@ -26,3 +26,10 @@ export function tsToIso(ts: unknown): string {
   if (Number.isFinite(n) && n > 0) return new Date(n < 1e12 ? n * 1000 : n).toISOString();
   return new Date().toISOString();
 }
+
+/** Mensagem apagada para todos ou editada (no celular ou em outro aparelho). */
+export interface MessageChange {
+  external_id: string;
+  kind: "delete" | "edit";
+  body?: string | null;
+}

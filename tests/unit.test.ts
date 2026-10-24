@@ -543,3 +543,16 @@ test("Z-API: mensagem só com @lid fica marcada para juntar na conversa do núme
   const noSuffix = parseZ({ type: "ReceivedCallback", messageId: "L3", phone: "222200401526959", chatLid: "222200401526959@lid", fromMe: true, text: { message: "x" } });
   assert.equal(noSuffix.messages[0]?.wa_id, "222200401526959");
 });
+
+test("Apagar e editar no celular chegam como alteração (Z-API e Evolution)", async () => {
+  const { parseWebhook: parseZ } = await import("@/lib/whatsapp/zapi");
+  const del = parseZ({ type: "ReceivedCallback", messageId: "X9", phone: "5585999998888", fromMe: true, notification: "REVOKE" });
+  assert.deepEqual(del.changes, [{ external_id: "X9", kind: "delete" }]);
+  assert.equal(del.messages.length, 0, "não vira mensagem nova");
+  const ed = parseZ({ type: "ReceivedCallback", messageId: "X8", phone: "5585999998888", fromMe: true, isEdit: true, text: { message: "texto novo" } });
+  assert.deepEqual(ed.changes, [{ external_id: "X8", kind: "edit", body: "texto novo" }]);
+  const evEdit = parseEvo({ event: "messages.edited", data: { key: { id: "E1" }, editedMessage: { conversation: "corrigido" } } });
+  assert.deepEqual(evEdit.changes, [{ external_id: "E1", kind: "edit", body: "corrigido" }]);
+  const evDel = parseEvo({ event: "MESSAGES_DELETE", data: { id: "E2", remoteJid: "5585@s.whatsapp.net", fromMe: true, status: "DELETED" } });
+  assert.deepEqual(evDel.changes, [{ external_id: "E2", kind: "delete" }]);
+});

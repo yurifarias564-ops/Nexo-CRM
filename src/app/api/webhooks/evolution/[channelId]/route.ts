@@ -3,7 +3,7 @@ import { LOGGED_OUT_CODES, markDown, markUp, tryReconnect } from "@/lib/whatsapp
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { parseWebhook, ownerNumber } from "@/lib/whatsapp/evolution";
-import { applyStatuses, ingestBatch } from "@/lib/whatsapp";
+import { applyChanges, applyStatuses, ingestBatch } from "@/lib/whatsapp";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -61,6 +61,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
       }
     }
     if (evt.statuses.length) await applyStatuses(channelId, evt.statuses);
+    if (evt.changes.length) await applyChanges(channelId, evt.changes);
   } catch (e) {
     console.error("[evolution webhook]", e);
     return new Response("error", { status: 500 });

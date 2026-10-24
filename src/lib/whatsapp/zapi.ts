@@ -1,7 +1,7 @@
 import "server-only";
 import { HttpError } from "@/lib/http";
 import type { MsgStatus } from "@/lib/types";
-import { tsToIso, type NormalizedMessage, type StatusUpdate } from "./types";
+import { tsToIso, type MessageChange, type NormalizedMessage, type StatusUpdate } from "./types";
 
 // Z-API (https://developer.z-api.io): WhatsApp por QR Code como serviço gerenciado.
 export interface ZapiCreds { instanceId: string; token: string; clientToken: string | null }
@@ -94,6 +94,16 @@ const KEY_TYPE = { cpf: "CPF", cnpj: "CNPJ", phone: "PHONE", email: "EMAIL", ran
 export async function sendPixCard(c: ZapiCreds, to: string, p: { name: string; keyType: keyof typeof KEY_TYPE; key: string }) {
   return msgId(await call(c, "send-button-pix", { method: "POST", body: { phone: phoneOf(to), pixKey: p.key, type: KEY_TYPE[p.keyType], merchantName: p.name } }));
 }
+/** Edita uma mensagem de texto enviada. */
+export async function editText(c: ZapiCreds, to: string, externalId: string, text: string) {
+  return msgId(await call(c, "send-text", { method: "POST", body: { phone: phoneOf(to), message: text, editMessageId: externalId } }));
+}
+/** Apaga para todos uma mensagem enviada. */
+export async function deleteForEveryone(c: ZapiCreds, to: string, externalId: string) {
+  const q = new URLSearchParams({ messageId: externalId, phone: phoneOf(to), owner: "true" });
+  await call(c, `messages?${q.toString()}`, { method: "DELETE" });
+}
+
 export async function sendCopyButton(c: ZapiCreds, to: string, m: { message: string; code: string; buttonText: string }) {
   return msgId(await call(c, "send-button-otp", { method: "POST", body: { phone: phoneOf(to), message: m.message, code: m.code, buttonText: m.buttonText } }));
 }
@@ -101,7 +111,7 @@ export async function sendCopyButton(c: ZapiCreds, to: string, m: { message: str
 // -----------------------------------------------------------------------------
 // Webhooks (ReceivedCallback, MessageStatusCallback, ConnectedCallback, DisconnectedCallback)
 
-export interface ZapiEvent { messages: NormalizedMessage[]; statuses: StatusUpdate[]; connection?: "open" | "close" }
+export interface ZapiEvent { messages: NormalizedMessage[]; statuses: StatusUpdate[]; changes: MessageChange[]; connection?: "open" | "close"; sample?: "revoke" | "edit" }
 
 const STATUS: Record<string, MsgStatus> = { SENT: "sent", RECEIVED: "delivered", DELIVERED: "delivered", READ: "read", PLAYED: "read" };
 type Rec = Record<string, unknown>;
@@ -131,10 +141,25 @@ function content(p: Rec): Pick<NormalizedMessage, "type" | "body" | "media_ref" 
 
 export function parseWebhook(payload: unknown): ZapiEvent {
   const p = o(payload) ?? {};
-  const out: ZapiEvent = { messages: [], statuses: [] };
+  const out: ZapiEvent = { messages: [], statuses: [], changes: [] };
   const type = String(p.type ?? "");
   if (type === "ReceivedCallback") {
     if (p.isGroup || p.isNewsletter || p.broadcast || p.isStatusReply) return out;
+    // Apagada para todos
+    if (String(p.notification ?? "").toUpperCase() === "REVOKE") {
+      const target = s(p.referenceMessageId) ?? s(p.messageId);
+      if (target) out.changes.push({ external_id: target, kind: "delete" });
+      out.sample = "revoke";
+      return out;
+    }
+    // Editada: chega de novo com o mesmo id e o texto novo
+    if (p.isEdit === true) {
+      const t = o(p.text);
+      const target = s(p.editMessageId) ?? s(p.referenceMessageId) ?? s(p.messageId);
+      if (target) out.changes.push({ external_id: target, kind: "edit", body: s(t?.message) ?? s(o(p.image)?.caption) ?? s(o(p.video)?.caption) ?? null });
+      out.sample = "edit";
+      return out;
+    }
     // O WhatsApp às vezes identifica o contato só pelo @lid (sem o número), principalmente
     // nas mensagens que você manda pelo celular. Guardamos o @lid para juntar na conversa certa.
     const rawPhone = s(p.phone) ?? "";
