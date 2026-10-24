@@ -21,7 +21,7 @@ function toPlace(f: Feature): Place {
   const street = [p.street, p.housenumber].filter(Boolean).join(", ");
   const address = [street, p.district || p.locality, p.city, p.state].filter(Boolean).join(", ");
   const name = p.name || street || p.city || "Local";
-  return { name, address: address === name ? [p.city, p.state].filter(Boolean).join(", ") : address, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], kind: p.osm_value ?? "" };
+  return { name, address: address === name ? [p.city, p.state].filter(Boolean).join(", ") : address, lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], kind: p.osm_key === "highway" ? "street" : p.osm_value ?? "" };
 }
 
 async function photon(path: string, signal?: AbortSignal): Promise<Place[]> {
@@ -106,7 +106,9 @@ export function LocationModal({ open, onClose, onSend }: { open: boolean; onClos
         ]);
         setPinAddr(pin[0] ?? null);
         const seen = new Set<string>();
-        setNearby(near.filter((p) => p.name && p.kind !== "house" && !seen.has(p.name) && seen.add(p.name)).slice(0, 8));
+        const uniq = near.filter((p) => p.name && p.kind !== "house" && !seen.has(p.name) && seen.add(p.name));
+        // Comércios e pontos de referência primeiro; ruas depois
+        setNearby([...uniq.filter((p) => p.kind !== "street"), ...uniq.filter((p) => p.kind === "street")].slice(0, 8));
       } catch { /* cancelado */ } finally { setNearLoading(false); }
     }, 450);
     return () => { clearTimeout(t); ctl.abort(); };
