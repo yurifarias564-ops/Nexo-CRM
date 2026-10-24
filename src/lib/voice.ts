@@ -172,6 +172,8 @@ export async function interpret(
     if (r.reply) reply = r.reply;
     calls.push(...r.calls);
     if (!r.toolUses.length || r.stop !== "tool_use") break;
+    // Já veio mais de uma ação de uma vez: o comando foi entendido inteiro, não precisa perguntar de novo
+    if (round === 0 && r.calls.length >= 2) break;
     messages.push({ role: "assistant", content: r.content });
     messages.push({
       role: "user",
