@@ -7,9 +7,11 @@ import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
 import { Field, Modal, Spinner } from "@/components/ui/misc";
 import { useVoip } from "@/components/calls/voip-provider";
+import { formatPhone } from "@/lib/utils";
 
 interface Settings { domain: string | null; connected_at: string }
-interface Ext { user_id: string; ramal: string }
+interface Ext { user_id: string; ramal: string; bina: string | null }
+interface Num { phone_number: string | null; name: string }
 
 async function send(url: string, method: string, body?: unknown) {
   const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -24,6 +26,9 @@ export function TelephonyCard() {
   const voip = useVoip();
   const [settings, setSettings] = useState<Settings | null | undefined>(undefined);
   const [exts, setExts] = useState<Ext[]>([]);
+  const [nums, setNums] = useState<Num[]>([]);
+  const [customFor, setCustomFor] = useState<string | null>(null);
+  const [custom, setCustom] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
   const [token, setToken] = useState("");
   const [domain, setDomain] = useState("");
@@ -33,12 +38,14 @@ export function TelephonyCard() {
 
   const load = useCallback(async () => {
     const sb = supabaseBrowser();
-    const [{ data: s }, { data: e }] = await Promise.all([
+    const [{ data: s }, { data: e }, { data: ch }] = await Promise.all([
       sb.from("voip_settings").select("domain, connected_at").eq("organization_id", ws.orgId).maybeSingle(),
-      sb.from("voip_extensions").select("user_id, ramal").eq("organization_id", ws.orgId),
+      sb.from("voip_extensions").select("user_id, ramal, bina").eq("organization_id", ws.orgId),
+      sb.from("whatsapp_channels").select("phone_number, name").eq("organization_id", ws.orgId),
     ]);
     setSettings((s as Settings | null) ?? null);
     setExts((e ?? []) as Ext[]);
+    setNums(((ch ?? []) as Num[]).filter((n) => n.phone_number));
   }, [ws.orgId]);
   useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
 
@@ -66,6 +73,15 @@ export function TelephonyCard() {
     setBusy("link");
     try { await send("/api/voip/extensions", "POST", { userId: linkFor, ramal: link.ramal.trim(), sipPass: link.pass }); toast.success("Ramal vinculado"); setLinkFor(null); setLink({ ramal: "", pass: "" }); await load(); }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
+  }
+  async function setBina(userId: string, bina: string | null) {
+    setBusy(`bina:${userId}`);
+    try {
+      const r = await send("/api/voip/extensions", "PATCH", { userId, bina });
+      toast.success(r.bina ? `Pronto: as ligações dessa pessoa saem pelo ${formatPhone(r.bina)}` : "Pronto: as ligações usam número local dinâmico");
+      setCustomFor(null); setCustom("");
+      await load();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
   }
   async function removeExt(userId: string) {
     if (!confirm("Tirar o ramal desta pessoa no CRM? (Na central ele continua existindo.)")) return;
@@ -107,6 +123,8 @@ export function TelephonyCard() {
                 {e ? (
                   <>
                     <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-200">Ramal {e.ramal}</span>
+                    <BinaSelect value={e.bina} nums={nums} disabled={!ws.canManage || busy === `bina:${m.user_id}`}
+                      onPick={(v) => (v === "__custom" ? (setCustomFor(m.user_id), setCustom(e.bina ?? "")) : void setBina(m.user_id, v || null))} />
                     {ws.canManage && <button onClick={() => void removeExt(m.user_id)} disabled={busy === m.user_id} className="text-slate-500 hover:text-red-300" aria-label="Remover ramal"><X className="h-4 w-4" /></button>}
                   </>
                 ) : ws.canManage ? (
@@ -136,6 +154,13 @@ export function TelephonyCard() {
         </div>
       </Modal>
 
+      <Modal open={Boolean(customFor)} onClose={() => setCustomFor(null)} title="Número que o cliente vê"
+        footer={<><Button variant="ghost" onClick={() => setCustomFor(null)}>Cancelar</Button><Button onClick={() => customFor && void setBina(customFor, custom)} loading={busy === `bina:${customFor}`} disabled={custom.replace(/\D/g, "").length < 10}>Salvar</Button></>}>
+        <div className="space-y-3 text-sm">
+          <Field label="DDD + número" hint="Ex.: 85999003908. A central só aceita números liberados na sua conta Api4Com."><input className="field" inputMode="tel" value={custom} onChange={(e) => setCustom(e.target.value)} /></Field>
+        </div>
+      </Modal>
+
       <Modal open={Boolean(linkFor)} onClose={() => setLinkFor(null)} title="Vincular ramal existente"
         footer={<><Button variant="ghost" onClick={() => setLinkFor(null)}>Cancelar</Button><Button onClick={linkExt} loading={busy === "link"} disabled={!link.ramal || link.pass.length < 4}>Vincular</Button></>}>
         <div className="space-y-3 text-sm">
@@ -144,5 +169,21 @@ export function TelephonyCard() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+const local = (p: string) => { const d = p.replace(/\D/g, ""); return d.startsWith("55") && d.length >= 12 ? d.slice(2) : d; };
+
+function BinaSelect({ value, nums, disabled, onPick }: { value: string | null; nums: Num[]; disabled: boolean; onPick: (v: string) => void }) {
+  const opts = nums.map((n) => ({ v: local(n.phone_number!), label: `${formatPhone(n.phone_number!)} · ${n.name}` }));
+  const known = !value || opts.some((o) => o.v === value);
+  return (
+    <select className="field h-8 w-auto max-w-[230px] py-0 text-xs" value={value ?? ""} disabled={disabled} title="Número que o cliente vê na ligação"
+      onChange={(e) => onPick(e.target.value)}>
+      <option value="">Número local dinâmico (DDD do cliente)</option>
+      {opts.map((o) => <option key={o.v} value={o.v}>Sai pelo {o.label}</option>)}
+      {!known && value && <option value={value}>Sai pelo {formatPhone(value)}</option>}
+      <option value="__custom">Outro número…</option>
+    </select>
   );
 }

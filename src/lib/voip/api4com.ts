@@ -62,6 +62,23 @@ export async function createExtension(token: string, u: { firstName: string; las
   return r;
 }
 
+/** Procura o ramal na central (para descobrir o id interno dela). */
+export async function findExtension(token: string, ramal: string): Promise<Api4ComExtension | null> {
+  const r = await call<unknown>(token, "/extensions");
+  const list = Array.isArray(r) ? r : Array.isArray((r as { data?: unknown[] } | null)?.data) ? (r as { data: unknown[] }).data : [];
+  const hit = (list as Api4ComExtension[]).find((e) => String(e?.ramal) === String(ramal));
+  return hit ?? null;
+}
+
+/** Troca o número de saída (bina) do ramal. Vazio = bina dinâmica. Mantém a gravação ligada. */
+export async function setExtensionBina(token: string, p: { id: string; ramal: string; bina: string | null }) {
+  const idNum = /^\d+$/.test(p.id) ? Number(p.id) : p.id;
+  return call<Api4ComExtension>(token, "/extensions", {
+    method: "PATCH",
+    body: { id: idNum, ramal: p.ramal, bina: p.bina ?? "", gravar_audio: 1 },
+  });
+}
+
 /** Click-to-call: a central chama o ramal do vendedor e, ao atender, disca para o lead. */
 export async function startCall(token: string, p: { extension: string; called: string; metadata: Record<string, string> }): Promise<{ id: string }> {
   const r = await call<{ id?: string | number; status?: string; message?: string }>(token, "/calls", {
