@@ -127,7 +127,7 @@ export async function interpret(
 ): Promise<{ calls: ToolCall[]; reply: string | null; heard: string | null }> {
   const system = [
     "Você converte comandos falados em português (Brasil) em ações de um CRM, usando as ferramentas.",
-    "Um único comando pode gerar várias ações (ex.: mover e adicionar tag). Chame uma ferramenta por ação.",
+    "Um único comando pode ter VÁRIAS ações e VÁRIOS leads (ex.: \"muda o valor do Yuri para 3000, tira a tag Anúncio dele e move a Vitória para Ganho com valor 2500\" = set_value Yuri, remove_tags Yuri, move_lead Vitória, set_value Vitória). Chame uma ferramenta por ação, TODAS na mesma resposta, sem esquecer nenhuma. \"Deixar só a tag X\" = remover as outras tags citadas (e adicionar X se ele não tiver).",
     "Use o nome do lead exatamente como foi dito. Para etapa e tags, prefira os nomes existentes abaixo (o usuário pode dizer 'coluna' querendo dizer etapa).",
     `Etapas existentes: ${context.stages.join(" | ") || "(nenhuma)"}`,
     `Tags existentes: ${context.tags.join(" | ") || "(nenhuma)"}`,
@@ -140,20 +140,43 @@ export async function interpret(
     "Se o comando não for uma ação de CRM, chame só frase_entendida e responda em uma frase curta.",
   ].join("\n");
 
-  const first = await askClaude(system, TOOLS, transcript);
-  let { calls, reply } = first;
-  const heard = first.heard;
-  // Às vezes o modelo só devolve a frase corrigida e para. Repete com a frase já corrigida,
-  // sem a ferramenta de correção, para obter as ações.
-  if (calls.length === 0 && heard) {
-    const second = await askClaude(system, TOOLS.filter((t) => t.name !== "frase_entendida"), heard);
-    calls = second.calls;
-    reply = second.reply ?? reply;
+  // Laço: o modelo às vezes devolve só uma ação por vez. Respondemos "ok" a cada ferramenta
+  // e pedimos as próximas até ele não chamar mais nenhuma (todas as ações do comando).
+  const messages: unknown[] = [{ role: "user", content: transcript }];
+  const calls: ToolCall[] = [];
+  let reply: string | null = null;
+  let heard: string | null = null;
+  for (let round = 0; round < 6; round++) {
+    const r = await askClaude(system, TOOLS, messages);
+    if (r.heard && !heard) heard = r.heard;
+    if (r.reply) reply = r.reply;
+    calls.push(...r.calls);
+    if (!r.toolUses.length || r.stop !== "tool_use") break;
+    messages.push({ role: "assistant", content: r.content });
+    messages.push({
+      role: "user",
+      content: [
+        ...r.toolUses.map((t) => ({ type: "tool_result", tool_use_id: t.id, content: "ok" })),
+        { type: "text", text: "Registrado. Se ainda faltar alguma ação do comando original, chame a ferramenta dela agora (sem repetir as já feitas). Se não faltar nada, responda só \"pronto\"." },
+      ],
+    });
   }
-  return { calls, reply, heard };
+  return { calls: dedupe(calls), reply: calls.length ? null : reply, heard };
 }
 
-async function askClaude(system: string, tools: typeof TOOLS, text: string) {
+function dedupe(calls: ToolCall[]) {
+  const seen = new Set<string>();
+  return calls.filter((c) => {
+    const k = `${c.name}:${JSON.stringify(c.input)}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+type Block = { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> };
+
+async function askClaude(system: string, tools: typeof TOOLS, messages: unknown[]) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -163,30 +186,31 @@ async function askClaude(system: string, tools: typeof TOOLS, text: string) {
     },
     body: JSON.stringify({
       model: envOptional("ANTHROPIC_MODEL", "claude-haiku-5-5"),
-      max_tokens: 1024,
+      max_tokens: 2048,
       system,
       tools,
       tool_choice: { type: "auto" },
-      messages: [{ role: "user", content: text }],
+      messages,
     }),
     signal: AbortSignal.timeout(30_000),
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    content?: ({ type: "text"; text: string } | { type: "tool_use"; name: string; input: Record<string, unknown> })[];
-    error?: { message?: string };
-  };
+  const body = (await res.json().catch(() => ({}))) as { content?: Block[]; stop_reason?: string; error?: { message?: string } };
   if (!res.ok) throw new HttpError(502, `Interpretação falhou: ${body.error?.message ?? res.status}`);
+  const content = body.content ?? [];
   const calls: ToolCall[] = [];
+  const toolUses: { id: string }[] = [];
   let reply: string | null = null;
   let heard: string | null = null;
-  for (const b of body.content ?? []) {
-    if (b.type === "tool_use" && b.name === "frase_entendida") {
-      const t = typeof b.input.texto === "string" ? b.input.texto.trim().slice(0, 1000) : "";
-      if (t) heard = t;
-    } else if (b.type === "tool_use") calls.push({ name: b.name, input: b.input });
-    else if (b.type === "text" && b.text.trim()) reply = b.text.trim();
+  for (const b of content) {
+    if (b.type === "tool_use") {
+      toolUses.push({ id: b.id });
+      if (b.name === "frase_entendida") {
+        const t = typeof b.input.texto === "string" ? b.input.texto.trim().slice(0, 1000) : "";
+        if (t) heard = t;
+      } else calls.push({ name: b.name, input: b.input });
+    } else if (b.type === "text" && b.text.trim()) reply = b.text.trim();
   }
-  return { calls, reply, heard };
+  return { calls, reply, heard, toolUses, content, stop: body.stop_reason ?? null };
 }
 
 

@@ -86,7 +86,10 @@ export function VoiceCommand() {
 
   const stop = useCallback(() => {
     try { srRef.current?.stop(); } catch { /* já parado */ }
-    if (recRef.current?.state === "recording") recRef.current.stop();
+    if (recRef.current?.state === "recording") {
+      try { recRef.current.requestData(); } catch { /* sem dados ainda */ }
+      recRef.current.stop();
+    }
   }, []);
 
   const start = useCallback(async () => {
@@ -103,13 +106,13 @@ export function VoiceCommand() {
         const blob = new Blob(chunks.current, { type });
         cleanup();
         setPhase("thinking");
-        // Espera o reconhecimento do navegador fechar a última frase (máx. 1,5 s)
-        await Promise.race([srDone.current, new Promise((r) => setTimeout(r, 1500))]);
+        // Espera o reconhecimento do navegador fechar a última frase (áudio curto demora mais a fechar)
+        await Promise.race([srDone.current, new Promise((r) => setTimeout(r, 3000))]);
         srRef.current = null;
         const said = `${srText.current.final} ${srText.current.interim}`.replace(/\s+/g, " ").trim();
         setLive("");
-        if (said.length >= 3) return void interpret({ text: said, tz: userTz() });
-        if (blob.size < 1500) { setPhase("idle"); return toast.message("Gravação muito curta — segure por um instante e fale o comando."); }
+        if (said) return void interpret({ text: said, tz: userTz() });
+        if (blob.size === 0) { setPhase("idle"); return toast.message("Não captei nenhum som. Verifique o microfone e tente de novo."); }
         const fd = new FormData();
         fd.append("tz", userTz());
         fd.append("audio", blob, `comando.${type.includes("mp4") ? "mp4" : type.includes("ogg") ? "ogg" : "webm"}`);
