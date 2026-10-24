@@ -78,7 +78,7 @@ export function TelephonyCard() {
     setBusy(`bina:${userId}`);
     try {
       const r = await send("/api/voip/extensions", "PATCH", { userId, bina });
-      toast.success(r.bina ? `Pronto: as ligações dessa pessoa saem pelo ${formatPhone(r.bina)}` : "Pronto: as ligações usam número local dinâmico");
+      toast.success(r.bina ? `Pronto: as ligações dessa pessoa saem pelo ${formatPhone(`55${r.bina}`)}` : "Pronto: as ligações usam número local dinâmico");
       setCustomFor(null); setCustom("");
       await load();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
@@ -182,7 +182,7 @@ function BinaSelect({ value, nums, disabled, onPick }: { value: string | null; n
       onChange={(e) => onPick(e.target.value)}>
       <option value="">Número local dinâmico (DDD do cliente)</option>
       {opts.map((o) => <option key={o.v} value={o.v}>Sai pelo {o.label}</option>)}
-      {!known && value && <option value={value}>Sai pelo {formatPhone(value)}</option>}
+      {!known && value && <option value={value}>Sai pelo {formatPhone(`55${value}`)}</option>}
       <option value="__custom">Outro número…</option>
     </select>
   );
