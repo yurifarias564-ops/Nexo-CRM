@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, CalendarClock, Check, CheckCheck, CircleUserRound, Clock, FileText, Lock, MapPin, MessageCircle, Paperclip, Plus, Search, Send, UserRound, Video, X, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, Check, CheckCheck, CircleUserRound, Clock, Copy, FileText, Lock, MapPin, MessageCircle, Paperclip, Plus, Search, Send, UserRound, Video, X, Zap, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -344,7 +344,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     const res = await fetch("/api/pix/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conv.id, ...p }) });
     const data = await res.json();
     if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); throw new Error(data.error); }
-    toast.success("Pix enviado: QR Code e código Copia e Cola");
+    toast.success(data.native ? "Pix enviado" : "Pix enviado (chave + código Copia e Cola)");
     stickToBottom.current = true;
   }
 
@@ -602,7 +602,8 @@ function Bubble({ m }: { m: Message }) {
             <FileText className="h-5 w-5 shrink-0" /> <span className="truncate">{m.body ?? "Documento"}</span>
           </a>
         )}
-        {m.type === "location" ? <LocationBody body={m.body} />
+        {m.media_mime === "application/x-pix" ? <PixBody body={m.body} out={out} />
+          : m.type === "location" ? <LocationBody body={m.body} />
           : m.body && !(m.type === "document" && media) && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
         <div className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", out ? "text-blue-100/70" : "text-slate-500")}>
           {time} {out && <StatusIcon s={m.status} />}
@@ -623,6 +624,33 @@ function LocationBody({ body }: { body: string | null }) {
         <a href={`https://www.google.com/maps?q=${coords[1]},${coords[2]}`} target="_blank" rel="noopener noreferrer"
           className="mt-1 inline-block rounded-md bg-black/20 px-2 py-1 text-xs font-medium underline-offset-2 hover:underline">Abrir no mapa</a>
       )}
+    </div>
+  );
+}
+
+/** Cobrança Pix no formato do WhatsApp: cartão com a chave e botão de copiar. */
+function PixBody({ body, out }: { body: string | null; out: boolean }) {
+  const lines = (body ?? "").split("\n");
+  const isCode = lines[0]?.startsWith("💠 Pix Copia e Cola");
+  const title = isCode ? lines[0]!.replace("💠 ", "") : "Pix";
+  const keyLine = isCode ? null : lines[1] ?? "";
+  const extra = isCode ? [] : lines.slice(2);
+  const copyValue = isCode ? lines.slice(1).join("") : (keyLine?.split(": ").slice(1).join(": ") ?? "");
+  return (
+    <div className="-mx-1 w-64 max-w-full">
+      <div className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5", out ? "bg-black/20" : "bg-ink-900/60")}>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300"><PixIcon className="h-6 w-6" /></span>
+        <span className="min-w-0">
+          <span className="block font-medium">{title}</span>
+          {keyLine && <span className="block truncate text-xs opacity-80">{keyLine}</span>}
+          {isCode && <span className="block truncate text-xs opacity-70">{copyValue.slice(0, 32)}…</span>}
+          {extra.map((l) => <span key={l} className="block truncate text-xs opacity-80">{l}</span>)}
+        </span>
+      </div>
+      <button type="button" onClick={() => void navigator.clipboard.writeText(copyValue).then(() => toast.success(isCode ? "Código Pix copiado" : "Chave Pix copiada"))}
+        className="mt-1.5 flex w-full items-center justify-center gap-2 border-t border-white/10 pt-2 text-sm font-medium text-emerald-300 hover:text-emerald-200">
+        <Copy className="h-4 w-4" /> {isCode ? "Copiar código Pix" : "Copiar chave Pix"}
+      </button>
     </div>
   );
 }

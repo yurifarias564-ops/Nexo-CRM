@@ -124,7 +124,7 @@ export function PixModal({ open, onClose, contactName, onSend }: {
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-amber-100">Nenhuma chave Pix cadastrada. Peça ao administrador para cadastrar a chave da empresa aqui no chat (botão + → Pix).</p>
         ) : (
           <>
-            <p className="text-center text-slate-400"><b className="text-slate-200">{contactName}</b> vai receber o QR Code e o código Pix Copia e Cola para pagar.</p>
+            <p className="text-center text-slate-400"><b className="text-slate-200">{contactName}</b> vai receber o Pix com o botão de copiar, como no WhatsApp.</p>
             {picking ? (
               <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
                 {keys.map((k) => (

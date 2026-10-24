@@ -98,6 +98,28 @@ export async function sendPtv(instance: string, to: string, base64: string): Pro
   return r.key.id;
 }
 
+/** Cartão nativo de Pix do WhatsApp ("Copiar chave Pix"). */
+export async function sendPixCard(instance: string, to: string, pix: { name: string; keyType: "cpf" | "cnpj" | "phone" | "email" | "random"; key: string }): Promise<string> {
+  const number = to.includes("@") ? to : to.replace(/\D/g, "");
+  const r = await call<{ key?: { id?: string } }>(`/message/sendButtons/${encodeURIComponent(instance)}`, {
+    method: "POST",
+    body: JSON.stringify({ number, title: "Pix", buttons: [{ type: "pix", currency: "BRL", name: pix.name, keyType: pix.keyType, key: pix.key }] }),
+  });
+  if (!r.key?.id) throw new HttpError(502, "WhatsApp (QR) não retornou o id da mensagem");
+  return r.key.id;
+}
+
+/** Mensagem com botão "copiar" (ex.: código Pix Copia e Cola). */
+export async function sendCopyButton(instance: string, to: string, m: { title: string; description?: string; footer?: string; displayText: string; copyCode: string }): Promise<string> {
+  const number = to.includes("@") ? to : to.replace(/\D/g, "");
+  const r = await call<{ key?: { id?: string } }>(`/message/sendButtons/${encodeURIComponent(instance)}`, {
+    method: "POST",
+    body: JSON.stringify({ number, title: m.title, description: m.description, footer: m.footer, buttons: [{ type: "copy", displayText: m.displayText, copyCode: m.copyCode }] }),
+  });
+  if (!r.key?.id) throw new HttpError(502, "WhatsApp (QR) não retornou o id da mensagem");
+  return r.key.id;
+}
+
 /** Localização (pino no mapa). */
 export async function sendLocation(instance: string, to: string, loc: { latitude: number; longitude: number; name?: string; address?: string }): Promise<string> {
   const number = to.includes("@") ? to : to.replace(/\D/g, "");

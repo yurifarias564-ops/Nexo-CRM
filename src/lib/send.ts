@@ -150,6 +150,74 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
   return { id, externalId };
 }
 
+export interface PixInput {
+  keyType: "cpf" | "cnpj" | "phone" | "email" | "random";
+  key: string;          // normalizada
+  keyDisplay: string;   // como o cliente vê
+  holderName: string;
+  code: string;         // Pix Copia e Cola
+  amount: number | null;
+  description?: string;
+  txid: string;
+}
+
+const META_KEY_TYPE = { cpf: "CPF", cnpj: "CNPJ", phone: "PHONE", email: "EMAIL", random: "EVP" } as const;
+export const PIX_MIME = "application/x-pix";
+
+/**
+ * Cobrança Pix o mais parecida possível com o "Pix" do WhatsApp:
+ *  - QR Code (Evolution): cartão nativo "Copiar chave Pix" + (com valor) botão "Copiar código Pix".
+ *  - API oficial: cartão de pagamento Pix da Meta quando a conta tem o recurso; senão, mensagens de texto.
+ * Se o formato especial falhar, cai para texto (resumo + código Copia e Cola), que sempre funciona.
+ */
+export async function sendPix(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, p: PixInput) {
+  const r = await resolveTarget(sb, orgId, t);
+  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  const brl = p.amount ? p.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
+  const label = `${{ cpf: "CPF", cnpj: "CNPJ", phone: "Celular", email: "E-mail", random: "Chave aleatória" }[p.keyType]}: ${p.keyDisplay}`;
+  const cardBody = ["💠 Pix", label, brl ? `Valor: ${brl}` : null, p.description ? `Ref.: ${p.description}` : null].filter(Boolean).join("\n");
+  const out: string[] = [];
+  let native = false;
+
+  try {
+    if (r.channel.provider === "meta") {
+      if (p.amount) {
+        const { auth, pid } = metaAuth(r);
+        const id = await meta.sendPixOrder(pid, auth, r.waId, {
+          referenceId: p.txid, amountCents: Math.round(p.amount * 100), description: p.description || `Pagamento para ${p.holderName}`,
+          code: p.code, merchantName: p.holderName, key: p.key, keyType: META_KEY_TYPE[p.keyType],
+        });
+        out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
+        native = true;
+      }
+    } else {
+      const inst = r.channel.evolution_instance!;
+      const id = await evo.sendPixCard(inst, r.waId, { name: p.holderName, keyType: p.keyType, key: p.key });
+      out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
+      if (p.amount) {
+        const id2 = await evo.sendCopyButton(inst, r.waId, {
+          title: `Pix de ${brl}`, description: p.description ? `Referente a: ${p.description}` : undefined,
+          footer: "Toque em copiar e cole no app do banco (Pix Copia e Cola)", displayText: "Copiar código Pix", copyCode: p.code,
+        });
+        out.push(await record(r, id2, "text", `💠 Pix Copia e Cola — ${brl}\n${p.code}`, null, PIX_MIME, userId));
+      }
+      native = true;
+    }
+  } catch {
+    native = false;
+  }
+
+  if (!native || (r.channel.provider === "meta" && !p.amount)) {
+    const summary = ["💠 *Pix*", label, `Favorecido: ${p.holderName}`, brl ? `Valor: *${brl}*` : null, p.description ? `Referente a: ${p.description}` : null,
+      "", "Copie o código da próxima mensagem e cole no app do banco em *Pix Copia e Cola*."].filter((l) => l !== null).join("\n");
+    const a = await sendTextVia(r.channel, r.waId, summary);
+    out.push(await record(r, a, "text", summary, null, null, userId));
+    const b = await sendTextVia(r.channel, r.waId, p.code);
+    out.push(await record(r, b, "text", p.code, null, null, userId));
+  }
+  return { ids: out, native };
+}
+
 export interface LocationInput { latitude: number; longitude: number; name?: string; address?: string }
 
 /** Envia um pino de localização (como no WhatsApp). */

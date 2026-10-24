@@ -91,6 +91,35 @@ export async function sendLocation(phoneNumberId: string, token: string, to: str
   return id;
 }
 
+/** Cobrança Pix nativa (Payments API Brasil): cartão com valor e botão de copiar o código. */
+export async function sendPixOrder(phoneNumberId: string, token: string, to: string, o: {
+  referenceId: string; amountCents: number; description: string; code: string; merchantName: string; key: string;
+  keyType: "CPF" | "CNPJ" | "PHONE" | "EMAIL" | "EVP";
+}): Promise<string> {
+  const money = { value: o.amountCents, offset: 100 };
+  const r = await call<{ messages?: { id: string }[] }>(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({
+      messaging_product: "whatsapp", recipient_type: "individual", to, type: "interactive",
+      interactive: {
+        type: "order_details",
+        body: { text: o.description },
+        action: {
+          name: "review_and_pay",
+          parameters: {
+            reference_id: o.referenceId, type: "digital-goods", payment_type: "br", currency: "BRL", total_amount: money,
+            payment_settings: [{ type: "pix_dynamic_code", pix_dynamic_code: { code: o.code, merchant_name: o.merchantName, key: o.key, key_type: o.keyType } }],
+            order: { status: "pending", tax: { value: 0, offset: 100 }, subtotal: money, items: [{ retailer_id: "cobranca", name: o.description.slice(0, 60), amount: money, quantity: 1 }] },
+          },
+        },
+      },
+    }),
+  });
+  const id = r.messages?.[0]?.id;
+  if (!id) throw new HttpError(502, "WhatsApp não retornou o id da mensagem");
+  return id;
+}
+
 export interface MetaTemplate {
   name: string;
   language: string;
