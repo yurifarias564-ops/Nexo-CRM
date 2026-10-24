@@ -44,11 +44,15 @@ export function ConnectionAlert() {
     const sub = sb.channel(`conn-alert-${ws.orgId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "whatsapp_channels", filter: `organization_id=eq.${ws.orgId}` }, () => void load())
       .subscribe();
-    const poll = setInterval(() => void load(), 30_000); // reserva, se o tempo real falhar
-    return () => { clearTimeout(t); clearInterval(poll); void sb.removeChannel(sub); };
+    return () => { clearTimeout(t); void sb.removeChannel(sub); };
   }, [ws.orgId, load]);
 
   const down = chs.filter((c) => c.status !== "connected" && (c.disconnected_at || c.needs_qr));
+  // Reserva se o tempo real atrasar: confere a cada 5 s enquanto há queda, senão a cada 30 s
+  useEffect(() => {
+    const poll = setInterval(() => void load(), down.length ? 5_000 : 30_000);
+    return () => clearInterval(poll);
+  }, [down.length, load]);
   useEffect(() => {
     if (!down.length) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
