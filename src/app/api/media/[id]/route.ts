@@ -4,6 +4,7 @@ import { fail, HttpError } from "@/lib/http";
 import { loadChannel } from "@/lib/whatsapp";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
+import { trustedRecordingUrl } from "@/lib/voip/api4com";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       const r = await meta.downloadMedia(msg.media_ref, ch.secrets.meta_access_token!);
       data = r.data;
       mime = r.mime || mime;
+    } else if (ch.provider === "zapi") {
+      // Z-API guarda a mídia por 30 dias e manda o link no aviso da mensagem
+      if (!trustedRecordingUrl(msg.media_ref)) throw new HttpError(404, "Mídia indisponível");
+      const u = new URL(msg.media_ref);
+      const res = await fetch(u, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) throw new HttpError(404, "Mídia expirada ou indisponível");
+      data = await res.arrayBuffer();
+      mime = res.headers.get("content-type") || mime;
     } else {
       const r = await evo.getMediaBase64(ch.evolution_instance!, msg.media_ref);
       if (!r.base64) throw new HttpError(404, "Mídia indisponível");

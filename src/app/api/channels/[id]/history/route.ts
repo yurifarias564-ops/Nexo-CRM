@@ -29,6 +29,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (ch.organization_id !== ctx.org.id) throw new HttpError(404, "Canal não encontrado");
     if (ch.status !== "connected") throw new HttpError(409, "Conecte o número antes de importar o histórico");
 
+    if (ch.provider === "zapi") {
+      return ok({ done: true, mode: "async" as const, message: "Na Z-API as conversas novas entram sozinhas; o histórico antigo não é importado." });
+    }
     if (ch.provider === "meta") {
       await meta.requestHistorySync(ch.meta_phone_number_id!, ch.secrets.meta_access_token!);
       return ok({ done: true, mode: "async" as const, message: "Solicitação enviada. O histórico chega automaticamente nos próximos minutos." });

@@ -4,20 +4,26 @@ import { HttpError } from "@/lib/http";
 import type { Channel } from "@/lib/types";
 import * as meta from "./meta";
 import * as evo from "./evolution";
+import * as zapi from "./zapi";
 import type { NormalizedMessage } from "./types";
 
 export interface ChannelWithSecrets extends Channel {
-  secrets: { meta_access_token: string | null; webhook_secret: string };
+  secrets: { meta_access_token: string | null; webhook_secret: string; zapi_token?: string | null; zapi_client_token?: string | null };
 }
 
 export async function loadChannel(channelId: string): Promise<ChannelWithSecrets> {
   const db = supabaseAdmin();
   const [{ data: ch }, { data: sec }] = await Promise.all([
     db.from("whatsapp_channels").select("*").eq("id", channelId).maybeSingle(),
-    db.from("whatsapp_channel_secrets").select("meta_access_token, webhook_secret").eq("channel_id", channelId).maybeSingle(),
+    db.from("whatsapp_channel_secrets").select("meta_access_token, webhook_secret, zapi_token, zapi_client_token").eq("channel_id", channelId).maybeSingle(),
   ]);
   if (!ch || !sec) throw new HttpError(404, "Canal não encontrado");
   return { ...(ch as Channel), secrets: sec };
+}
+
+export function zapiCreds(ch: ChannelWithSecrets): zapi.ZapiCreds {
+  if (!ch.zapi_instance_id || !ch.secrets.zapi_token) throw new HttpError(409, "Canal Z-API sem credenciais");
+  return { instanceId: ch.zapi_instance_id, token: ch.secrets.zapi_token, clientToken: ch.secrets.zapi_client_token ?? null };
 }
 
 export async function sendTextVia(channel: ChannelWithSecrets, waId: string, text: string): Promise<string> {
@@ -26,6 +32,7 @@ export async function sendTextVia(channel: ChannelWithSecrets, waId: string, tex
     if (!channel.meta_phone_number_id || !channel.secrets.meta_access_token) throw new HttpError(409, "Canal oficial sem credenciais");
     return meta.sendText(channel.meta_phone_number_id, channel.secrets.meta_access_token, waId, text);
   }
+  if (channel.provider === "zapi") return zapi.sendText(zapiCreds(channel), waId, text);
   if (!channel.evolution_instance) throw new HttpError(409, "Canal QR sem instância");
   return evo.sendText(channel.evolution_instance, waId, text);
 }

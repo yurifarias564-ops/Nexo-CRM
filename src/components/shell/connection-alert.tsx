@@ -34,7 +34,7 @@ export function ConnectionAlert() {
   }, []);
 
   const load = useCallback(async () => {
-    const { data } = await supabaseBrowser().from("whatsapp_channels").select(COLS).eq("organization_id", ws.orgId).eq("provider", "evolution");
+    const { data } = await supabaseBrowser().from("whatsapp_channels").select(COLS).eq("organization_id", ws.orgId).in("provider", ["evolution", "zapi"]);
     apply((data ?? []) as Ch[]);
   }, [ws.orgId, apply]);
 

@@ -14,7 +14,7 @@ const localTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const isPast = (ms: number) => Number.isNaN(ms) || ms < Date.now() - 60_000;
 const userTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return "America/Sao_Paulo"; } };
 
-type Target = { provider: "meta" | "evolution"; channelId: string; windowOpenUntil: string | null } | null;
+type Target = { provider: "meta" | "evolution" | "zapi"; channelId: string; windowOpenUntil: string | null } | null;
 type Template = { name: string; language: string; category: string; body: string; params: number };
 
 export interface EditingScheduled { id: string; body: string | null; send_at: string }

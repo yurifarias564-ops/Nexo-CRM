@@ -15,7 +15,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     await rateLimit(`reconnect:${id}`, 6, 60, "Aguarde alguns segundos antes de tentar de novo.");
     const { data: ch } = await (await supabaseServer()).from("whatsapp_channels").select("id, organization_id, provider").eq("id", id).maybeSingle();
     if (!ch || ch.organization_id !== ctx.org.id) throw new HttpError(404, "Número não encontrado");
-    if (ch.provider !== "evolution") throw new HttpError(422, "Reconexão automática é para números por QR Code");
+    if (ch.provider === "meta") throw new HttpError(422, "Reconexão automática é para números por QR Code");
     return ok({ result: await tryReconnect(id, true) });
   } catch (e) {
     return fail(e);

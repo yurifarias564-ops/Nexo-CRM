@@ -512,3 +512,22 @@ test("WhatsApp QR: queda com sessão encerrada pede QR; queda comum reconecta", 
   assert.equal(backoffFor(0), 5);
   assert.equal(backoffFor(99), 300, "espera máxima de 5 min entre tentativas");
 });
+
+test("Z-API: mensagens recebidas, enviadas pelo celular, status e conexão", async () => {
+  const { parseWebhook: parseZ } = await import("@/lib/whatsapp/zapi");
+  const txt = parseZ({ type: "ReceivedCallback", instanceId: "I1", messageId: "M1", phone: "5585999998888", fromMe: false, momment: 1700000000000, senderName: "Cliente", chatName: "Cliente", text: { message: "oi" } });
+  assert.equal(txt.messages[0]?.body, "oi");
+  assert.equal(txt.messages[0]?.direction, "in");
+  assert.equal(txt.messages[0]?.wa_id, "5585999998888");
+  assert.equal(txt.messages[0]?.sent_at, new Date(1700000000000).toISOString());
+  const mine = parseZ({ type: "ReceivedCallback", messageId: "M2", phone: "5585999998888", fromMe: true, chatName: "Cliente", image: { imageUrl: "https://x.z-api.io/a.jpg", mimeType: "image/jpeg", caption: "foto" } });
+  assert.equal(mine.messages[0]?.direction, "out");
+  assert.equal(mine.messages[0]?.media_ref, "https://x.z-api.io/a.jpg");
+  const ptv = parseZ({ type: "ReceivedCallback", messageId: "M3", phone: "55859", video: { videoUrl: "https://x/v.mp4", caption: "", mimeType: "video/mp4" } });
+  assert.equal(ptv.messages[0]?.media_mime, "video/mp4;ptv");
+  assert.equal(parseZ({ type: "ReceivedCallback", isGroup: true, messageId: "G", phone: "123-group", text: { message: "x" } }).messages.length, 0, "grupos ficam fora");
+  const st = parseZ({ type: "MessageStatusCallback", status: "READ", ids: ["M1", "M2"] });
+  assert.deepEqual(st.statuses, [{ external_id: "M1", status: "read" }, { external_id: "M2", status: "read" }]);
+  assert.equal(parseZ({ type: "DisconnectedCallback", disconnected: true }).connection, "close");
+  assert.equal(parseZ({ type: "ConnectedCallback", connected: true, phone: "5585" }).connection, "open");
+});

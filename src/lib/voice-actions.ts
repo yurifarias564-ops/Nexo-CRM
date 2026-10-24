@@ -27,7 +27,7 @@ export const ResolvedAction = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("schedule_message"), ...Lead,
     sendAt: z.string().datetime(), timeZone: z.string().min(1).max(64), text: z.string().trim().min(1).max(4096),
-    provider: z.enum(["meta", "evolution"]).nullable(),
+    provider: z.enum(["meta", "evolution", "zapi"]).nullable(),
   }),
   z.object({
     kind: z.literal("schedule_meeting"), ...Lead,

@@ -7,6 +7,7 @@ import { appUrl } from "@/lib/env";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
+import * as zapi from "@/lib/whatsapp/zapi";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,13 @@ const Body = z.discriminatedUnion("provider", [
   z.object({
     provider: z.literal("evolution"),
     name: z.string().trim().min(1).max(60),
+  }),
+  z.object({
+    provider: z.literal("zapi"),
+    name: z.string().trim().min(1).max(60),
+    instanceId: z.string().trim().regex(/^[A-Za-z0-9]{8,64}$/, "ID da instância inválido"),
+    token: z.string().trim().min(8, "Token da instância inválido").max(200),
+    clientToken: z.string().trim().max(200).optional(),
   }),
 ]);
 
@@ -60,6 +68,26 @@ export async function POST(req: Request) {
       // Coexistência: tenta puxar o histórico do app (falha silenciosa se o número não for de coexistência)
       meta.requestHistorySync(body.phoneNumberId, body.accessToken).catch(() => undefined);
       return ok({ id: ch.id }, 201);
+    }
+
+    if (body.provider === "zapi") {
+      const creds = { instanceId: body.instanceId, token: body.token, clientToken: body.clientToken || null };
+      const st = await zapi.status(creds); // valida as credenciais
+      const phone = st.connected ? await zapi.phoneNumber(creds) : null;
+      const { data: ch, error } = await db.from("whatsapp_channels").insert({
+        organization_id: ctx.org.id, provider: "zapi", name: body.name, zapi_instance_id: body.instanceId,
+        status: st.connected ? "connected" : "connecting", phone_number: phone,
+      }).select("id").single();
+      if (error) throw error.code === "23505" ? new HttpError(409, "Esta instância da Z-API já está conectada a uma conta") : error;
+      try {
+        const s = await db.from("whatsapp_channel_secrets").insert({ channel_id: ch.id, webhook_secret: secret, zapi_token: body.token, zapi_client_token: body.clientToken || null });
+        if (s.error) throw s.error;
+        await zapi.setWebhooks(creds, `${appUrl()}/api/webhooks/zapi/${ch.id}?token=${secret}`);
+      } catch (e) {
+        await db.from("whatsapp_channels").delete().eq("id", ch.id);
+        throw e;
+      }
+      return ok({ id: ch.id, connected: st.connected }, 201);
     }
 
     // Evolution (QR Code)

@@ -2,7 +2,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { HttpError } from "@/lib/http";
-import { loadChannel, sendTextVia, type ChannelWithSecrets } from "@/lib/whatsapp";
+import { loadChannel, sendTextVia, zapiCreds, type ChannelWithSecrets } from "@/lib/whatsapp";
+import * as zapi from "@/lib/whatsapp/zapi";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
 import type { MsgType } from "@/lib/types";
@@ -138,6 +139,12 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
     mediaRef = await meta.uploadMedia(pid, auth, file, mime, filename);
     // A API oficial não tem vídeo "bolinha": vai como vídeo comum.
     externalId = await meta.sendMedia(pid, auth, r.waId, kind, mediaRef, ptv ? undefined : caption || undefined, filename);
+  } else if (r.channel.provider === "zapi") {
+    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const c = zapiCreds(r.channel);
+    externalId = ptv ? await zapi.sendPtv(c, r.waId, b64) : await zapi.sendMedia(c, r.waId, kind, mime, b64, filename, caption || undefined);
+    // A Z-API devolve o link da mídia só no webhook; até lá, o CRM mostra a mensagem sem pré-visualização
+    mediaRef = "";
   } else {
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     externalId = ptv
@@ -146,7 +153,7 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
     mediaRef = externalId; // baixado sob demanda pelo id da mensagem
   }
   const body = ptv ? null : caption || (kind === "document" ? filename : null);
-  const id = await record(r, externalId, kind, body, mediaRef, ptv && r.channel.provider !== "meta" ? `${mime};ptv` : mime, userId);
+  const id = await record(r, externalId, kind, body, mediaRef || null, ptv && r.channel.provider !== "meta" ? `${mime};ptv` : mime, userId);
   return { id, externalId };
 }
 
@@ -190,6 +197,18 @@ export async function sendPix(sb: SupabaseClient, orgId: string, userId: string,
         out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
         native = true;
       }
+    } else if (r.channel.provider === "zapi") {
+      const c = zapiCreds(r.channel);
+      const id = await zapi.sendPixCard(c, r.waId, { name: p.holderName, keyType: p.keyType, key: p.key });
+      out.push(await record(r, id, "text", cardBody, null, PIX_MIME, userId));
+      if (p.amount) {
+        const id2 = await zapi.sendCopyButton(c, r.waId, {
+          message: `*Pix de ${brl}*${p.description ? `\nReferente a: ${p.description}` : ""}\n\nToque em copiar e cole no app do banco (Pix Copia e Cola).`,
+          code: p.code, buttonText: "Copiar código Pix",
+        });
+        out.push(await record(r, id2, "text", `💠 Pix Copia e Cola — ${brl}\n${p.code}`, null, PIX_MIME, userId));
+      }
+      native = true;
     } else {
       const inst = r.channel.evolution_instance!;
       const id = await evo.sendPixCard(inst, r.waId, { name: p.holderName, keyType: p.keyType, key: p.key });
@@ -229,6 +248,8 @@ export async function sendLocation(sb: SupabaseClient, orgId: string, userId: st
   if (r.channel.provider === "meta") {
     const { auth, pid } = metaAuth(r);
     externalId = await meta.sendLocation(pid, auth, r.waId, clean);
+  } else if (r.channel.provider === "zapi") {
+    externalId = await zapi.sendLocation(zapiCreds(r.channel), r.waId, clean);
   } else {
     externalId = await evo.sendLocation(r.channel.evolution_instance!, r.waId, clean);
   }
@@ -238,7 +259,7 @@ export async function sendLocation(sb: SupabaseClient, orgId: string, userId: st
 }
 
 /** Qual canal/provedor seria usado para este alvo (para avisos ao agendar). */
-export async function previewTarget(sb: SupabaseClient, orgId: string, t: SendTarget): Promise<{ provider: "meta" | "evolution"; channelId: string; windowOpenUntil: string | null } | null> {
+export async function previewTarget(sb: SupabaseClient, orgId: string, t: SendTarget): Promise<{ provider: "meta" | "evolution" | "zapi"; channelId: string; windowOpenUntil: string | null } | null> {
   try {
     const r = await resolveTarget(sb, orgId, t);
     let until: string | null = null;

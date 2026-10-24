@@ -1,7 +1,8 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { HttpError } from "@/lib/http";
-import { loadChannel } from "@/lib/whatsapp";
+import { loadChannel, zapiCreds } from "@/lib/whatsapp";
+import * as zapi from "@/lib/whatsapp/zapi";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
 import { Blueprint } from "./blueprint";
@@ -36,6 +37,10 @@ export async function deliverReport(s: ReportSettings, pdf: Uint8Array, fileName
   if (ch.organization_id !== s.organization_id) throw new HttpError(409, "Canal inválido para esta empresa");
   if (ch.status !== "connected") throw new HttpError(409, `O WhatsApp "${ch.name}" está desconectado. Reconecte para enviar o relatório.`);
   const b64 = Buffer.from(pdf).toString("base64");
+  if (ch.provider === "zapi") {
+    if (s.target_type === "group") throw new HttpError(409, "Envio para grupos ainda não é suportado no número da Z-API. Escolha um número.");
+    return zapi.sendMedia(zapiCreds(ch), s.target_id.replace(/\D/g, ""), "document", "application/pdf", b64, fileName, caption.slice(0, 1000));
+  }
   if (ch.provider === "evolution") {
     const to = s.target_type === "group" ? s.target_id : s.target_id.replace(/\D/g, "");
     return evo.sendMedia(ch.evolution_instance!, to, "document", "application/pdf", b64, fileName, caption.slice(0, 1000));

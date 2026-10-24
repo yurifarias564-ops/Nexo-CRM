@@ -1,7 +1,7 @@
 export type Role = "owner" | "admin" | "agent";
 export type SubscriptionStatus = "pending" | "active" | "past_due" | "canceled";
 export type StageKind = "open" | "won" | "lost";
-export type Provider = "meta" | "evolution";
+export type Provider = "meta" | "evolution" | "zapi";
 export type ChannelStatus = "disconnected" | "connecting" | "connected" | "error";
 export type MsgDirection = "in" | "out";
 export type MsgStatus = "pending" | "sent" | "delivered" | "read" | "failed" | "received";
@@ -29,7 +29,7 @@ export interface LeadTag { lead_id: string; tag_id: string; organization_id: str
 export interface Member { user_id: string; role: Role; full_name: string | null; email: string | null }
 export interface Channel {
   id: string; organization_id: string; provider: Provider; name: string; status: ChannelStatus;
-  phone_number: string | null; meta_phone_number_id: string | null; meta_waba_id: string | null; evolution_instance: string | null;
+  phone_number: string | null; meta_phone_number_id: string | null; meta_waba_id: string | null; evolution_instance: string | null; zapi_instance_id?: string | null;
   history_imported_at: string | null; last_error: string | null; created_at: string;
   calling_enabled?: boolean; meta_coexistence?: boolean; call_recording?: "meta" | "browser"; call_recording_purpose?: string;
 }

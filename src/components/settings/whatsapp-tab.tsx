@@ -16,7 +16,7 @@ import { useLatest } from "@/lib/hooks";
 export function WhatsAppTab() {
   const ws = useWorkspace();
   const [channels, setChannels] = useState<Channel[] | null>(null);
-  const [adding, setAdding] = useState<null | "choose" | "meta" | "evolution" | "embedded">(null);
+  const [adding, setAdding] = useState<null | "choose" | "meta" | "evolution" | "zapi" | "embedded">(null);
   const [callsFor, setCallsFor] = useState<Channel | null>(null);
   const [qrFor, setQrFor] = useState<string | null>(null);
   const [importing, setImporting] = useState<{ id: string; done: number; total: number; msgs: number } | null>(null);
@@ -78,7 +78,7 @@ export function WhatsAppTab() {
       <ChannelList channels={channels}
         actions={(c) => (
           <>
-            {c.provider === "evolution" && c.status !== "connected" && (
+            {c.provider !== "meta" && c.status !== "connected" && (
               <Button size="sm" variant="outline" onClick={() => setQrFor(c.id)}><QrCode className="h-3.5 w-3.5" /> Ler QR Code</Button>
             )}
             {c.status === "connected" && (
@@ -103,7 +103,7 @@ export function WhatsAppTab() {
       />
 
       <Modal open={adding === "choose"} onClose={() => setAdding(null)} title="Como deseja conectar?" wide>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <button onClick={() => setAdding(embeddedSignupReady ? "embedded" : "meta")} className="card p-5 text-left transition hover:border-brand-400/50 hover:bg-ink-800">
             <ShieldCheck className="h-6 w-6 text-emerald-300" />
             <p className="mt-3 font-medium text-white">API oficial (Meta)</p>
@@ -111,8 +111,13 @@ export function WhatsAppTab() {
           </button>
           <button onClick={() => setAdding("evolution")} className="card p-5 text-left transition hover:border-brand-400/50 hover:bg-ink-800">
             <QrCode className="h-6 w-6 text-brand-300" />
-            <p className="mt-3 font-medium text-white">QR Code</p>
-            <p className="mt-1 text-sm text-slate-400">Conecta em segundos lendo o QR pelo celular e importa todo o histórico. Uso não oficial: há risco de bloqueio pela Meta.</p>
+            <p className="mt-3 font-medium text-white">QR Code (servidor próprio)</p>
+            <p className="mt-1 text-sm text-slate-400">Evolution API no seu servidor. Importa todo o histórico. Uso não oficial: há risco de bloqueio pela Meta.</p>
+          </button>
+          <button onClick={() => setAdding("zapi")} className="card p-5 text-left transition hover:border-brand-400/50 hover:bg-ink-800">
+            <QrCode className="h-6 w-6 text-emerald-300" />
+            <p className="mt-3 font-medium text-white">QR Code pela Z-API</p>
+            <p className="mt-1 text-sm text-slate-400">Use a sua conta da Z-API (serviço pago, eles mantêm o servidor). Cole o ID e o token da instância e leia o QR.</p>
           </button>
         </div>
         <p className="mt-4 text-center text-xs text-slate-500">
@@ -125,6 +130,11 @@ export function WhatsAppTab() {
       <EmbeddedSignup open={adding === "embedded"} onClose={() => setAdding(null)} onDone={() => { setAdding(null); void load(); }} />
       <MetaForm open={adding === "meta"} onClose={() => setAdding(null)} onDone={() => { setAdding(null); void load(); }} />
       <EvolutionForm open={adding === "evolution"} onClose={() => setAdding(null)} onCreated={(id) => { setAdding(null); void load(); setQrFor(id); }} />
+      <ZapiForm open={adding === "zapi"} onClose={() => setAdding(null)} onCreated={(id, connected) => {
+        setAdding(null); void load();
+        if (connected) toast.success("WhatsApp da Z-API conectado! As conversas novas já começam a cair aqui.");
+        else setQrFor(id);
+      }} />
       <QrModal channelId={qrFor} onClose={() => setQrFor(null)} onConnected={(id) => {
         setQrFor(null);
         void load();
@@ -149,7 +159,7 @@ function ChannelList({ channels, actions, onEmpty }: { channels: Channel[] | nul
           <div className="min-w-0 flex-1">
             <p className="font-medium text-white">{c.name}</p>
             <p className="text-xs text-slate-500">
-              {c.provider === "meta" ? "API oficial" : "QR Code"} · {c.phone_number ? formatPhone(c.phone_number) : "número ainda não identificado"}
+              {c.provider === "meta" ? "API oficial" : c.provider === "zapi" ? "QR Code · Z-API" : "QR Code"} · {c.phone_number ? formatPhone(c.phone_number) : "número ainda não identificado"}
               {" · "}
               <span className={c.status === "connected" ? "text-emerald-300" : "text-amber-300"}>
                 {c.status === "connected" ? "Conectado" : c.status === "connecting" ? "Aguardando leitura do QR" : c.status === "error" ? "Erro" : "Desconectado"}
@@ -324,6 +334,48 @@ function CallingModal({ channel, onClose, onSaved }: { channel: Channel; onClose
         )}
         <p className="text-xs text-slate-500">No painel da Meta (app → WhatsApp → Configuração → Webhooks), marque também o campo <b>calls</b>.</p>
       </div>
+    </Modal>
+  );
+}
+
+function ZapiForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string, connected: boolean) => void }) {
+  const [f, setF] = useState({ name: "", instanceId: "", token: "", clientToken: "" });
+  const [busy, setBusy] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const res = await fetch("/api/channels", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "zapi", ...f, clientToken: f.clientToken || undefined }) });
+    const data = await res.json();
+    setBusy(false);
+    if (!res.ok) return toast.error(data.error);
+    setF({ name: "", instanceId: "", token: "", clientToken: "" });
+    onCreated(data.id, Boolean(data.connected));
+  }
+  return (
+    <Modal open={open} onClose={onClose} title="Conectar pela Z-API" wide>
+      <form onSubmit={submit} className="space-y-4">
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-300">
+          <li>No painel da Z-API, abra <b>Instâncias</b> e entre na sua instância.</li>
+          <li>Copie o <b>ID da instância</b> e o <b>Token da instância</b> e cole abaixo.</li>
+          <li>Em <b>Segurança</b> da conta, copie o <b>Token de segurança (Client-Token)</b>, se estiver ativado.</li>
+        </ol>
+        <Field label="Nome de identificação"><input className="field" required maxLength={60} placeholder="Comercial — Yuri" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="ID da instância"><input className="field font-mono" required autoComplete="off" spellCheck={false} value={f.instanceId} onChange={(e) => setF({ ...f, instanceId: e.target.value.trim() })} /></Field>
+          <Field label="Token da instância"><input className="field font-mono" required type="password" autoComplete="off" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value.trim() })} /></Field>
+        </div>
+        <Field label="Client-Token (token de segurança da conta)" hint="Opcional se a segurança por token estiver desativada na Z-API. Fica guardado só no servidor.">
+          <input className="field font-mono" type="password" autoComplete="off" value={f.clientToken} onChange={(e) => setF({ ...f, clientToken: e.target.value.trim() })} />
+        </Field>
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
+          O CRM configura sozinho os avisos (webhooks) da instância para receber as mensagens. Conexão não oficial: evite disparos em massa.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button type="submit" loading={busy}>Conectar</Button>
+        </div>
+      </form>
     </Modal>
   );
 }
