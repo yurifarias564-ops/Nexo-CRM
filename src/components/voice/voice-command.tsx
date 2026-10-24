@@ -111,10 +111,15 @@ export function VoiceCommand() {
         srRef.current = null;
         const said = `${srText.current.final} ${srText.current.interim}`.replace(/\s+/g, " ").trim();
         setLive("");
-        if (said) return void interpret({ text: said, tz: userTz() });
-        if (blob.size === 0) { setPhase("idle"); return toast.message("Não captei nenhum som. Verifique o microfone e tente de novo."); }
+        // Sem áudio gravado: usa só o texto do navegador
+        if (blob.size === 0) {
+          if (said) return void interpret({ text: said, tz: userTz() });
+          setPhase("idle"); return toast.message("Não captei nenhum som. Verifique o microfone e tente de novo.");
+        }
+        // O servidor transcreve o áudio completo (mais preciso); o texto do navegador vai de reserva
         const fd = new FormData();
         fd.append("tz", userTz());
+        if (said) fd.append("text", said);
         fd.append("audio", blob, `comando.${type.includes("mp4") ? "mp4" : type.includes("ogg") ? "ogg" : "webm"}`);
         void interpret(fd);
       };
@@ -137,8 +142,15 @@ export function VoiceCommand() {
           srText.current.interim = interim;
           setLive(`${srText.current.final} ${interim}`.trim());
         };
-        sr.onerror = () => resolve();
-        sr.onend = () => resolve();
+        let failed = false;
+        sr.onerror = (e) => { if (e?.error && e.error !== "no-speech" && e.error !== "aborted") failed = true; };
+        // O Chrome do computador encerra o reconhecimento sozinho depois de uma pausa: reinicia enquanto grava
+        sr.onend = () => {
+          if (!failed && recRef.current?.state === "recording" && srRef.current === sr) {
+            try { sr.start(); return; } catch { /* segue */ }
+          }
+          resolve();
+        };
         try { sr.start(); } catch { resolve(); }
       }) : Promise.resolve();
 

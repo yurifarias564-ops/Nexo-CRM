@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Member, Pipeline, QuickReply, Role, Stage, Tag } from "@/lib/types";
 
@@ -52,6 +52,13 @@ export function WorkspaceProvider({ initial, children }: { initial: WorkspaceDat
       }
     }));
   }, [initial.orgId]);
+
+  // Comando de voz pode criar etapa/tag: recarrega as listas
+  useEffect(() => {
+    const r = () => void reload(["stages", "tags"]);
+    window.addEventListener("crm:refresh", r);
+    return () => window.removeEventListener("crm:refresh", r);
+  }, [reload]);
 
   const value = useMemo<Ctx>(() => ({
     ...initial,

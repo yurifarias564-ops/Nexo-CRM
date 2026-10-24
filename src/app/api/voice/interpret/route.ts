@@ -30,7 +30,15 @@ export async function POST(req: Request) {
       if (!(audio instanceof Blob) || audio.size === 0) throw new HttpError(422, "Áudio não recebido");
       if (audio.size > MAX_AUDIO) throw new HttpError(413, "Áudio muito longo (máx. ~2 minutos)");
       const ext = audio.type.includes("mp4") ? "mp4" : audio.type.includes("ogg") ? "ogg" : "webm";
-      transcript = await transcribe(audio, `comando.${ext}`);
+      // Texto que o próprio navegador entendeu (reserva se a transcrição do servidor falhar)
+      const hint = typeof form.get("text") === "string" ? String(form.get("text")).trim().slice(0, 1000) : "";
+      try {
+        transcript = await transcribe(audio, `comando.${ext}`);
+      } catch (e) {
+        if (!hint) throw e;
+        transcript = hint;
+      }
+      if (!transcript && hint) transcript = hint;
     } else {
       const body = (await readJson(req, 8_000)) as { text?: unknown; tz?: unknown };
       if (isValidTimeZone(body.tz)) tz = body.tz;
@@ -44,7 +52,10 @@ export async function POST(req: Request) {
       sb.from("tags").select("id, name"),
       sb.from("organization_members").select("user_id, profiles!inner(full_name, email)").eq("organization_id", ctx.org.id),
     ]);
-    const stageList = (stages ?? []) as { id: string; name: string }[];
+    const stageList = (stages ?? []) as { id: string; name: string; position: number; pipeline_id: string }[];
+    // Etapas que este comando vai criar (para mover/criar lead nelas no mesmo comando)
+    const newStages: string[] = [];
+    const newStageNamed = (name: string) => newStages.find((n) => norm(n) === norm(name)) ?? null;
     const tagList = (tags ?? []) as { id: string; name: string }[];
     type MemberRow = { user_id: string; profiles: { full_name: string | null; email: string | null } | { full_name: string | null; email: string | null }[] };
     const memberList = ((members ?? []) as MemberRow[]).map((m) => {
@@ -89,13 +100,30 @@ export async function POST(req: Request) {
         return t ? { id: t.id, name: t.name } : { id: null, name: name.trim().slice(0, 40) };
       });
 
+    // Criar etapa vem antes de mover/criar lead nela
+    calls.sort((a, b) => Number(b.name === "create_stage") - Number(a.name === "create_stage"));
     for (const c of calls) {
       const i = c.input;
       switch (c.name) {
+        case "create_stage": {
+          const name = String(i.name ?? "").trim().slice(0, 60);
+          if (!name) break;
+          if (ctx.role === "agent") { issues.push("Só administradores podem criar etapas do funil."); break; }
+          const exact = stageList.find((s) => norm(s.name) === norm(name));
+          if (exact || newStageNamed(name)) break; // já existe: não cria de novo
+          const after = i.after ? bestMatch(stageList, String(i.after)) : null;
+          const pipelineId = after?.pipeline_id ?? stageList[0]?.pipeline_id;
+          if (!pipelineId) { issues.push("Nenhum funil configurado."); break; }
+          newStages.push(name);
+          actions.push({ kind: "create_stage", name, pipelineId, afterStageId: after?.id ?? null, afterStageName: after?.name ?? null });
+          break;
+        }
         case "move_lead": {
-          const st = bestMatch(stageList, String(i.stage ?? ""));
-          if (!st) { issues.push(`Não existe a etapa "${i.stage}".`); break; }
-          actions.push({ kind: "move_lead", ...(await resolveLead(i.lead)), stageId: st.id, stageName: st.name });
+          const wanted = String(i.stage ?? "");
+          const fresh = newStageNamed(wanted);
+          const st = fresh ? null : bestMatch(stageList, wanted);
+          if (!st && !fresh) { issues.push(`Não existe a etapa "${wanted}". Diga "crie a etapa ${wanted}" para criar.`); break; }
+          actions.push({ kind: "move_lead", ...(await resolveLead(i.lead)), stageId: st?.id ?? null, stageName: st?.name ?? fresh! });
           break;
         }
         case "add_tags":
@@ -108,7 +136,8 @@ export async function POST(req: Request) {
           break;
         }
         case "create_lead": {
-          const st = (i.stage ? bestMatch(stageList, String(i.stage)) : null) ?? stageList[0];
+          const fresh = i.stage ? newStageNamed(String(i.stage)) : null;
+          const st = fresh ? { id: null, name: fresh } : (i.stage ? bestMatch(stageList, String(i.stage)) : null) ?? stageList[0];
           if (!st) { issues.push("Nenhuma etapa configurada."); break; }
           const value = Number(i.value);
           actions.push({

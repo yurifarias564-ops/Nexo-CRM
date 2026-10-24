@@ -5,24 +5,38 @@ import { norm } from "@/lib/utils";
 
 export { norm };
 
-export async function transcribe(file: Blob, filename: string): Promise<string> {
+const TRANSCRIBE_PROMPT = "Comandos de CRM: lead, coluna, etapa, funil, negociação, agendamento, agendar, reunião, amanhã, horas, tag, anúncio, proposta, qualificação, WhatsApp, mensagem, telefone, valor, reais.";
+
+async function whisperCall(url: string, key: string, model: string, file: Blob, filename: string): Promise<string> {
   const form = new FormData();
   form.append("file", file, filename);
-  form.append("model", envOptional("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"));
+  form.append("model", model);
   form.append("language", "pt");
-  form.append("prompt", "Comandos de CRM: lead, coluna, etapa, funil, negociação, agendamento, agendar, reunião, amanhã, horas, tag, anúncio, proposta, qualificação, WhatsApp, mensagem, telefone.");
-  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env("OPENAI_API_KEY")}` },
-    body: form,
-    signal: AbortSignal.timeout(45_000),
-  });
+  form.append("prompt", TRANSCRIBE_PROMPT);
+  const res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(45_000) });
   const body = (await res.json().catch(() => ({}))) as { text?: string; error?: { message?: string } };
-  if (!res.ok) {
-    console.error("[voz] transcrição OpenAI", res.status, body.error?.message);
-    throw new HttpError(502, "Não consegui entender o áudio. Recarregue a página (Ctrl+Shift+R) e fale de novo pelo Chrome, ou use “Digitar comando”.");
-  }
+  if (!res.ok) throw new Error(`${res.status} ${body.error?.message ?? ""}`);
   return (body.text ?? "").trim();
+}
+
+/**
+ * Áudio → texto no servidor (quando o navegador não transcreve sozinho, ex.: alguns computadores).
+ * Usa a Groq (Whisper, tem plano gratuito) se houver GROQ_API_KEY; senão, a OpenAI.
+ */
+export async function transcribe(file: Blob, filename: string): Promise<string> {
+  const groq = envOptional("GROQ_API_KEY");
+  const openai = envOptional("OPENAI_API_KEY");
+  const errors: string[] = [];
+  if (groq) {
+    try { return await whisperCall("https://api.groq.com/openai/v1/audio/transcriptions", groq, envOptional("GROQ_TRANSCRIBE_MODEL", "whisper-large-v3-turbo"), file, filename); }
+    catch (e) { errors.push(`groq ${(e as Error).message}`); }
+  }
+  if (openai) {
+    try { return await whisperCall("https://api.openai.com/v1/audio/transcriptions", openai, envOptional("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"), file, filename); }
+    catch (e) { errors.push(`openai ${(e as Error).message}`); }
+  }
+  console.error("[voz] transcrição falhou", errors.join(" | ") || "sem chave configurada");
+  throw new HttpError(502, "Não consegui transformar o áudio em texto neste aparelho. Use o Google Chrome atualizado ou toque em “Digitar comando”.");
 }
 
 export type ToolCall = { name: string; input: Record<string, unknown> };
@@ -47,6 +61,11 @@ const TOOLS = [
     name: "remove_tags",
     description: "Remove tags/etiquetas de um lead.",
     input_schema: { type: "object", properties: { lead: { type: "string" }, tags: { type: "array", items: { type: "string" }, minItems: 1 } }, required: ["lead", "tags"] },
+  },
+  {
+    name: "create_stage",
+    description: "Cria uma nova etapa (coluna) no funil. Use quando pedirem para criar etapa/coluna, inclusive \"caso não exista, crie\" — se a etapa já existir, NÃO chame. Pode ser usada no mesmo comando antes de mover leads para ela.",
+    input_schema: { type: "object", properties: { name: { type: "string", description: "Nome da etapa nova" }, after: { type: "string", description: "Etapa existente depois da qual a nova fica (opcional)" } }, required: ["name"] },
   },
   {
     name: "create_lead",
@@ -127,6 +146,7 @@ export async function interpret(
 ): Promise<{ calls: ToolCall[]; reply: string | null; heard: string | null }> {
   const system = [
     "Você converte comandos falados em português (Brasil) em ações de um CRM, usando as ferramentas.",
+    "Etapa/coluna que não existe na lista abaixo: se o usuário pediu para criar (ou \"caso não exista, crie\"), chame create_stage com o nome e depois move_lead/create_lead usando esse mesmo nome. Sempre chame TODAS as ações pedidas: mover, criar, valor, tags etc.",
     "Um único comando pode ter VÁRIAS ações e VÁRIOS leads (ex.: \"muda o valor do Yuri para 3000, tira a tag Anúncio dele e move a Vitória para Ganho com valor 2500\" = set_value Yuri, remove_tags Yuri, move_lead Vitória, set_value Vitória). Chame uma ferramenta por ação, TODAS na mesma resposta, sem esquecer nenhuma. \"Deixar só a tag X\" = remover as outras tags citadas (e adicionar X se ele não tiver).",
     "Use o nome do lead exatamente como foi dito. Para etapa e tags, prefira os nomes existentes abaixo (o usuário pode dizer 'coluna' querendo dizer etapa).",
     `Etapas existentes: ${context.stages.join(" | ") || "(nenhuma)"}`,

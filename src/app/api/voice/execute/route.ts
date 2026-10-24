@@ -1,3 +1,4 @@
+import { norm } from "@/lib/utils";
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
 import { supabaseServer } from "@/lib/supabase/server";
@@ -40,13 +41,46 @@ export async function POST(req: Request) {
       return id;
     };
 
+    // Etapas criadas neste comando: nome → id (para mover/criar lead nelas)
+    const created = new Map<string, string>();
+    const stageIdFor = async (id: string | null, name: string) => {
+      if (id) return id;
+      const got = created.get(norm(name));
+      if (got) return got;
+      const { data } = await sb.from("stages").select("id, name");
+      const hit = (data ?? []).find((s) => norm(s.name) === norm(name));
+      if (!hit) throw new HttpError(404, `A etapa "${name}" não foi criada`);
+      return hit.id as string;
+    };
+
     let failure: { action: string; error: string } | null = null;
     for (const a of actions) {
       try {
       switch (a.kind) {
+        case "create_stage": {
+          if (ctx.role === "agent") throw new HttpError(403, "Só administradores podem criar etapas do funil");
+          const { data: list } = await sb.from("stages").select("id, name, kind, position").eq("pipeline_id", a.pipelineId).order("position");
+          const all = (list ?? []) as { id: string; name: string; kind: string; position: number }[];
+          const exists = all.find((s) => norm(s.name) === norm(a.name));
+          if (exists) { created.set(norm(a.name), exists.id); break; }
+          // Entra depois da etapa pedida; senão, antes de Ganho/Perdido
+          let idx = a.afterStageId ? all.findIndex((s) => s.id === a.afterStageId) + 1 : all.findIndex((s) => s.kind !== "open");
+          if (idx <= 0 || idx > all.length) idx = idx === 0 ? 0 : all.length;
+          const PALETTE = ["#3b82f6", "#8b5cf6", "#06b6d4", "#f59e0b", "#ec4899", "#14b8a6", "#6366f1"];
+          const { data: st, error } = await sb.from("stages").insert({
+            organization_id: ctx.org.id, pipeline_id: a.pipelineId, name: a.name, position: idx, color: PALETTE[all.length % PALETTE.length],
+          }).select("id").single();
+          if (error) throw error;
+          // Renumera as posições para a nova etapa ficar no lugar certo
+          const order = [...all.slice(0, idx).map((s) => s.id), st.id, ...all.slice(idx).map((s) => s.id)];
+          for (let k = 0; k < order.length; k++) await sb.from("stages").update({ position: k }).eq("id", order[k]!);
+          created.set(norm(a.name), st.id);
+          break;
+        }
         case "move_lead": {
-          const { data: top } = await sb.from("leads").select("position").eq("stage_id", a.stageId).order("position").limit(1).maybeSingle();
-          const { error } = await sb.from("leads").update({ stage_id: a.stageId, position: (top?.position ?? 0) - 1024 }).eq("id", need(a.leadId));
+          const stageId = await stageIdFor(a.stageId, a.stageName);
+          const { data: top } = await sb.from("leads").select("position").eq("stage_id", stageId).order("position").limit(1).maybeSingle();
+          const { error } = await sb.from("leads").update({ stage_id: stageId, position: (top?.position ?? 0) - 1024 }).eq("id", need(a.leadId));
           if (error) throw error;
           break;
         }
@@ -63,10 +97,11 @@ export async function POST(req: Request) {
           break;
         }
         case "create_lead": {
-          const { data: st } = await sb.from("stages").select("pipeline_id").eq("id", a.stageId).maybeSingle();
+          const stageId = await stageIdFor(a.stageId, a.stageName);
+          const { data: st } = await sb.from("stages").select("pipeline_id").eq("id", stageId).maybeSingle();
           if (!st) throw new HttpError(404, "Etapa não encontrada");
           const { data: lead, error } = await sb.from("leads")
-            .insert({ organization_id: ctx.org.id, pipeline_id: st.pipeline_id, stage_id: a.stageId, name: a.name, phone: a.phone, value: a.value ?? 0, source: "Comando de voz", position: -Date.now() / 1000 })
+            .insert({ organization_id: ctx.org.id, pipeline_id: st.pipeline_id, stage_id: stageId, name: a.name, phone: a.phone, value: a.value ?? 0, source: "Comando de voz", position: -Date.now() / 1000 })
             .select("id").single();
           if (error) {
             if (error.code === "23505") throw new HttpError(409, "Já existe um lead com esse telefone");
