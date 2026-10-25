@@ -614,39 +614,39 @@ test("regras da IA: prompt, padrão e horário", () => {
   assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-25T13:00:00Z")), false); // domingo
 });
 
-import { checkReply, DEFAULT_RULES, rulesPrompt, stripEmojis, withinHours, withDefaults } from "@/lib/ai/rules";
+import { classify, findProtocol, newCode, trackedUrl, withProtocol } from "@/lib/tracking/shared";
+import { adFrom } from "@/lib/whatsapp/types";
+import { parseWebhook as parseZapi } from "@/lib/whatsapp/zapi";
 
-test("filtro da IA: palavra proibida, preço proibido, desconto e emoji", () => {
-  const r = { ...DEFAULT_RULES, forbidden_words: ["garantido", "aprovação"], price_policy: "proibido" as const, emojis: false };
-  assert.deepEqual(checkReply("Boa noite, Yuri. Posso ajudar com a MT-03.", r), []);
-  assert.ok(checkReply("Seu crédito está garantido!", r).some((x) => x.includes("garantido")));
-  assert.ok(checkReply("A aprovacao é rápida", r).some((x) => x.includes("aprovação")));
-  assert.ok(checkReply("Ela sai por R$ 33.990", r).some((x) => x.includes("preço")));
-  assert.ok(checkReply("Fica 12x de 2.890,00", r).length > 0);
-  assert.ok(checkReply("Que ótimo 😄", r).some((x) => x.includes("emoji")));
-  assert.equal(stripEmojis("Que ótimo 😄 Até já"), "Que ótimo Até já");
-  assert.ok(checkReply("Consigo te dar um desconto de 10%", r).length > 0);
-  const ok5 = { ...DEFAULT_RULES, max_discount_pct: 5 };
-  assert.deepEqual(checkReply("Posso fazer 5% de desconto à vista", ok5), []);
-  assert.ok(checkReply("Faço 8% de desconto", ok5).some((x) => x.includes("acima")));
+test("rastreio: canal de origem pelas UTMs e ids de clique", () => {
+  assert.equal(classify({ utm_source: "facebook", utm_medium: "paid" }), "meta_ads");
+  assert.equal(classify({ utm_source: "ig", utm_medium: "cpc" }), "meta_ads");
+  assert.equal(classify({ fbclid: "abc" }), "meta_ads");
+  assert.equal(classify({ utm_source: "instagram", utm_medium: "bio" }), "bio");
+  assert.equal(classify({ utm_source: "instagram", utm_medium: "stories" }), "instagram");
+  assert.equal(classify({ gclid: "x" }), "google");
+  assert.equal(classify({ utm_source: "tiktok" }), "tiktok");
+  assert.equal(classify({ referrer: "https://l.instagram.com/" }), "instagram");
+  assert.equal(classify({}), "direto");
+  assert.equal(classify({ kind: "site" }), "site");
 });
 
-test("filtro da IA: com preço liberado só aceita valores das informações", () => {
-  const r = { ...DEFAULT_RULES, price_policy: "liberado" as const, knowledge: "MT-03 a partir de R$ 33.990\nFazer 250: R$ 22.490,00" };
-  assert.deepEqual(checkReply("A MT-03 sai a partir de R$ 33.990.", r), []);
-  assert.deepEqual(checkReply("A Fazer está R$ 22.490", r), []);
-  assert.ok(checkReply("A MT-03 sai por R$ 31.500", r).some((x) => x.includes("31.500")));
+test("rastreio: protocolo na mensagem do WhatsApp", () => {
+  const code = newCode();
+  assert.match(code, /^[A-Z0-9]{6}$/);
+  const msg = withProtocol("Olá! Quero a MT-03", code);
+  assert.equal(findProtocol(msg), code);
+  assert.equal(findProtocol("oi, protocolo ab12cd"), "AB12CD");
+  assert.equal(findProtocol("Olá, tudo bem?"), null);
+  assert.equal(trackedUrl("https://x.app", "bio", { utm_source: "instagram", utm_campaign: "{{campaign.name}}", utm_content: "" }), "https://x.app/r/bio?utm_source=instagram&utm_campaign={{campaign.name}}");
 });
 
-test("regras da IA: prompt, padrão e horário", () => {
-  const r = withDefaults({ goal: "pre_atendimento", forbidden_topics: ["juros"], required_questions: ["Qual modelo?"] });
-  assert.equal(r.price_policy, "proibido");
-  const p = rulesPrompt(r);
-  assert.match(p, /PRÉ-ATENDIMENTO/);
-  assert.match(p, /juros/);
-  assert.match(p, /1\. Qual modelo\?/);
-  const h = { ...r, hours: { ...r.hours, enabled: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "18:00" } };
-  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-26T13:00:00Z")), true);
-  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-26T23:00:00Z")), false);
-  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-25T13:00:00Z")), false);
+test("rastreio: anúncio de clique para o WhatsApp (Meta oficial e Z-API)", () => {
+  assert.deepEqual(adFrom({ source_id: "1203", source_type: "ad", source_url: "https://fb.me/x", headline: "MT-03 0km", ctwa_clid: "Ab1" }),
+    { source_id: "1203", source_url: "https://fb.me/x", source_type: "ad", title: "MT-03 0km", body: null, ctwa_clid: "Ab1" });
+  assert.equal(adFrom({ title: "só título" }), null);
+  const z = parseZapi({ type: "ReceivedCallback", phone: "5585999990000", messageId: "M1", fromMe: false, momment: 1761350000000, text: { message: "Oi" },
+    externalAdReply: { title: "Promo MT-03", sourceId: "999", sourceUrl: "https://fb.me/ad", ctwaClid: "CLID" } });
+  assert.equal(z.messages[0]?.ad?.source_id, "999");
+  assert.equal(z.messages[0]?.ad?.ctwa_clid, "CLID");
 });

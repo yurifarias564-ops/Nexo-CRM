@@ -15,6 +15,7 @@ import { CallModal } from "./call-modal";
 import { VoipCallButton } from "@/components/calls/voip-provider";
 import { callOutcomeLabel } from "@/lib/constants";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
+import { LeadOrigin } from "./lead-origin";
 import { ScheduledList } from "@/components/scheduled/scheduled-list";
 import { formatWhen } from "@/lib/time";
 import type { Lead } from "@/lib/types";
@@ -273,6 +274,8 @@ export function LeadDrawer({
                 <div className="col-span-2"><Field label="Observações"><textarea className="field h-20 resize-none py-2" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} maxLength={5000} /></Field></div>
               </div>
               <Button onClick={save} loading={saving} className="w-full">Salvar alterações</Button>
+
+              <LeadOrigin leadId={lead.id} />
 
               <div>
                 <span className="label">Tags</span>

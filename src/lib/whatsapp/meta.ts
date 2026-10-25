@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { env, envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import type { MsgStatus, MsgType } from "@/lib/types";
-import { tsToIso, type NormalizedMessage, type StatusUpdate } from "./types";
+import { adFrom, tsToIso, type NormalizedMessage, type StatusUpdate } from "./types";
 
 const graph = () => `https://graph.facebook.com/${envOptional("META_GRAPH_VERSION", "v23.0")}`;
 
@@ -259,7 +259,7 @@ export function parseWebhook(payload: unknown): MetaBatch[] {
       if (change.field === "messages") {
         for (const m of (v.messages ?? []) as MetaMsg[]) {
           if (!m.id || !m.from || m.type === "reaction") continue;
-          batch.messages.push({ wa_id: m.from, contact_name: names.get(m.from) ?? null, external_id: m.id, direction: "in", status: "received", sent_at: tsToIso(m.timestamp), ...parseContent(m) });
+          batch.messages.push({ wa_id: m.from, contact_name: names.get(m.from) ?? null, external_id: m.id, direction: "in", status: "received", sent_at: tsToIso(m.timestamp), ...parseContent(m), ad: adFrom(m.referral) });
         }
         for (const s of (v.statuses ?? []) as { id?: string; status?: string }[]) {
           const st = s.status ? STATUS[s.status] : undefined;

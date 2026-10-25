@@ -1,7 +1,7 @@
 import "server-only";
 import { HttpError } from "@/lib/http";
 import type { MsgStatus } from "@/lib/types";
-import { tsToIso, type MessageChange, type NormalizedMessage, type StatusUpdate } from "./types";
+import { adFrom, tsToIso, type MessageChange, type NormalizedMessage, type StatusUpdate } from "./types";
 
 // Z-API (https://developer.z-api.io): WhatsApp por QR Code como serviço gerenciado.
 export interface ZapiCreds { instanceId: string; token: string; clientToken: string | null }
@@ -189,6 +189,7 @@ export function parseWebhook(payload: unknown): ZapiEvent {
       status: fromMe ? "sent" : "received",
       sent_at: tsToIso(Number(p.momment) || Date.now()),
       lid,
+      ad: fromMe ? null : adFrom(p.externalAdReply) ?? adFrom(o(p.text)?.externalAdReply) ?? adFrom(p.referral),
     } as NormalizedMessage);
   } else if (type === "MessageStatusCallback") {
     const st = STATUS[String(p.status ?? "").toUpperCase()];

@@ -2,7 +2,7 @@ import "server-only";
 import { env } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import type { MsgStatus, MsgType } from "@/lib/types";
-import { tsToIso, type MessageChange, type NormalizedMessage, type StatusUpdate } from "./types";
+import { adFrom, tsToIso, type MessageChange, type NormalizedMessage, type StatusUpdate } from "./types";
 
 const base = () => env("EVOLUTION_API_URL").replace(/\/+$/, "");
 
@@ -257,6 +257,17 @@ function content(msg: Rec["message"]): Pick<NormalizedMessage, "type" | "body" |
   return { type: "other", body: "Mensagem não suportada", media_ref: null, media_mime: null };
 }
 
+/** Anúncio "clique para o WhatsApp": vem em contextInfo.externalAdReply de qualquer tipo de mensagem. */
+function evoAd(msg: unknown) {
+  if (!msg || typeof msg !== "object") return null;
+  for (const v of Object.values(msg as Record<string, unknown>)) {
+    const ctx = v && typeof v === "object" ? (v as { contextInfo?: { externalAdReply?: unknown } }).contextInfo : null;
+    const ad = adFrom(ctx?.externalAdReply);
+    if (ad) return ad;
+  }
+  return null;
+}
+
 export function normalizeRecord(raw: unknown, historical = false): NormalizedMessage | null {
   const r = raw as Rec;
   const key = r?.key;
@@ -275,6 +286,7 @@ export function normalizeRecord(raw: unknown, historical = false): NormalizedMes
     sent_at: historical || ts ? tsToIso(ts) : new Date().toISOString(),
     ...c,
     media_ref: c.media_ref ? key.id : null, // id para baixar sob demanda
+    ad: fromMe ? null : evoAd(r.message),
   };
 }
 

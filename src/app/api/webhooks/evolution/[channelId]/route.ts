@@ -5,6 +5,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { parseWebhook, ownerNumber } from "@/lib/whatsapp/evolution";
 import { applyChanges, applyStatuses, ingestBatch } from "@/lib/whatsapp";
 import { aiAfterIngest } from "@/lib/ai/trigger";
+import { trackAfterIngest } from "@/lib/tracking/attribute";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -57,7 +58,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
     }
     if (evt.messages.length) {
       await ingestBatch(channelId, evt.messages, evt.historical);
-      if (!evt.historical) after(() => aiAfterIngest(channelId, evt.messages));
+      if (!evt.historical) after(() => trackAfterIngest(channelId, evt.messages).then(() => aiAfterIngest(channelId, evt.messages)));
       if (evt.historical) {
         await db.from("whatsapp_channels").update({ history_imported_at: new Date().toISOString() }).eq("id", channelId);
       }
