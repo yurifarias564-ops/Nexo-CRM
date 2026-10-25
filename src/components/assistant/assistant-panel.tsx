@@ -29,6 +29,7 @@ function Rich({ text }: { text: string }) {
         const t = l.trim();
         if (!t) return <div key={k} className="h-1" />;
         if (/^[-•*]\s+/.test(t)) return <p key={k} className="flex gap-2 pl-1"><span className="text-brand-300">•</span><span className="min-w-0 flex-1">{inline(t.replace(/^[-•*]\s+/, ""), k)}</span></p>;
+        if (t.startsWith(">")) return <p key={k} className="rounded-lg border-l-2 border-emerald-400/60 bg-emerald-500/5 px-2 py-1 text-slate-100">{inline(t.replace(/^>\s?/, ""), k)}</p>;
         if (/^#{1,4}\s/.test(t)) return <p key={k} className="pt-1 font-semibold text-white">{inline(t.replace(/^#{1,4}\s/, ""), k)}</p>;
         return <p key={k}>{inline(t, k)}</p>;
       })}
