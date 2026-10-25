@@ -13,6 +13,7 @@ import { CallProvider } from "@/components/calls/call-provider";
 import { VoipProvider } from "@/components/calls/voip-provider";
 import { cn } from "@/lib/utils";
 import { ConnectionAlert } from "./connection-alert";
+import { AssistantButton } from "@/components/assistant/assistant-panel";
 
 const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boolean }[] = [
   { href: "/dashboard", label: "Painel", icon: BarChart3 },
@@ -133,7 +134,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <h1 className="hidden text-sm font-medium text-slate-300 md:block">
             {NAV.find((n) => path.startsWith(n.href))?.label}
           </h1>
-          <div className="ml-auto shrink-0"><VoiceCommand /></div>
+          <div className="ml-auto flex shrink-0 items-center gap-2"><AssistantButton /><VoiceCommand /></div>
         </header>
         <ConnectionAlert />
         <main className="min-h-0 flex-1 overflow-hidden"><CallProvider><VoipProvider>{children}</VoipProvider></CallProvider></main>
