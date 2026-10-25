@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Target } from "lucide-react";
+import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Target, Handshake } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -52,7 +52,8 @@ function useUnread(orgId: string) {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const ws = useWorkspace();
-  const nav = ws.role === "agent" ? NAV.filter((n) => n.seller) : NAV;
+  const base = ws.role === "agent" ? NAV.filter((n) => n.seller) : NAV;
+  const nav = ws.isHouse && !ws.supportMode ? [...base, { href: "/parceiros", label: "Parceiros", icon: Handshake }] : base;
   const path = usePathname();
   const router = useRouter();
   const unread = useUnread(ws.orgId);
@@ -139,8 +140,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex shrink-0 items-center gap-2"><AssistantButton /><VoiceCommand /></div>
         </header>
         <ConnectionAlert />
+        {ws.supportMode && <SupportBar orgId={ws.orgId} orgName={ws.orgName} />}
         <main className="min-h-0 flex-1 overflow-hidden"><CallProvider><VoipProvider>{children}</VoipProvider></CallProvider></main>
       </div>
+    </div>
+  );
+}
+
+/** Faixa quando o dono da plataforma está dentro da conta de um cliente. */
+function SupportBar({ orgId, orgName }: { orgId: string; orgName: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  async function leave() {
+    setBusy(true);
+    const res = await fetch(`/api/platform/partners/${orgId}/access`, { method: "DELETE" });
+    setBusy(false);
+    if (!res.ok) return toast.error((await res.json()).error);
+    router.push("/parceiros");
+    router.refresh();
+  }
+  return (
+    <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-100">
+      <Handshake className="h-3.5 w-3.5" />
+      <span className="flex-1 truncate">Você está na conta de <b>{orgName}</b> como suporte. Tudo o que fizer aqui fica registrado.</span>
+      <button onClick={() => void leave()} disabled={busy} className="rounded-md border border-amber-400/40 px-2.5 py-1 font-medium hover:bg-amber-500/20">{busy ? "Saindo…" : "Sair e voltar para Parceiros"}</button>
     </div>
   );
 }

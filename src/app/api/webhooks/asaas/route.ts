@@ -1,13 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { env } from "@/lib/env";
+import { updateSubscription } from "@/lib/asaas";
 
 export const runtime = "nodejs";
 
 type AsaasEvent = {
   id?: string;
   event: string;
-  payment?: { id: string; subscription?: string; externalReference?: string; dueDate?: string; status?: string };
+  payment?: { id: string; subscription?: string; externalReference?: string; dueDate?: string; status?: string; billingType?: string; creditCard?: { creditCardNumber?: string; creditCardBrand?: string; creditCardToken?: string } };
   subscription?: { id: string; externalReference?: string };
 };
 
@@ -69,10 +70,23 @@ export async function POST(req: Request) {
       end.setUTCDate(end.getUTCDate() + 3);
       const current = sub.current_period_end ? new Date(sub.current_period_end) : null;
       const periodEnd = current && current > end ? current : end;
+      const p = evt.payment;
+      const card = p?.billingType === "CREDIT_CARD" ? p.creditCard : undefined;
       const r = await db.from("subscriptions")
-        .update({ status: "active", current_period_end: periodEnd.toISOString(), updated_at: now })
+        .update({
+          status: "active", current_period_end: periodEnd.toISOString(), updated_at: now,
+          ...(p?.billingType ? { billing_type: p.billingType } : {}),
+          ...(card ? { card_brand: card.creditCardBrand ?? null, card_last4: card.creditCardNumber?.slice(-4) ?? null } : {}),
+        })
         .eq("organization_id", sub.organization_id);
       if (r.error) throw r.error;
+      // Pagou com cartão: as próximas mensalidades passam a ser debitadas sozinhas no cartão, no dia do vencimento
+      if (card?.creditCardToken && subscriptionId) {
+        await updateSubscription(subscriptionId, { billingType: "CREDIT_CARD", creditCardToken: card.creditCardToken })
+          .catch((e) => console.error("[asaas] cartão recorrente", e));
+      }
+    } else if ((evt.event === "PAYMENT_CREATED" || evt.event === "PAYMENT_UPDATED") && evt.payment?.dueDate && ["PENDING", "OVERDUE"].includes(evt.payment.status ?? "PENDING")) {
+      await db.from("subscriptions").update({ next_due_date: evt.payment.dueDate, ...(evt.payment.billingType ? { billing_type: evt.payment.billingType } : {}), updated_at: now }).eq("organization_id", sub.organization_id);
     } else if (PAST_DUE.has(evt.event) || CANCEL.has(evt.event)) {
       const status = CANCEL.has(evt.event) ? "canceled" : "past_due";
       const r = await db.from("subscriptions").update({ status, updated_at: now }).eq("organization_id", sub.organization_id);

@@ -58,6 +58,53 @@ export async function cancelSubscription(subscriptionId: string) {
   return asaas<{ deleted: boolean }>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "DELETE" });
 }
 
+export interface AsaasSubscription { id: string; status: string; billingType: string; value: number; nextDueDate: string; cycle: string; creditCard?: { creditCardNumber?: string; creditCardBrand?: string } }
+export interface AsaasPayment {
+  id: string; subscription?: string; status: string; billingType: string; value: number; dueDate: string;
+  invoiceUrl?: string; bankSlipUrl?: string; paymentDate?: string | null; clientPaymentDate?: string | null;
+  creditCard?: { creditCardNumber?: string; creditCardBrand?: string; creditCardToken?: string };
+}
+
+export async function getSubscription(id: string) {
+  return asaas<AsaasSubscription>(`/subscriptions/${encodeURIComponent(id)}`);
+}
+
+/** Muda vencimento, forma de pagamento ou cartão da assinatura (e das cobranças em aberto). */
+export async function updateSubscription(id: string, patch: { nextDueDate?: string; billingType?: string; creditCardToken?: string; value?: number }) {
+  return asaas<AsaasSubscription>(`/subscriptions/${encodeURIComponent(id)}`, {
+    method: "POST",
+    body: JSON.stringify({ ...patch, updatePendingPayments: true }),
+  });
+}
+
+export async function subscriptionPayments(id: string, limit = 12) {
+  const r = await asaas<{ data: AsaasPayment[] }>(`/subscriptions/${encodeURIComponent(id)}/payments?limit=${limit}`);
+  return r.data;
+}
+
+/** Cobranças em aberto (pendentes ou vencidas) com vencimento no intervalo. */
+export async function openPayments(status: "PENDING" | "OVERDUE", from: string, to: string) {
+  const out: AsaasPayment[] = [];
+  for (let offset = 0; offset < 2000; offset += 100) {
+    const r = await asaas<{ data: AsaasPayment[]; hasMore?: boolean }>(`/payments?status=${status}&dueDate%5Bge%5D=${from}&dueDate%5Ble%5D=${to}&limit=100&offset=${offset}`);
+    out.push(...r.data);
+    if (!r.hasMore) break;
+  }
+  return out;
+}
+
+/** Linha digitável do boleto. */
+export async function boletoLine(paymentId: string): Promise<string | null> {
+  const r = await asaas<{ identificationField?: string }>(`/payments/${encodeURIComponent(paymentId)}/identificationField`).catch(() => null);
+  return r?.identificationField ?? null;
+}
+
+/** Pix copia e cola da cobrança. */
+export async function pixPayload(paymentId: string): Promise<string | null> {
+  const r = await asaas<{ payload?: string }>(`/payments/${encodeURIComponent(paymentId)}/pixQrCode`).catch(() => null);
+  return r?.payload ?? null;
+}
+
 export function isValidCpfCnpj(raw: string): boolean {
   const d = raw.replace(/\D/g, "");
   if (d.length === 11) {

@@ -13,6 +13,8 @@ export interface SessionContext {
   role: Role | null;
   subscription: Subscription | null;
   active: boolean;
+  /** Dono da plataforma (painel de parceiros, acesso de suporte às contas). */
+  isHouse: boolean;
   orgs: { id: string; name: string; role: Role }[];
 }
 
@@ -23,12 +25,13 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
   const user = auth.user;
   if (!user) return null;
 
-  const [{ data: profile }, { data: memberships }] = await Promise.all([
+  const [{ data: profile }, { data: memberships }, { data: house }] = await Promise.all([
     supabase.from("profiles").select("full_name, current_organization_id").eq("id", user.id).maybeSingle(),
     supabase
       .from("organization_members")
       .select("role, organization_id, organizations(id, name, created_at)")
       .eq("user_id", user.id),
+    supabase.rpc("is_house").then((r) => r, () => ({ data: false })),
   ]);
 
   type M = { role: Role; organization_id: string; organizations: Organization | Organization[] | null };
@@ -51,9 +54,11 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
     subscription = (data as Subscription | null) ?? null;
   }
 
-  const active =
+  const isHouse = house === true;
+  // O dono da plataforma entra na conta do cliente mesmo com a assinatura vencida (suporte)
+  const active = isHouse || (
     subscription?.status === "active" &&
-    (!subscription.current_period_end || new Date(subscription.current_period_end) > new Date());
+    (!subscription.current_period_end || new Date(subscription.current_period_end) > new Date()));
 
   return {
     userId: user.id,
@@ -63,6 +68,7 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
     role: current?.role ?? null,
     subscription,
     active,
+    isHouse,
     orgs: orgs.map(({ id, name, role }) => ({ id, name, role })),
   };
 });

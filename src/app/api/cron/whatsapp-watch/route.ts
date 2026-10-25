@@ -2,6 +2,7 @@ import { isCronRequest } from "@/lib/cron";
 import { watchAll } from "@/lib/whatsapp/watchdog";
 import { refreshAvatars } from "@/lib/whatsapp/avatars";
 import { dispatchEvents, syncStale } from "@/lib/meta-ads";
+import { runPartnerBilling } from "@/lib/platform/partners";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -16,7 +17,9 @@ async function handle(req: Request) {
     // Meta Ads: eventos de venda/lead para o pixel e números dos anúncios (a cada hora por conta)
     const metaEvents = await dispatchEvents(40).catch((e) => { console.error("[meta eventos]", e); return 0; });
     const metaSync = new Date().getMinutes() % 10 === 0 ? await syncStale(2).catch(() => 0) : 0;
-    return Response.json({ watch, avatars, metaEvents, metaSync });
+    // Cobrança dos parceiros nos grupos (no dia do vencimento e 2 dias depois, se não pagou)
+    const partnerBills = new Date().getMinutes() % 15 === 5 ? await runPartnerBilling().catch((e) => { console.error("[parceiros]", e); return 0; }) : 0;
+    return Response.json({ watch, avatars, metaEvents, metaSync, partnerBills });
   } catch (e) {
     console.error("[cron whatsapp-watch]", e);
     return new Response("error", { status: 500 });

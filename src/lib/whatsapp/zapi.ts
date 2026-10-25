@@ -78,6 +78,24 @@ export async function setWebhooks(c: ZapiCreds, url: string) {
   await call(c, "update-every-webhooks", { method: "PUT", body: { value: url, notifySentByMe: true } });
 }
 
+/** Grupos do número (id no formato "120363…-group"). */
+export async function listGroups(c: ZapiCreds): Promise<{ id: string; subject: string; size: number | null }[]> {
+  const out: { id: string; subject: string; size: number | null }[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const r = await call<unknown>(c, `groups?page=${page}&pageSize=100`, {}, 40_000);
+    const arr = (Array.isArray(r) ? r : []) as { phone?: string; name?: string; isGroup?: boolean }[];
+    for (const g of arr) if (g.phone && (g.isGroup || g.phone.endsWith("-group"))) out.push({ id: g.phone, subject: g.name?.trim() || "Grupo sem nome", size: null });
+    if (arr.length < 100) break;
+  }
+  return out.sort((a, b) => a.subject.localeCompare(b.subject, "pt-BR"));
+}
+
+/** Texto para um grupo (o id do grupo vai como está). */
+export async function sendGroupText(c: ZapiCreds, groupId: string, text: string) {
+  if (!/^[\d-]+(-group)?$/.test(groupId)) throw new HttpError(422, "Grupo inválido");
+  return msgId(await call(c, "send-text", { method: "POST", body: { phone: groupId, message: text } }));
+}
+
 export async function sendText(c: ZapiCreds, to: string, text: string) {
   return msgId(await call(c, "send-text", { method: "POST", body: { phone: phoneOf(to), message: text } }));
 }

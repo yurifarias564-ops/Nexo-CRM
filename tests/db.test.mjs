@@ -409,5 +409,12 @@ const pev2 = await su("select value from public.meta_events where lead_id=$1 and
 ok("valor corrigido antes do envio atualiza o evento (sem duplicar)", pev2.length === 1 && Number(pev2[0].value) === 3000);
 ok("vendedor não vê a fila de eventos", (await as(C, "select * from public.meta_events")).length === 0);
 
+console.log("\n# Parceiros (painel do dono da plataforma)");
+const pr = await su("select * from public.platform_partners()");
+ok("visão de parceiros lista as empresas com uso e assinatura", pr.length >= 2 && pr.some((r) => r.id === orgA && Number(r.leads) >= 1));
+await expectError("usuário comum não chama a visão de parceiros", () => as(A, "select * from public.platform_partners()"), "42501");
+await su("insert into public.partner_settings (organization_id, billing_group_id, billing_group_name) values ($1,'120363-group','Grupo A')", [orgA]);
+ok("cliente não lê configuração de cobrança nem histórico", (await as(A, "select * from public.partner_settings")).length === 0 && (await as(A, "select * from public.platform_audit")).length === 0);
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

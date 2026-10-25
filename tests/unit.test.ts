@@ -680,3 +680,17 @@ test("anúncio do lead: id do anúncio, {{ad.id}} na UTM ou nome", () => {
   assert.equal(resolveAd({ lead_id: "a", ad_id: null, utm_term: null, utm_content: "Video MT-03", ad_title: null }, byName, known), "120001");
   assert.equal(resolveAd({ lead_id: "a", ad_id: null, utm_term: null, utm_content: "bio", ad_title: null }, byName, known), null);
 });
+
+import { billingMessage } from "@/lib/platform/billing-message";
+
+test("parceiros: mensagem de cobrança no grupo", () => {
+  const m = billingMessage("Moto Center", { value: 197, dueDate: "2026-11-05", invoiceUrl: "https://www.asaas.com/i/abc" }, "due", "23793.38128 60000.000003 00000.000400 1 99990000019700", "00020101021226...6304ABCD");
+  assert.match(m, /Hoje \(05\/11\/2026\) vence/);
+  assert.match(m, /R\$\s?197,00/);
+  assert.match(m, /Linha digitável/);
+  assert.match(m, /Pix copia e cola/);
+  assert.match(m, /asaas\.com\/i\/abc/);
+  const late = billingMessage("Moto Center", { value: 197, dueDate: "2026-11-05" }, "overdue", null, null);
+  assert.match(late, /venceu em 05\/11\/2026/);
+  assert.ok(!late.includes("Linha digitável"));
+});

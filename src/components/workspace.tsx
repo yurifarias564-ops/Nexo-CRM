@@ -15,6 +15,10 @@ export interface WorkspaceData {
   tags: Tag[];
   members: Member[];
   quickReplies: QuickReply[];
+  /** Dono da plataforma (vê o painel de parceiros). */
+  isHouse?: boolean;
+  /** Está dentro da conta de um cliente como suporte. */
+  supportMode?: boolean;
 }
 
 interface Ctx extends WorkspaceData {
