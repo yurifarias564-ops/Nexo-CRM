@@ -1,3 +1,4 @@
+import { SUPABASE_URL } from "@/lib/supabase/config";
 import { z } from "zod";
 import { fail, ok, readJson } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -48,7 +49,7 @@ export async function PUT(req: Request) {
     // Só aceita imagens do nosso armazenamento (vêm do upload)
     for (const k of ["logo_url", "icon_url"] as const) {
       if (b[k] === null) row[k] = null;
-      else if (b[k] && b[k]!.includes("/storage/v1/object/public/branding/")) row[k] = b[k];
+      else if (b[k] && b[k]!.startsWith(`${SUPABASE_URL}/storage/v1/object/public/branding/${orgId}/`) && !b[k]!.includes("..")) row[k] = b[k];
     }
     const { data, error } = await db.from("org_branding").upsert(row).select("*").single();
     if (error) throw error;

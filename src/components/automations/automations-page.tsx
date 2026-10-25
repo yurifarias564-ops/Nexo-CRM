@@ -42,7 +42,7 @@ function newStep(type: Step["type"], ws: ReturnType<typeof useWorkspace>): Step 
 
 export function AutomationsPage() {
   const [list, setList] = useState<{ automations: Automation[]; stats: Record<string, Stat> } | null>(null);
-  const [editing, setEditing] = useState<(AutomationBody & { id?: string }) | null>(null);
+  const [editing, setEditing] = useState<(AutomationBody & { id?: string; assinatura?: string }) | null>(null);
   const [gallery, setGallery] = useState(false);
   const [runsOf, setRunsOf] = useState<Automation | null>(null);
 
@@ -115,7 +115,7 @@ export function AutomationsPage() {
                     {s?.last && <span>última {relativeTime(s.last)}</span>}
                     <div className="ml-auto flex gap-1">
                       <Button size="sm" variant="ghost" onClick={() => setRunsOf(a)}><History className="h-3.5 w-3.5" /> Execuções</Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditing({ ...a, id: undefined, name: `${a.name} (cópia)`, enabled: false })}><Copy className="h-3.5 w-3.5" /> Duplicar</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditing({ ...a, id: undefined, assinatura: undefined, name: `${a.name} (cópia)`, enabled: false })}><Copy className="h-3.5 w-3.5" /> Duplicar</Button>
                       <Button size="sm" variant="outline" onClick={() => setEditing(a)}>Editar</Button>
                       <button onClick={() => void remove(a)} className="rounded-md p-1.5 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Excluir"><Trash2 className="h-4 w-4" /></button>
                     </div>
@@ -179,7 +179,7 @@ function Gallery({ onClose, onPick }: { onClose: () => void; onPick: (b: Omit<Au
 // Editor visual (fluxo vertical, como n8n / Salesbot)
 // ------------------------------------------------------------------------------------------------
 
-function Editor({ initial, onClose }: { initial: AutomationBody & { id?: string }; onClose: () => void }) {
+function Editor({ initial, onClose }: { initial: AutomationBody & { id?: string; assinatura?: string }; onClose: () => void }) {
   const ws = useWorkspace();
   const [a, setA] = useState(initial);
   const [open, setOpen] = useState<number | "trigger" | null>(initial.steps.length ? null : "trigger");
@@ -239,7 +239,7 @@ function Editor({ initial, onClose }: { initial: AutomationBody & { id?: string 
                     <button disabled={i === a.steps.length - 1} onClick={(e) => { e.stopPropagation(); move(i, 1); }} className="rounded p-1 text-slate-500 hover:text-white disabled:opacity-30" aria-label="Descer"><ArrowDown className="h-3.5 w-3.5" /></button>
                     <button onClick={(e) => { e.stopPropagation(); del(i); }} className="rounded p-1 text-slate-500 hover:text-red-300" aria-label="Remover"><Trash2 className="h-3.5 w-3.5" /></button>
                   </>}>
-                  {open === i && <StepForm s={s} onChange={(n) => setStep(i, n)} />}
+                  {open === i && <StepForm s={s} onChange={(n) => setStep(i, n)} assinatura={initial.assinatura} />}
                 </Node>
               </div>
             );
@@ -393,7 +393,7 @@ function TriggerForm({ t, onChange }: { t: Trigger; onChange: (t: Trigger) => vo
   );
 }
 
-function StepForm({ s, onChange }: { s: Step; onChange: (s: Step) => void }) {
+function StepForm({ s, onChange, assinatura }: { s: Step; onChange: (s: Step) => void; assinatura?: string }) {
   const ws = useWorkspace();
   switch (s.type) {
     case "send_message": return <F label="Mensagem para o cliente"><TextWithVars value={s.text} onChange={(text) => onChange({ ...s, text })} /></F>;
@@ -458,7 +458,8 @@ function StepForm({ s, onChange }: { s: Step; onChange: (s: Step) => void }) {
     case "webhook": return (
       <div className="space-y-1.5">
         <F label="Endereço do webhook (n8n, Make, Zapier…)"><input className="field font-mono text-xs" value={s.url} onChange={(e) => onChange({ ...s, url: e.target.value.trim() })} /></F>
-        <p className="text-[11px] text-slate-500"><MessageSquareText className="mr-1 inline h-3 w-3" />Envia um POST com nome, telefone, valor, etapa, origem, responsável e tags do lead. Cabeçalho <code>x-nexo-signature</code> para conferir a origem.</p>
+        <p className="text-[11px] text-slate-500"><MessageSquareText className="mr-1 inline h-3 w-3" />Envia um POST com nome, telefone, valor, etapa, origem, responsável e tags do lead. Cabeçalho <code>x-nexo-signature</code> (HMAC-SHA256 do corpo) para conferir a origem.</p>
+        <p className="text-[11px] text-slate-500">Chave da assinatura: {assinatura ? <code className="select-all text-slate-300">{assinatura}</code> : "salve a automação para ver a chave"}. Endereços de rede interna são bloqueados.</p>
       </div>
     );
   }

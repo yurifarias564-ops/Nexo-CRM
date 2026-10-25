@@ -27,6 +27,8 @@ export interface RunInput {
   maxTokens?: number;
   /** Claude: pensar antes de responder (padrão: sim). */
   think?: boolean;
+  /** Hora-limite (ms desde 1970) para a resposta inteira: nenhuma chamada passa disso. */
+  deadline?: number;
 }
 
 export const MODELS: Record<AiProvider, { id: string; label: string }[]> = {
@@ -51,12 +53,14 @@ export const defaultModel = (p: AiProvider) => MODELS[p][0]!.id;
 
 export class AiError extends Error {}
 
-async function post(url: string, headers: Record<string, string>, body: unknown, label: string) {
+async function post(url: string, headers: Record<string, string>, body: unknown, label: string, deadline?: number) {
+  const left = deadline ? deadline - Date.now() : 90_000;
+  if (left < 3_000) throw new AiError(`${label}: tempo esgotado para responder`);
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(Math.min(90_000, left)),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
@@ -93,6 +97,7 @@ async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
   const messages: { role: string; content: unknown }[] = alternate(i.history).map((t) => ({ role: t.role, content: t.text }));
   const tools = i.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
   let thinking = i.think !== false;
+  let last = "";
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
     // Raciocínio antes de responder (qualidade de atendimento); se o modelo não aceitar, segue sem
     const base = { model: i.model, system: i.system, messages, ...(tools.length ? { tools } : {}) };
@@ -100,9 +105,9 @@ async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
     try {
       data = thinking
         ? await post("https://api.anthropic.com/v1/messages", { "x-api-key": i.apiKey, "anthropic-version": "2023-06-01" },
-          { ...base, max_tokens: (i.maxTokens ?? 1200) + 2048, thinking: { type: "enabled", budget_tokens: 2048 } }, "Claude")
+          { ...base, max_tokens: (i.maxTokens ?? 1200) + 2048, thinking: { type: "enabled", budget_tokens: 2048 } }, "Claude", i.deadline)
         : await post("https://api.anthropic.com/v1/messages", { "x-api-key": i.apiKey, "anthropic-version": "2023-06-01" },
-          { ...base, max_tokens: i.maxTokens ?? 1200 }, "Claude");
+          { ...base, max_tokens: i.maxTokens ?? 1200 }, "Claude", i.deadline);
     } catch (e) {
       if (!thinking || !/thinking/i.test((e as Error).message)) throw e;
       thinking = false;
@@ -112,6 +117,7 @@ async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
     const content = (data.content ?? []) as { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
     const uses = content.filter((c) => c.type === "tool_use");
     const text = content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n").trim();
+    if (text) last = text;
     if (!uses.length || data.stop_reason !== "tool_use") return text;
     messages.push({ role: "assistant", content });
     const results = [];
@@ -123,7 +129,7 @@ async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
     }
     messages.push({ role: "user", content: results });
   }
-  return "";
+  return last; // acabaram as rodadas: usa o último texto que o modelo escreveu
 }
 
 /** O Gemini não aceita algumas chaves de JSON Schema. */
@@ -142,15 +148,17 @@ async function runGemini(i: RunInput, calls: ToolCall[]): Promise<string> {
   const contents: { role: string; parts: unknown[] }[] = alternate(i.history).map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.text }] }));
   const tools = [{ functionDeclarations: i.tools.map((t) => ({ name: t.name, description: t.description, parameters: geminiSchema(t.parameters) })) }];
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(i.model)}:generateContent`;
+  let last = "";
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
     const data = await post(url, { "x-goog-api-key": i.apiKey }, {
       systemInstruction: { parts: [{ text: i.system }] }, contents, ...(i.tools.length ? { tools } : {}),
       generationConfig: { maxOutputTokens: i.maxTokens ?? 1200 },
-    }, "Gemini");
+    }, "Gemini", i.deadline);
     const cand = ((data.candidates ?? []) as { content?: { role?: string; parts?: { text?: string; thought?: boolean; functionCall?: { name: string; args?: unknown } }[] } }[])[0];
     const parts = cand?.content?.parts ?? [];
     const fcs = parts.filter((p) => p.functionCall);
     const text = parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("\n").trim();
+    if (text) last = text;
     if (!fcs.length) return text;
     contents.push({ role: "model", parts });
     const responses = [];
@@ -162,17 +170,19 @@ async function runGemini(i: RunInput, calls: ToolCall[]): Promise<string> {
     }
     contents.push({ role: "user", parts: responses });
   }
-  return "";
+  return last; // acabaram as rodadas: usa o último texto que o modelo escreveu
 }
 
 async function runGroq(i: RunInput, calls: ToolCall[]): Promise<string> {
   const messages: Record<string, unknown>[] = [{ role: "system", content: i.system }, ...alternate(i.history).map((t) => ({ role: t.role, content: t.text }))];
   const tools = i.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
+  let last = "";
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
     const data = await post("https://api.groq.com/openai/v1/chat/completions", { Authorization: `Bearer ${i.apiKey}` },
-      { model: i.model, messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}), max_tokens: i.maxTokens ?? 1200 }, "Groq");
+      { model: i.model, messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}), max_tokens: i.maxTokens ?? 1200 }, "Groq", i.deadline);
     const msg = ((data.choices ?? []) as { message?: { content?: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[])[0]?.message;
     const tcs = msg?.tool_calls ?? [];
+    if (msg?.content?.trim()) last = msg.content.trim();
     if (!tcs.length) return (msg?.content ?? "").trim();
     messages.push({ role: "assistant", content: msg?.content ?? "", tool_calls: tcs });
     for (const tc of tcs) {
@@ -182,7 +192,7 @@ async function runGroq(i: RunInput, calls: ToolCall[]): Promise<string> {
       messages.push({ role: "tool", tool_call_id: tc.id, content: result });
     }
   }
-  return "";
+  return last; // acabaram as rodadas: usa o último texto que o modelo escreveu
 }
 
 export async function runWithTools(i: RunInput): Promise<{ text: string; calls: ToolCall[] }> {

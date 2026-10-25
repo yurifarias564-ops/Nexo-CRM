@@ -36,8 +36,8 @@ export async function aiAfterIngest(channelId: string, messages: NormalizedMessa
     (async () => {
       if (!outs.length) return;
       await sleep(5000); // dá tempo de a própria IA marcar as mensagens dela
-      const { data: check } = await db.from("messages").select("id, conversation_id, by_ai, sent_by").in("id", outs.map((o) => o.id));
-      const human = new Set((check ?? []).filter((m) => !m.by_ai).map((m) => m.conversation_id));
+      const { data: check } = await db.from("messages").select("id, conversation_id, by_ai, by_automation, sent_by").in("id", outs.map((o) => o.id));
+      const human = new Set((check ?? []).filter((m) => !m.by_ai && !m.by_automation).map((m) => m.conversation_id));
       for (const c of human) await pauseAiForHuman(c).catch(() => undefined);
     })(),
   ]);

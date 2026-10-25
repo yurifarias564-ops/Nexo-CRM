@@ -21,7 +21,7 @@ export async function requireHouse() {
 }
 
 export async function audit(actorId: string, orgId: string | null, action: string, details: Record<string, unknown> = {}) {
-  await supabaseAdmin().from("platform_audit").insert({ actor_id: actorId, organization_id: orgId, action, details }).then(() => undefined, () => undefined);
+  await supabaseAdmin().from("platform_audit").insert({ actor_id: actorId, organization_id: orgId, action, details }).then(({ error }) => { if (error) console.error("[auditoria]", error.message); }, (e) => console.error("[auditoria]", e));
 }
 
 export async function platformSettings() {
@@ -83,6 +83,18 @@ const today = (tz: string, plusDays = 0) => {
  * para quem não paga no cartão; 2 dias depois, se ainda estiver em aberto, manda o lembrete.
  * Quem paga no cartão é debitado sozinho pelo Asaas — só recebe mensagem se o cartão falhar.
  */
+/** Acesso de suporte é temporário: some sozinho depois de 12 horas. */
+export async function expireSupportAccess() {
+  const db = supabaseAdmin();
+  const { data } = await db.from("platform_support_access").select("organization_id, user_id").lt("created_at", new Date(Date.now() - 12 * 3600_000).toISOString());
+  for (const r of data ?? []) {
+    await db.from("organization_members").delete().eq("organization_id", r.organization_id).eq("user_id", r.user_id).neq("role", "owner");
+    await db.from("platform_support_access").delete().eq("organization_id", r.organization_id).eq("user_id", r.user_id);
+    await audit(r.user_id, r.organization_id, "acesso de suporte expirou (12h)");
+  }
+  return data?.length ?? 0;
+}
+
 export async function runPartnerBilling() {
   const s = await platformSettings();
   if (!s.billing_channel_id) return 0;

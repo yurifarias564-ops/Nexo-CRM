@@ -42,6 +42,10 @@ const Body = z.discriminatedUnion("action", [
   z.object({ action: z.literal("value"), value_cents: z.number().int().min(500).max(100_000_00) }),
 ]);
 
+function must(r: { error: { message: string } | null }) {
+  if (r.error) throw new Error(r.error.message);
+}
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ orgId: string }> }) {
   try {
     const { orgId } = await params;
@@ -55,13 +59,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orgId:
     const now = new Date().toISOString();
 
     if (b.action === "due_date") {
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date()); // hoje no Brasil
       if (b.date < todayStr) throw new HttpError(422, "Escolha hoje ou uma data futura");
       if (sub?.asaas_subscription_id) await updateSubscription(sub.asaas_subscription_id, { nextDueDate: b.date });
       // Acesso vale até o novo vencimento + 3 dias de tolerância
       const end = new Date(`${b.date}T23:59:00-03:00`);
       end.setUTCDate(end.getUTCDate() + 3);
-      await db.from("subscriptions").upsert({ organization_id: orgId, status: "active", next_due_date: b.date, current_period_end: end.toISOString(), updated_at: now });
+      must(await db.from("subscriptions").upsert({ organization_id: orgId, status: "active", next_due_date: b.date, current_period_end: end.toISOString(), updated_at: now }));
       await audit(ctx.userId, orgId, "vencimento alterado", { de: sub?.next_due_date ?? null, para: b.date, asaas: Boolean(sub?.asaas_subscription_id) });
     } else if (b.action === "status") {
       const patch = b.status === "blocked" ? { status: "past_due" } : b.status === "courtesy" ? { status: "active", current_period_end: null } : { status: "active" };
@@ -69,16 +73,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orgId:
         // Reativar sem data: libera por mais 3 dias até ajustar o vencimento
         Object.assign(patch, { current_period_end: new Date(Date.now() + 3 * 86_400_000).toISOString() });
       }
-      await db.from("subscriptions").upsert({ organization_id: orgId, ...patch, updated_at: now });
+      must(await db.from("subscriptions").upsert({ organization_id: orgId, ...patch, updated_at: now }));
       await audit(ctx.userId, orgId, b.status === "blocked" ? "acesso bloqueado" : b.status === "courtesy" ? "cortesia (sem vencimento)" : "acesso liberado");
     } else if (b.action === "group") {
-      await db.from("partner_settings").upsert({ organization_id: orgId, billing_group_id: b.group_id, billing_group_name: b.group_name, updated_at: now });
+      must(await db.from("partner_settings").upsert({ organization_id: orgId, billing_group_id: b.group_id, billing_group_name: b.group_name, updated_at: now }));
       await audit(ctx.userId, orgId, "grupo de cobrança", { grupo: b.group_name });
     } else if (b.action === "notes") {
-      await db.from("partner_settings").upsert({ organization_id: orgId, notes: b.notes || null, updated_at: now });
+      must(await db.from("partner_settings").upsert({ organization_id: orgId, notes: b.notes || null, updated_at: now }));
     } else if (b.action === "value") {
       if (sub?.asaas_subscription_id) await updateSubscription(sub.asaas_subscription_id, { value: b.value_cents / 100 });
-      await db.from("subscriptions").upsert({ organization_id: orgId, value_cents: b.value_cents, updated_at: now });
+      must(await db.from("subscriptions").upsert({ organization_id: orgId, value_cents: b.value_cents, updated_at: now }));
       await audit(ctx.userId, orgId, "valor alterado", { de: sub?.value_cents ?? null, para: b.value_cents });
     }
     return ok({ ok: true });

@@ -436,6 +436,17 @@ ok("vendedor não vê automações", (await as(C, "select * from public.automati
 ok("dono vê automações da empresa", (await as(A, "select * from public.automations")).length === 1);
 ok("outra empresa não vê automações", (await as(B, "select * from public.automations")).length === 0);
 ok("ninguém lê a fila de acontecimentos pelo banco", (await as(A, "select * from public.automation_events")).length === 0);
+const claimed1 = await su("select * from public.automation_claim_events(100)");
+const claimed2 = await su("select * from public.automation_claim_events(100)");
+ok("cada acontecimento é pego uma vez só (sem duplicar execução)", claimed1.length >= 1 && claimed2.length === 0);
+await expectError("usuário não pega a fila de acontecimentos", () => as(A, "select * from public.automation_claim_events(10)"), "42501");
+const autoId = (await su("select id from public.automations where organization_id=$1 limit 1", [orgA]))[0].id;
+await su("insert into public.automation_runs (organization_id, automation_id, lead_id, status) values ($1,$2,$3,'waiting')", [orgA, autoId, leadA]);
+await expectError("não cria duas execuções ativas da mesma automação no mesmo lead", () => su("insert into public.automation_runs (organization_id, automation_id, lead_id, status) values ($1,$2,$3,'running')", [orgA, autoId, leadA]), "23505");
+await su("update public.automation_runs set status='done' where automation_id=$1", [autoId]);
+await su("insert into public.automation_runs (organization_id, automation_id, lead_id, status) values ($1,$2,$3,'running')", [orgA, autoId, leadA]);
+ok("depois que a anterior termina, pode rodar de novo", Number((await su("select count(*) n from public.automation_runs where automation_id=$1", [autoId]))[0].n) === 2);
+await expectError("evento da Meta só aceita situações válidas", () => su("update public.meta_events set status='xx' where lead_id=$1", [leadA]), "23514");
 
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

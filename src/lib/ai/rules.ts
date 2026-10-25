@@ -105,7 +105,8 @@ export function rulesPrompt(r: Rules): string {
 
 const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const EMOJI = /\p{Extended_Pictographic}/u;
-const MONEY = /(R\$\s*\d|\d+\s*(reais|mil reais)\b|\d{1,3}(\.\d{3})+(,\d{2})?|\d+,\d{2}\b|\d+\s*x\s*(de\s*)?R?\$?\s*\d)/i;
+// Só é preço quando vem com R$, "reais" ou parcela ("10x de 99"). "15.000 km", CEP, ano e telefone não contam.
+const MONEY = /(R\$\s*\d|\d[\d.,]*\s*(mil\s+)?(reais|real)\b|\b\d{1,3}(\.\d{3})+,\d{2}\b|\d+\s*x\s*(de\s*)?(R\$\s*)?\d+,\d{2}\b)/i;
 
 /** "1.234,50" / "1234.5" / "1234" → número em centavos como texto, para comparar valores escritos de jeitos diferentes. */
 function cents(n: string): string {

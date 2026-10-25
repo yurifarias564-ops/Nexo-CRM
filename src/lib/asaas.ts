@@ -31,7 +31,7 @@ export async function createCustomer(input: {
 export async function createSubscription(input: {
   customer: string; valueCents: number; description: string; externalReference: string;
 }) {
-  const nextDueDate = new Date().toISOString().slice(0, 10);
+  const nextDueDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date()); // hoje no Brasil
   return asaas<{ id: string }>("/subscriptions", {
     method: "POST",
     body: JSON.stringify({

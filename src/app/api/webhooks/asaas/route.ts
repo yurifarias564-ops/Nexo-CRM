@@ -16,6 +16,15 @@ const ACTIVATE = new Set(["PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"]);
 const PAST_DUE = new Set(["PAYMENT_OVERDUE", "PAYMENT_REFUNDED", "PAYMENT_CHARGEBACK_REQUESTED", "PAYMENT_CHARGEBACK_DISPUTE"]);
 const CANCEL = new Set(["SUBSCRIPTION_DELETED", "SUBSCRIPTION_INACTIVATED"]);
 
+/** +1 mês sem "pular" mês (31/01 → 28/02, não 03/03). */
+function addMonthClamped(d: Date) {
+  const day = d.getUTCDate();
+  const r = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1, 12));
+  const last = new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth() + 1, 0)).getUTCDate();
+  r.setUTCDate(Math.min(day, last));
+  return r;
+}
+
 function safeEqual(a: string, b: string) {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -65,8 +74,7 @@ export async function POST(req: Request) {
     if (ACTIVATE.has(evt.event)) {
       // Vigência: vencimento pago + 1 mês + 3 dias de tolerância
       const base = evt.payment?.dueDate ? new Date(`${evt.payment.dueDate}T12:00:00Z`) : new Date();
-      const end = new Date(base);
-      end.setUTCMonth(end.getUTCMonth() + 1);
+      const end = addMonthClamped(base);
       end.setUTCDate(end.getUTCDate() + 3);
       const current = sub.current_period_end ? new Date(sub.current_period_end) : null;
       const periodEnd = current && current > end ? current : end;
@@ -87,10 +95,26 @@ export async function POST(req: Request) {
       }
     } else if ((evt.event === "PAYMENT_CREATED" || evt.event === "PAYMENT_UPDATED") && evt.payment?.dueDate && ["PENDING", "OVERDUE"].includes(evt.payment.status ?? "PENDING")) {
       await db.from("subscriptions").update({ next_due_date: evt.payment.dueDate, ...(evt.payment.billingType ? { billing_type: evt.payment.billingType } : {}), updated_at: now }).eq("organization_id", sub.organization_id);
-    } else if (PAST_DUE.has(evt.event) || CANCEL.has(evt.event)) {
-      const status = CANCEL.has(evt.event) ? "canceled" : "past_due";
-      const r = await db.from("subscriptions").update({ status, updated_at: now }).eq("organization_id", sub.organization_id);
+    } else if (CANCEL.has(evt.event)) {
+      const r = await db.from("subscriptions").update({ status: "canceled", updated_at: now }).eq("organization_id", sub.organization_id);
       if (r.error) throw r.error;
+    } else if (PAST_DUE.has(evt.event)) {
+      const periodEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
+      let block: boolean;
+      if (evt.event === "PAYMENT_OVERDUE") {
+        // Vencido: respeita os dias de tolerância (o acesso cai sozinho quando a vigência acaba)
+        block = !periodEnd || periodEnd <= new Date();
+      } else {
+        // Estorno/contestação: só bloqueia se for o pagamento que liberou a vigência atual
+        const due = evt.payment?.dueDate ? new Date(`${evt.payment.dueDate}T12:00:00Z`) : null;
+        const end = due ? addMonthClamped(due) : null;
+        if (end) end.setUTCDate(end.getUTCDate() + 3);
+        block = !periodEnd || !end || end.getTime() >= periodEnd.getTime() - 86_400_000;
+      }
+      if (block) {
+        const r = await db.from("subscriptions").update({ status: "past_due", updated_at: now }).eq("organization_id", sub.organization_id);
+        if (r.error) throw r.error;
+      }
     }
   } catch (e) {
     // Remove a marca de idempotência para o Asaas poder reenviar

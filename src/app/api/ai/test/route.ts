@@ -4,7 +4,7 @@ import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
 import { isValidTimeZone } from "@/lib/time";
 import { testAgent } from "@/lib/ai/agent";
-import { AiError } from "@/lib/ai/llm";
+import { AiError, MODELS } from "@/lib/ai/llm";
 import { Rules } from "@/lib/ai/rules";
 
 export const runtime = "nodejs";
@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     const ctx = await requireApiContext({ manage: true });
     await rateLimit(`ai-test:${ctx.userId}`, 30, 60, "Muitos testes seguidos. Aguarde um minuto.");
     const b = Body.parse(await readJson(req, 400_000));
+    if (b.agent.model && !MODELS[b.agent.provider].some((m) => m.id === b.agent.model)) throw new HttpError(422, "Modelo de IA inválido");
     try {
       return ok(await testAgent(ctx.org.id, b));
     } catch (e) {

@@ -34,7 +34,7 @@ async function all<T>(q: (a: number, b: number) => PromiseLike<{ data: T[] | nul
 
 async function context(orgId: string) {
   const db = supabaseAdmin();
-  const ads = await all<AdMeta>((a, b) => db.from("meta_ads").select("ad_id, name, status, campaign_name, adset_name, thumbnail_url").eq("organization_id", orgId).range(a, b));
+  const ads = await all<AdMeta>((a, b) => db.from("meta_ads").select("ad_id, name, status, campaign_name, adset_name, thumbnail_url").eq("organization_id", orgId).order("ad_id").range(a, b));
   const byName = new Map<string, string>();
   for (const a of ads) if (a.name) byName.set(a.name.trim().toLowerCase(), a.ad_id);
   return { ads, byName, known: new Set(ads.map((a) => a.ad_id)) };
@@ -45,9 +45,9 @@ export async function adsReport(orgId: string, fromIso: string, toIso: string, f
   const { ads, byName, known } = await context(orgId);
   const [ins, stages, origins] = await Promise.all([
     all<{ ad_id: string; spend: number; impressions: number; reach: number; clicks: number; link_clicks: number; conversations: number }>((a, b) =>
-      db.from("meta_ad_insights").select("ad_id, spend, impressions, reach, clicks, link_clicks, conversations").eq("organization_id", orgId).gte("day", fromDay).lte("day", toDay).range(a, b)),
+      db.from("meta_ad_insights").select("ad_id, spend, impressions, reach, clicks, link_clicks, conversations").eq("organization_id", orgId).gte("day", fromDay).lte("day", toDay).order("ad_id").order("day").range(a, b)),
     db.from("stages").select("id, kind").eq("organization_id", orgId).then((r) => r.data ?? []),
-    all<Origin>((a, b) => db.from("lead_origins").select("lead_id, ad_id, utm_term, utm_content, ad_title").eq("organization_id", orgId).range(a, b)),
+    all<Origin>((a, b) => db.from("lead_origins").select("lead_id, ad_id, utm_term, utm_content, ad_title").eq("organization_id", orgId).order("lead_id").range(a, b)),
   ]);
   const won = new Set(stages.filter((s) => s.kind === "won").map((s) => s.id));
   const leadAd = new Map<string, string>();
@@ -93,7 +93,7 @@ export async function adsReport(orgId: string, fromIso: string, toIso: string, f
 export async function adLeads(orgId: string, adId: string) {
   const db = supabaseAdmin();
   const { byName, known } = await context(orgId);
-  const origins = await all<Origin & { created_at: string }>((a, b) => db.from("lead_origins").select("lead_id, ad_id, utm_term, utm_content, ad_title, created_at").eq("organization_id", orgId).range(a, b));
+  const origins = await all<Origin & { created_at: string }>((a, b) => db.from("lead_origins").select("lead_id, ad_id, utm_term, utm_content, ad_title, created_at").eq("organization_id", orgId).order("lead_id").range(a, b));
   const ids = origins.filter((o) => resolveAd(o, byName, known) === adId).map((o) => o.lead_id);
   const out: { id: string; name: string; phone: string | null; value: number; stage: string | null; won: boolean; created_at: string; conversation_id: string | null; last_message_preview: string | null }[] = [];
   for (let i = 0; i < ids.length && out.length < 500; i += 200) {

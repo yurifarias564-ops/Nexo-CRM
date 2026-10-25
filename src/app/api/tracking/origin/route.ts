@@ -31,6 +31,9 @@ export async function PUT(req: Request) {
     const { error } = await db.from("lead_origins").upsert({
       lead_id: lead.id, organization_id: ctx.org.id, channel: b.channel, source_type: "manual",
       utm_campaign: b.utm_campaign, utm_content: b.utm_content, updated_at: new Date().toISOString(),
+      // Origem manual: limpa os dados de clique/anúncio para a venda não ser atribuída ao anúncio errado
+      utm_source: null, utm_medium: null, utm_term: null, ad_id: null, ad_title: null, ad_url: null,
+      ctwa_clid: null, fbclid: null, gclid: null, link_id: null, click_id: null,
     });
     if (error) throw error;
     return ok({ ok: true });

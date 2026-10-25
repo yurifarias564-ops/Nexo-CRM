@@ -586,6 +586,11 @@ test("filtro da IA: palavra proibida, preço proibido, desconto e emoji", () => 
   assert.ok(checkReply("A aprovacao é rápida", r).some((x) => x.includes("aprovação"))); // sem acento também pega
   assert.ok(checkReply("Ela sai por R$ 33.990", r).some((x) => x.includes("preço")));
   assert.ok(checkReply("Fica 12x de 2.890,00", r).length > 0);
+  // Quilometragem, CEP, ano e telefone não são preço
+  assert.deepEqual(checkReply("Ela está com 15.000 km, ano 2024, e fica na rua do CEP 60.135-000.", r), []);
+  assert.deepEqual(checkReply("Me chama no 85 99999-0000 que te explico.", r), []);
+  assert.ok(checkReply("Sai por 33 mil reais", r).length > 0);
+  assert.ok(checkReply("Em 10x de 99,90 sem juros", r).length > 0);
   assert.ok(checkReply("Que ótimo 😄", r).some((x) => x.includes("emoji")));
   assert.equal(stripEmojis("Que ótimo 😄 Até já"), "Que ótimo Até já");
   assert.ok(checkReply("Consigo te dar um desconto de 10%", r).length > 0);

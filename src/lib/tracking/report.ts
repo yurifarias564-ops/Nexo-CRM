@@ -38,11 +38,11 @@ export async function campaignReport(orgId: string, fromIso: string, toIso: stri
 
   type L = { id: string; name: string; value: number; created_at: string; stage_id: string; stage_changed_at: string };
   const [created, won, clicks] = await Promise.all([
-    all<L>((a, b) => db.from("leads").select("id, name, value, created_at, stage_id, stage_changed_at").eq("organization_id", orgId).gte("created_at", fromIso).lt("created_at", toIso).order("created_at", { ascending: false }).range(a, b)),
+    all<L>((a, b) => db.from("leads").select("id, name, value, created_at, stage_id, stage_changed_at").eq("organization_id", orgId).gte("created_at", fromIso).lt("created_at", toIso).order("created_at", { ascending: false }).order("id").range(a, b)),
     wonStages.size
-      ? all<L>((a, b) => db.from("leads").select("id, name, value, created_at, stage_id, stage_changed_at").eq("organization_id", orgId).in("stage_id", [...wonStages]).gte("stage_changed_at", fromIso).lt("stage_changed_at", toIso).range(a, b))
+      ? all<L>((a, b) => db.from("leads").select("id, name, value, created_at, stage_id, stage_changed_at").eq("organization_id", orgId).in("stage_id", [...wonStages]).gte("stage_changed_at", fromIso).lt("stage_changed_at", toIso).order("id").range(a, b))
       : Promise.resolve([] as L[]),
-    all<{ link_id: string; created_at: string; utm_campaign: string | null; utm_content: string | null }>((a, b) => db.from("tracking_clicks").select("link_id, created_at, utm_campaign, utm_content").eq("organization_id", orgId).gte("created_at", fromIso).lt("created_at", toIso).range(a, b)),
+    all<{ link_id: string; created_at: string; utm_campaign: string | null; utm_content: string | null }>((a, b) => db.from("tracking_clicks").select("link_id, created_at, utm_campaign, utm_content").eq("organization_id", orgId).gte("created_at", fromIso).lt("created_at", toIso).order("id").range(a, b)),
   ]);
 
   const ids = [...new Set([...created, ...won].map((l) => l.id))];

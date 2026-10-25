@@ -3,6 +3,7 @@ import { fail, ok, readJson } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { AutomationBody } from "@/lib/automations/schema";
 import { validateRefs } from "@/lib/automations/validate";
+import { webhookSecret } from "@/lib/automations/engine";
 
 export const runtime = "nodejs";
 
@@ -26,7 +27,7 @@ export async function GET() {
         if (!s.last || r.created_at > s.last) s.last = r.created_at;
       }
     }
-    return ok({ automations: autos ?? [], stats });
+    return ok({ automations: (autos ?? []).map((a) => ({ ...a, assinatura: webhookSecret(a.id) })), stats });
   } catch (e) {
     return fail(e);
   }

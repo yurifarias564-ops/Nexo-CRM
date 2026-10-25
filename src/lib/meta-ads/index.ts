@@ -26,6 +26,8 @@ export async function loadConn(orgId: string): Promise<{ conn: MetaConn | null; 
 
 async function graph<T = Record<string, unknown>>(url: string, cred: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const u = new URL(url.startsWith("http") ? url : `${GRAPH}/${url.replace(/^\//, "")}`);
+  // A chave só vai para o servidor da Meta (inclusive nos links de "próxima página")
+  if (u.protocol !== "https:" || u.hostname !== "graph.facebook.com") throw new HttpError(502, "Meta: endereço inesperado na paginação");
   const headers: Record<string, string> = { authorization: `Bearer ${cred}` };
   if (init?.body) headers["content-type"] = "application/json";
   const res = await fetch(u, { method: init?.method ?? "GET", headers, body: init?.body ? JSON.stringify(init.body) : undefined, signal: AbortSignal.timeout(45_000) });
@@ -212,10 +214,16 @@ export function buildEvent(c: EventCtx): { mode: string; event: Record<string, u
 /** Envia os eventos pendentes (Lead e Purchase) de todas as empresas. Chamado a cada minuto. */
 export async function dispatchEvents(limit = 40) {
   const db = supabaseAdmin();
-  const { data: pend } = await db.from("meta_events").select("*").eq("status", "pending").order("created_at").limit(limit);
+  // Envios que travaram no meio (servidor caiu) voltam para a fila
+  await db.from("meta_events").update({ status: "pending" }).eq("status", "sending").lt("next_attempt_at", new Date(Date.now() - 10 * 60_000).toISOString());
+  const { data: pend } = await db.from("meta_events").select("id").eq("status", "pending")
+    .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`).order("created_at").limit(limit);
   let sent = 0;
   const conns = new Map<string, Awaited<ReturnType<typeof loadConn>> & { waba: string | null }>();
-  for (const ev of pend ?? []) {
+  for (const p of pend ?? []) {
+    // Trava: só um processo envia cada evento (sem evento duplicado na Meta)
+    const { data: ev } = await db.from("meta_events").update({ status: "sending", next_attempt_at: new Date().toISOString() }).eq("id", p.id).eq("status", "pending").select("*").maybeSingle();
+    if (!ev) continue;
     try {
       let cc = conns.get(ev.organization_id);
       if (!cc) {
@@ -236,7 +244,7 @@ export async function dispatchEvents(limit = 40) {
       const click = origin?.tracking_clicks as { created_at: string } | { created_at: string }[] | null | undefined;
       const { mode, event } = buildEvent({
         eventName: ev.event_name, eventKey: ev.event_key, value: ev.event_name === "Purchase" ? Number(ev.value ?? lead.value) : null,
-        currency: cc.conn.currency || "BRL", at: new Date(),
+        currency: "BRL", at: new Date(ev.created_at), // valores do CRM são em reais; hora da venda/lead, não do envio
         lead: { id: lead.id, name: lead.name, phone: lead.phone, email: lead.email },
         origin: origin ? { source_type: origin.source_type, ctwa_clid: origin.ctwa_clid, fbclid: origin.fbclid, clickAt: (Array.isArray(click) ? click[0]?.created_at : click?.created_at) ?? null } : null,
         wabaId: cc.waba, pageId: cc.conn.page_id,
@@ -246,7 +254,9 @@ export async function dispatchEvents(limit = 40) {
       sent++;
     } catch (e) {
       const attempts = ev.attempts + 1;
-      await db.from("meta_events").update({ status: attempts >= 5 ? "failed" : "pending", attempts, error: (e as Error).message.slice(0, 500) }).eq("id", ev.id);
+      // Espera crescente entre tentativas: 2, 4, 8, 16… min (até 8 tentativas, ~8h)
+      const next = new Date(Date.now() + 2 ** attempts * 60_000).toISOString();
+      await db.from("meta_events").update({ status: attempts >= 8 ? "failed" : "pending", attempts, next_attempt_at: next, error: (e as Error).message.slice(0, 500) }).eq("id", ev.id);
     }
   }
   return sent;

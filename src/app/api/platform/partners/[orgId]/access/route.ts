@@ -17,9 +17,14 @@ export async function POST(_req: Request, { params }: { params: Promise<{ orgId:
     if (!org) throw new HttpError(404, "Empresa não encontrada");
     const { data: member } = await db.from("organization_members").select("role").eq("organization_id", orgId).eq("user_id", ctx.userId).maybeSingle();
     if (!member) {
+      // Primeiro a marca de "suporte" (é ela que permite remover o acesso depois), depois o acesso
+      const mark = await db.from("platform_support_access").upsert({ organization_id: orgId, user_id: ctx.userId, created_at: new Date().toISOString() });
+      if (mark.error) throw mark.error;
       const { error } = await db.from("organization_members").insert({ organization_id: orgId, user_id: ctx.userId, role: "admin" });
-      if (error) throw error;
-      await db.from("platform_support_access").upsert({ organization_id: orgId, user_id: ctx.userId });
+      if (error) {
+        await db.from("platform_support_access").delete().eq("organization_id", orgId).eq("user_id", ctx.userId);
+        throw error;
+      }
     }
     await db.from("profiles").update({ current_organization_id: orgId }).eq("id", ctx.userId);
     await audit(ctx.userId, orgId, "acessou a conta (suporte)");

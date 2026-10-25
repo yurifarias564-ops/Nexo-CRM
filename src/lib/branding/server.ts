@@ -42,7 +42,7 @@ const mainHost = () => { try { return new URL(appUrl()).host.toLowerCase(); } ca
 export const brandForHost = cache(async (): Promise<{ brand: Brand; orgId: string | null }> => {
   const host = await currentHost();
   if (!host || host === mainHost() || host.endsWith(".vercel.app") || host === "localhost") return { brand: { ...DEFAULT_BRAND }, orgId: null };
-  const { data } = await supabaseAdmin().from("org_branding").select("*").eq("custom_domain", host.replace(/^www\./, "")).maybeSingle();
+  const { data } = await supabaseAdmin().from("org_branding").select("*").in("custom_domain", [...new Set([host, host.replace(/^www\./, "")])]).limit(1).maybeSingle();
   const row = (data as Row | null) ?? null;
   return { brand: toBrand(row), orgId: row?.organization_id ?? null };
 });

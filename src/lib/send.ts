@@ -134,11 +134,13 @@ function metaAuth(r: Resolved) {
   return { auth, pid };
 }
 
-export async function sendText(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, text: string) {
+export async function sendText(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, text: string, opts: { automation?: boolean } = {}) {
   const r = await resolveTarget(sb, orgId, t);
   if (!(await isWindowOpen(r))) throw new WindowClosedError();
   const externalId = await sendTextVia(r.channel, r.sendTo, text);
   const id = await record(r, externalId, "text", text, null, null, userId);
+  // Mensagem de automação: não é "pessoa respondendo", então não pausa a IA
+  if (opts.automation) await supabaseAdmin().from("messages").update({ by_automation: true }).eq("id", id);
   return { id, externalId };
 }
 

@@ -44,6 +44,11 @@ export async function PUT(req: Request) {
       const { error } = await db.from("meta_secrets").upsert({ organization_id: ctx.org.id, ["access_token"]: b.credential, updated_at: new Date().toISOString() });
       if (error) throw error;
     }
+    // Trocou de conta de anúncios: apaga os números da conta antiga (não misturar nos relatórios)
+    if (current.conn?.ad_account_id && current.conn.ad_account_id !== account) {
+      await db.from("meta_ad_insights").delete().eq("organization_id", ctx.org.id);
+      await db.from("meta_ads").delete().eq("organization_id", ctx.org.id);
+    }
     const { data, error } = await db.from("meta_connections").upsert({
       organization_id: ctx.org.id, ad_account_id: account, ad_account_name: info.account?.name ?? current.conn?.ad_account_name ?? null,
       currency: info.account?.currency ?? current.conn?.currency ?? "BRL", pixel_id: b.pixel_id || null, page_id: b.page_id || null,

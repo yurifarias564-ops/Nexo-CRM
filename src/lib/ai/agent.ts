@@ -376,16 +376,16 @@ export const SAFE_FALLBACK = "Vou confirmar essa informação com o nosso especi
  * se ainda violar, a resposta é bloqueada: vai uma mensagem segura e o atendimento passa para a equipe.
  */
 async function generateGuarded(p: {
-  agent: AgentRow; model: string; key: string; system: string; history: ChatTurn[]; exec: (n: string, a: Record<string, unknown>) => Promise<string>; effects: Effect[];
+  agent: AgentRow; model: string; key: string; system: string; history: ChatTurn[]; exec: (n: string, a: Record<string, unknown>) => Promise<string>; effects: Effect[]; deadline?: number;
 }): Promise<{ text: string; calls: ToolCall[]; blocked: string[] | null }> {
   const rules = p.agent.rules;
-  const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: TOOLS, exec: p.exec });
+  const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: TOOLS, exec: p.exec, deadline: p.deadline });
   let text = rules.emojis ? out.text : stripEmojis(out.text);
   let reasons = checkReply(text, rules);
   if (!reasons.length) return { text, calls: out.calls, blocked: null };
 
   const fix = `## CORREÇÃO OBRIGATÓRIA\nSua resposta anterior foi BLOQUEADA pelo filtro da empresa porque: ${reasons.join("; ")}.\nResposta bloqueada: «${text.slice(0, 1500)}»\nReescreva a resposta ao cliente cumprindo TODAS as regras. Não cite valores, palavras ou assuntos proibidos.`;
-  const again = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: `${p.system}\n\n${fix}`, history: p.history, tools: [], exec: p.exec, maxRounds: 1 });
+  const again = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: `${p.system}\n\n${fix}`, history: p.history, tools: [], exec: p.exec, maxRounds: 1, deadline: p.deadline });
   text = rules.emojis ? again.text : stripEmojis(again.text);
   const still = checkReply(text, rules);
   if (!still.length && text.trim()) {
@@ -405,6 +405,10 @@ async function generateGuarded(p: {
  * Chamado depois que chega mensagem do cliente. Espera alguns segundos (o cliente costuma mandar
  * várias seguidas), confere se a IA deve responder e responde uma vez só.
  */
+const LOCK_SECONDS = 240;        // trava da conversa enquanto a IA responde
+const GENERATION_MS = 150_000;   // tempo máximo para gerar (sempre menor que a trava)
+const MAX_RUNS_PER_HOUR = 20;    // trava contra loop de robô x robô
+
 export async function respondToConversation(conversationId: string, triggerMessageId: string) {
   const db = supabaseAdmin();
   const { data: conv } = await db.from("conversations").select("id, organization_id, channel_id, lead_id, created_at, ai_state, ai_paused_until").eq("id", conversationId).maybeSingle();
@@ -432,8 +436,27 @@ export async function respondToConversation(conversationId: string, triggerMessa
   const { data: fresh } = await db.from("conversations").select("ai_state").eq("id", conv.id).maybeSingle();
   if (fresh?.ai_state !== "auto") return;
 
-  const { data: locked } = await db.rpc("ai_try_lock", { p_conv: conv.id, p_seconds: 120 });
-  if (!locked) return;
+  // Trava: uma resposta por vez. Se outra resposta está sendo gerada, espera ela terminar e,
+  // se esta mensagem ainda for a última do cliente, responde a ela (nenhuma mensagem fica sem resposta).
+  const waitUntil = Date.now() + 150_000;
+  for (;;) {
+    const { data: locked } = await db.rpc("ai_try_lock", { p_conv: conv.id, p_seconds: LOCK_SECONDS });
+    if (locked) break;
+    if (Date.now() > waitUntil) return;
+    await sleep(3000);
+    const { data: newest } = await db.from("messages").select("id").eq("conversation_id", conv.id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
+    if (newest?.id !== triggerMessageId) return; // chegou mensagem mais nova do cliente: quem cuida é a execução dela
+  }
+  {
+    // Já respondida? (a resposta anterior pode ter lido esta mensagem antes de terminar)
+    const { data: trig } = await db.from("messages").select("sent_at").eq("id", triggerMessageId).maybeSingle();
+    const [{ data: human }, { data: cv }] = trig ? await Promise.all([
+      db.from("messages").select("id").eq("conversation_id", conv.id).eq("direction", "out").eq("by_ai", false).eq("by_automation", false).gt("sent_at", trig.sent_at).limit(1).maybeSingle(),
+      db.from("conversations").select("ai_answered_until").eq("id", conv.id).maybeSingle(),
+    ]) : [{ data: null }, { data: null }];
+    const answered = cv?.ai_answered_until && trig && new Date(cv.ai_answered_until) >= new Date(trig.sent_at);
+    if (!trig || human || answered) { await db.from("conversations").update({ ai_lock_until: null }).eq("id", conv.id); return; }
+  }
 
   // Fora do horário, modo "só mensagem": avisa uma vez e para
   if (!inHours && rules.hours.mode === "so_mensagem") {
@@ -450,17 +473,25 @@ export async function respondToConversation(conversationId: string, triggerMessa
     return;
   }
 
-  // Limite de respostas da IA por conversa: passou do limite, a equipe assume
-  if (rules.max_ai_replies > 0) {
-    const { count } = await db.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conv.id).eq("by_ai", true);
-    if ((count ?? 0) >= rules.max_ai_replies) {
+  // Limite de respostas da IA por conversa (conta respostas, não pedaços de mensagem) e trava
+  // contra loop (ex.: robô de resposta automática do outro lado): passou do limite, a equipe assume
+  {
+    const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+    const [total, lastHour] = await Promise.all([
+      rules.max_ai_replies > 0 ? db.from("ai_runs").select("id", { count: "exact", head: true }).eq("conversation_id", conv.id).eq("status", "ok") : Promise.resolve({ count: 0 }),
+      db.from("ai_runs").select("id", { count: "exact", head: true }).eq("conversation_id", conv.id).gte("created_at", hourAgo),
+    ]);
+    const reason = rules.max_ai_replies > 0 && (total.count ?? 0) >= rules.max_ai_replies ? `limite de ${rules.max_ai_replies} respostas da IA atingido`
+      : (lastHour.count ?? 0) >= MAX_RUNS_PER_HOUR ? `mais de ${MAX_RUNS_PER_HOUR} respostas em 1 hora (possível robô do outro lado)` : null;
+    if (reason) {
       await db.from("conversations").update({ ai_state: "paused", ai_paused_until: null, ai_lock_until: null }).eq("id", conv.id);
-      if (conv.lead_id) await db.from("activities").insert({ organization_id: conv.organization_id, lead_id: conv.lead_id, actor_id: null, type: "ai_handoff", payload: { reason: `limite de ${rules.max_ai_replies} respostas da IA atingido`, seller: null } });
+      if (conv.lead_id) await db.from("activities").insert({ organization_id: conv.organization_id, lead_id: conv.lead_id, actor_id: null, type: "ai_handoff", payload: { reason, seller: null } });
       return;
     }
   }
 
   const started = Date.now();
+  const deadline = started + GENERATION_MS;
   const model = agent.model || defaultModel(agent.provider);
   let calls: ToolCall[] = [];
   try {
@@ -492,7 +523,7 @@ export async function respondToConversation(conversationId: string, triggerMessa
     const exec = makeExec({ live: true, db, orgId: conv.organization_id, leadId: l?.id ?? null, conversationId: conv.id, agent, stages, sellers: team, leadSeller: l?.assigned_to ?? null, existingTags: [...tags], effects });
     const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento. Não prometa retorno imediato do vendedor." : "";
     const out = await generateGuarded({
-      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote), history: toHistory(msgs), exec, effects,
+      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote), history: toHistory(msgs), exec, effects, deadline,
     });
     calls = out.calls;
     if (out.blocked) {
@@ -506,6 +537,9 @@ export async function respondToConversation(conversationId: string, triggerMessa
       if (i) await sleep(1200);
       await sendAiText(conv.organization_id, conv.id, parts[i]!.slice(0, 4000));
     }
+    // Até qual mensagem do cliente esta resposta leu (para não responder duas vezes à mesma)
+    const seen = msgs.filter((m) => m.direction === "in").map((m) => m.sent_at).sort().pop();
+    if (seen) await db.from("conversations").update({ ai_answered_until: seen }).eq("id", conv.id);
     await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: l?.id ?? null, provider: agent.provider, model, status: "ok", reply: out.text.slice(0, 8000), tools: [...calls, ...effects.filter((e) => e.kind === "filter").map((e) => ({ name: "filtro", args: e, result: "" }))], ms: Date.now() - started });
   } catch (e) {
     console.error("[ia] resposta", e);

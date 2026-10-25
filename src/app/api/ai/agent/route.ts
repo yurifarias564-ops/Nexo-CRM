@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
-import { fail, ok, readJson } from "@/lib/http";
+import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { envOptional } from "@/lib/env";
 import { isValidTimeZone } from "@/lib/time";
@@ -58,6 +58,8 @@ export async function PUT(req: Request) {
   try {
     const ctx = await requireApiContext({ manage: true });
     const b = Body.parse(await readJson(req, 200_000));
+    // Só modelos da lista (evita custo surpresa com modelos caros na chave da plataforma)
+    if (b.model && !MODELS[b.provider].some((m) => m.id === b.model)) throw new HttpError(422, "Modelo de IA inválido");
     const db = supabaseAdmin();
     const prev = await loadAgent(ctx.org.id);
     const enabled_at = b.enabled ? (prev?.enabled && prev.enabled_at ? prev.enabled_at : new Date().toISOString()) : prev?.enabled_at ?? null;

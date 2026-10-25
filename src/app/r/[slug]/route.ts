@@ -29,7 +29,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
 
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0]!.trim();
   const ipHash = ip ? createHash("sha256").update(`${ip}:${envOptional("SUPABASE_SERVICE_ROLE_KEY", "nexo")}`).digest("hex").slice(0, 32) : null;
-  try { await rateLimit(`r:${ipHash ?? "anon"}`, 30, 60); } catch { return page(429, "Muitos acessos seguidos. Tente de novo em instantes."); }
+  try { await rateLimit(`r:${ipHash ?? `anon:${slug}`}`, ipHash ? 30 : 300, 60); } catch { return page(429, "Muitos acessos seguidos. Tente de novo em instantes."); }
 
   // Número de destino: o do link, o do canal ou (no script do site) um número da própria empresa
   const { data: chans } = await db.from("whatsapp_channels").select("id, phone_number").eq("organization_id", link.organization_id);
