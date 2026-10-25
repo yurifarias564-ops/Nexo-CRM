@@ -106,7 +106,15 @@ export function rulesPrompt(r: Rules): string {
 const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const EMOJI = /\p{Extended_Pictographic}/u;
 // Só é preço quando vem com R$, "reais" ou parcela ("10x de 99"). "15.000 km", CEP, ano e telefone não contam.
-const MONEY = /(R\$\s*\d|\d[\d.,]*\s*(mil\s+)?(reais|real)\b|\b\d{1,3}(\.\d{3})+,\d{2}\b|\d+\s*x\s*(de\s*)?(R\$\s*)?\d+,\d{2}\b)/i;
+const UNIT = String.raw`(?![-\d]|\s*(km|kms|quil|metros?|m²|m2|cc|cilindradas|pessoas|clientes|seguidores|unidades|kg|litros|l\b|anos|dias|meses|horas|min))`;
+const MONEY = new RegExp([
+  String.raw`R\$\s*\d`,                                   // R$ 33.990
+  String.raw`\d[\d.,]*\s*(mil\s+)?(reais|real)\b`,        // 33 mil reais
+  String.raw`\b\d{1,3}(\.\d{3})+(,\d{2})?\b${UNIT}`,      // 33.990 / 2.890,00 (não "15.000 km" nem CEP)
+  String.raw`\b\d+,\d{2}\b${UNIT}`,                       // 150,00
+  String.raw`\b\d+\s*mil\b${UNIT}`,                       // entrada de 5 mil
+  String.raw`\d+\s*x\s*de\s*(R\$\s*)?\d`,                 // 10x de 99
+].join("|"), "i");
 
 /** "1.234,50" / "1234.5" / "1234" → número em centavos como texto, para comparar valores escritos de jeitos diferentes. */
 function cents(n: string): string {

@@ -591,6 +591,8 @@ test("filtro da IA: palavra proibida, preço proibido, desconto e emoji", () => 
   assert.deepEqual(checkReply("Me chama no 85 99999-0000 que te explico.", r), []);
   assert.ok(checkReply("Sai por 33 mil reais", r).length > 0);
   assert.ok(checkReply("Em 10x de 99,90 sem juros", r).length > 0);
+  for (const t of ["Sai por 33.990", "Fica 150,00", "Faço em 10x de 99", "Entrada de 5 mil e o resto financiado", "R$33mil", "3 reais"]) assert.ok(checkReply(t, r).length > 0, t);
+  for (const t of ["Motor de 300 cc com 2.500 km rodados", "São 5 mil km de garantia de fábrica", "Atendemos mais de 1.000 clientes", "Ano 2024, revisada"]) assert.deepEqual(checkReply(t, r), [], t);
   assert.ok(checkReply("Que ótimo 😄", r).some((x) => x.includes("emoji")));
   assert.equal(stripEmojis("Que ótimo 😄 Até já"), "Que ótimo Até já");
   assert.ok(checkReply("Consigo te dar um desconto de 10%", r).length > 0);

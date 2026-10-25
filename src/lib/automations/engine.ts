@@ -1,7 +1,8 @@
 import "server-only";
 import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
+import { request as httpsRequest } from "node:https";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { sendText } from "@/lib/send";
 import { loadChannel, sendTextVia } from "@/lib/whatsapp";
@@ -154,23 +155,40 @@ async function clientRepliedSince(leadId: string, since: string) {
   return Boolean(data);
 }
 
-/** Webhook: só endereços públicos (nada de rede interna, localhost etc.). */
-function privateIp(ip: string) {
-  if (isIP(ip) === 6) {
-    const x = ip.toLowerCase();
-    if (x.startsWith("::ffff:")) return privateIp(x.slice(7));
-    return x === "::1" || x === "::" || x.startsWith("fc") || x.startsWith("fd") || x.startsWith("fe80");
-  }
-  const [a, b] = ip.split(".").map(Number) as [number, number];
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+/** Webhook: só endereços públicos (nada de rede interna, localhost, nuvem etc.). */
+const BLOCKED = (() => {
+  const b = new BlockList();
+  for (const [ip, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const) b.addSubnet(ip, bits, "ipv4");
+  for (const [ip, bits] of [["::", 128], ["::1", 128], ["64:ff9b::", 96], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) b.addSubnet(ip, bits, "ipv6");
+  return b;
+})();
+const blockedIp = (ip: string) => BLOCKED.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4");
+
+/** Confere o endereço e devolve o IP público já verificado (a conexão usa exatamente esse IP). */
+export async function publicTarget(raw: string): Promise<{ url: URL; ip: string; family: 4 | 6 }> {
+  const url = new URL(raw);
+  if (url.protocol !== "https:") throw new Error("Use um endereço https://");
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const addrs = isIP(host) ? [{ address: host, family: isIP(host) as 4 | 6 }] : (await lookup(host, { all: true })).map((r) => ({ address: r.address, family: r.family as 4 | 6 }));
+  if (!addrs.length || addrs.some((a) => blockedIp(a.address))) throw new Error("Endereço não permitido (rede interna)");
+  return { url, ip: addrs[0]!.address, family: addrs[0]!.family };
 }
 
-async function assertPublicUrl(raw: string) {
-  const u = new URL(raw);
-  if (u.protocol !== "https:") throw new Error("Use um endereço https://");
-  const host = u.hostname.replace(/^\[|\]$/g, "");
-  const ips = isIP(host) ? [host] : (await lookup(host, { all: true })).map((r) => r.address);
-  if (!ips.length || ips.some(privateIp)) throw new Error("Endereço não permitido (rede interna)");
+/** POST https para o IP já verificado (sem segunda consulta de DNS e sem seguir redirecionamento). */
+export function postPinned(t: { url: URL; ip: string; family: 4 | 6 }, body: string, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(t.url, {
+      method: "POST", headers: { ...headers, "content-length": Buffer.byteLength(body).toString() }, timeout: 15_000,
+      lookup: (_h, opts, cb) => {
+        const o = opts as { all?: boolean };
+        if (o.all) (cb as unknown as (e: null, a: { address: string; family: number }[]) => void)(null, [{ address: t.ip, family: t.family }]);
+        else cb(null, t.ip, t.family);
+      },
+    }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+    req.on("timeout", () => req.destroy(new Error("Tempo esgotado (15s)")));
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 /** Chave para o n8n conferir que a chamada veio do CRM (mostrada no editor da automação). */
@@ -270,9 +288,8 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
       const body = JSON.stringify(payload);
       // Assinatura para o n8n conferir que veio do CRM
       const sig = createHmac("sha256", webhookSecret(a.id)).update(body).digest("hex");
-      await assertPublicUrl(step.url);
-      const res = await fetch(step.url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-nexo-signature": sig, "user-agent": "NexoCRM-Automacoes" }, body, signal: AbortSignal.timeout(15_000) });
-      return res.ok ? { ok: true, info: `HTTP ${res.status}` } : { ok: false, info: `HTTP ${res.status}` };
+      const status = await postPinned(await publicTarget(step.url), body, { "content-type": "application/json", "x-nexo-signature": sig, "user-agent": "NexoCRM-Automacoes" });
+      return status >= 200 && status < 300 ? { ok: true, info: `HTTP ${status}` } : { ok: false, info: `HTTP ${status}` };
     }
     case "ai": {
       const { data: convs } = await db().from("conversations").select("id").eq("lead_id", lead.id);

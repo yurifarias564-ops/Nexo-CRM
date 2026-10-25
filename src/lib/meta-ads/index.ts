@@ -232,6 +232,11 @@ export async function dispatchEvents(limit = 40) {
         cc = { ...c, waba: ch?.meta_waba_id ?? null };
         conns.set(ev.organization_id, cc);
       }
+      // A Meta só aceita eventos de até 7 dias
+      if (Date.now() - new Date(ev.created_at).getTime() > 7 * 86_400_000) {
+        await db.from("meta_events").update({ status: "skipped", error: "Expirado (a Meta só aceita eventos de até 7 dias)" }).eq("id", ev.id);
+        continue;
+      }
       if (!cc.conn?.pixel_id || !cc.cred || !ev.lead_id) {
         await db.from("meta_events").update({ status: "skipped", error: "Pixel ou chave de acesso não configurados" }).eq("id", ev.id);
         continue;

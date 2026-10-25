@@ -410,6 +410,7 @@ const GENERATION_MS = 150_000;   // tempo máximo para gerar (sempre menor que a
 const MAX_RUNS_PER_HOUR = 20;    // trava contra loop de robô x robô
 
 export async function respondToConversation(conversationId: string, triggerMessageId: string) {
+  const entry = Date.now(); // a função tem no máximo 300s: tudo (espera + geração) cabe em ~250s
   const db = supabaseAdmin();
   const { data: conv } = await db.from("conversations").select("id, organization_id, channel_id, lead_id, created_at, ai_state, ai_paused_until").eq("id", conversationId).maybeSingle();
   if (!conv) return;
@@ -431,14 +432,14 @@ export async function respondToConversation(conversationId: string, triggerMessa
   await sleep(agent.reply_delay_seconds * 1000);
 
   // Só a última mensagem do cliente dispara; se alguém da equipe respondeu, a IA não entra
-  const { data: last } = await db.from("messages").select("id, direction, by_ai").eq("conversation_id", conv.id).order("sent_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: last } = await db.from("messages").select("id, direction, by_ai").eq("conversation_id", conv.id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
   if (!last || last.id !== triggerMessageId) return;
   const { data: fresh } = await db.from("conversations").select("ai_state").eq("id", conv.id).maybeSingle();
   if (fresh?.ai_state !== "auto") return;
 
   // Trava: uma resposta por vez. Se outra resposta está sendo gerada, espera ela terminar e,
   // se esta mensagem ainda for a última do cliente, responde a ela (nenhuma mensagem fica sem resposta).
-  const waitUntil = Date.now() + 150_000;
+  const waitUntil = Math.min(Date.now() + 150_000, entry + 150_000);
   for (;;) {
     const { data: locked } = await db.rpc("ai_try_lock", { p_conv: conv.id, p_seconds: LOCK_SECONDS });
     if (locked) break;
@@ -452,10 +453,11 @@ export async function respondToConversation(conversationId: string, triggerMessa
     const { data: trig } = await db.from("messages").select("sent_at").eq("id", triggerMessageId).maybeSingle();
     const [{ data: human }, { data: cv }] = trig ? await Promise.all([
       db.from("messages").select("id").eq("conversation_id", conv.id).eq("direction", "out").eq("by_ai", false).eq("by_automation", false).gt("sent_at", trig.sent_at).limit(1).maybeSingle(),
-      db.from("conversations").select("ai_answered_until").eq("id", conv.id).maybeSingle(),
+      db.from("conversations").select("ai_answered_until, ai_state").eq("id", conv.id).maybeSingle(),
     ]) : [{ data: null }, { data: null }];
     const answered = cv?.ai_answered_until && trig && new Date(cv.ai_answered_until) >= new Date(trig.sent_at);
-    if (!trig || human || answered) { await db.from("conversations").update({ ai_lock_until: null }).eq("id", conv.id); return; }
+    // Enquanto esperava, a conversa pode ter sido pausada (filtro, limite) ou desligada
+    if (!trig || human || answered || cv?.ai_state !== "auto") { await db.from("conversations").update({ ai_lock_until: null }).eq("id", conv.id); return; }
   }
 
   // Fora do horário, modo "só mensagem": avisa uma vez e para
@@ -491,7 +493,7 @@ export async function respondToConversation(conversationId: string, triggerMessa
   }
 
   const started = Date.now();
-  const deadline = started + GENERATION_MS;
+  const deadline = Math.min(started + GENERATION_MS, entry + 250_000);
   const model = agent.model || defaultModel(agent.provider);
   let calls: ToolCall[] = [];
   try {
