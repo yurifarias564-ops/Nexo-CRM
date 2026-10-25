@@ -45,10 +45,10 @@ function IdleBadge({ since }: { since: number }) {
 }
 
 /** De onde o lead veio: bolinha colorida no canto da foto. */
-function sourceBadge(l: Lead): { label: string; bg: string; Icon: typeof MessageCircle } | null {
+function sourceBadge(l: Lead): { label: string; bg: string; Icon: typeof MessageCircle; img?: string } | null {
   const s = (l.source ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (s.includes("whats") || (!s && l.last_message_at)) return { label: "WhatsApp", bg: "bg-[#25D366]", Icon: MessageCircle };
-  if (s.includes("insta")) return { label: "Instagram", bg: "bg-gradient-to-tr from-[#f58529] via-[#dd2a7b] to-[#8134af]", Icon: Camera };
+  if (s.includes("whats") || (!s && l.last_message_at)) return { label: "WhatsApp", bg: "bg-white", Icon: MessageCircle, img: "/channels/whatsapp.png" };
+  if (s.includes("insta")) return { label: "Instagram", bg: "bg-white", Icon: Camera, img: "/channels/instagram.png" };
   if (s.includes("face") || s.includes("meta")) return { label: "Facebook", bg: "bg-[#1877F2]", Icon: ThumbsUp };
   if (s.includes("voz")) return { label: "Comando de voz", bg: "bg-brand-500", Icon: Mic };
   if (s.includes("import") || s.includes("planilha")) return { label: "Planilha importada", bg: "bg-slate-500", Icon: FileSpreadsheet };
@@ -67,10 +67,18 @@ function LeadPhoto({ lead }: { lead: Lead }) {
         ? <img src={lead.avatar_url} alt="" loading="lazy" onError={() => setBroken(true)} className="h-8 w-8 rounded-full object-cover ring-1 ring-line" />
         : <Avatar name={lead.name} className="h-8 w-8 text-[11px]" />}
       {badge && (
-        <span title={`Origem: ${badge.label}`} aria-label={`Origem: ${badge.label}`}
-          className={cn("absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-white ring-2 ring-ink-800", badge.bg)}>
-          <badge.Icon className="h-2 w-2" strokeWidth={3} />
-        </span>
+        badge.img ? (
+          <span title={`Origem: ${badge.label}`} aria-label={`Origem: ${badge.label}`}
+            className="absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center overflow-hidden rounded-full bg-white p-[2px] ring-2 ring-ink-800">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={badge.img} alt="" className={cn("h-full w-full object-contain", badge.label === "Instagram" && "rounded-[4px]")} />
+          </span>
+        ) : (
+          <span title={`Origem: ${badge.label}`} aria-label={`Origem: ${badge.label}`}
+            className={cn("absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-white ring-2 ring-ink-800", badge.bg)}>
+            <badge.Icon className="h-2 w-2" strokeWidth={3} />
+          </span>
+        )
       )}
     </span>
   );
