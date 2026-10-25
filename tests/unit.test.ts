@@ -711,3 +711,21 @@ test("marca: tons da cor, CSS e domínio", () => {
   assert.equal(isApex("motocenter.com"), true);
   assert.equal(isApex("app.motocenter.com"), false);
 });
+
+import { AutomationBody, matchesKeywords, renderVars, TEMPLATES as AUTO_TEMPLATES, waitMs } from "@/lib/automations/schema";
+
+test("automações: variáveis, palavras-chave, espera e modelos", () => {
+  const v = { name: "Yuri Farias", phone: "5585999990000", stage: "Negociação", value: 2500, seller: "Ana", org: "Moto Center" };
+  assert.equal(renderVars("Olá, {{primeiro_nome}}! Aqui é da {{empresa}}.", v), "Olá, Yuri! Aqui é da Moto Center.");
+  assert.match(renderVars("Valor {{valor}} com {{vendedor}}", v), /R\$\s?2\.500,00 com Ana/);
+  assert.equal(renderVars("Oi, {{primeiro_nome}}!", { ...v, name: "+5585999990000" }), "Oi!");
+  assert.equal(renderVars("{{desconhecida}}", v), "{{desconhecida}}");
+  assert.ok(matchesKeywords("Qual o PRECO da moto?", ["preço"]));
+  assert.ok(matchesKeywords("qualquer coisa", []));
+  assert.ok(!matchesKeywords("bom dia", ["preço", "valor"]));
+  assert.equal(waitMs({ amount: 2, unit: "hours" }), 7_200_000);
+  for (const t of AUTO_TEMPLATES) {
+    const steps = t.body.steps.map((s) => (s.type === "assign" && !s.user_ids.length ? { ...s, user_ids: ["11111111-1111-4111-8111-111111111111"] } : s));
+    assert.ok(AutomationBody.safeParse({ ...t.body, steps, enabled: false }).success, t.id);
+  }
+});

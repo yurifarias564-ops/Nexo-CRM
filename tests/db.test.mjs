@@ -424,5 +424,18 @@ await expectError("usuário não altera a marca direto no banco", () => as(A, "u
 await expectError("domínio repetido em outra empresa é recusado", () => su("insert into public.org_branding (organization_id, custom_domain) values ($1,'crm.motocenter.com.br')", [orgB]), "23505");
 await expectError("cor inválida é recusada", () => su("update public.org_branding set primary_color='azul' where organization_id=$1", [orgA]), "23514");
 
+console.log("\n# Automações");
+const evCount = async () => Number((await su("select count(*) n from public.automation_events where organization_id=$1", [orgA]))[0].n);
+const evBefore = await evCount();
+await su("update public.leads set stage_id=(select id from public.stages where organization_id=$1 and kind='open' order by position limit 1) where id=$2", [orgA, leadA]);
+ok("sem automação ligada não gera fila", (await evCount()) === evBefore);
+await su(`insert into public.automations (organization_id, name, enabled, trigger, steps) values ($1,'Teste',true,'{"type":"won"}','[{"type":"wait","amount":1,"unit":"days"}]')`, [orgA]);
+await su("update public.leads set stage_id=(select id from public.stages where organization_id=$1 and kind='open' order by position desc limit 1) where id=$2", [orgA, leadA]);
+ok("mudar de etapa gera acontecimento para as automações", (await evCount()) === evBefore + 1);
+ok("vendedor não vê automações", (await as(C, "select * from public.automations")).length === 0);
+ok("dono vê automações da empresa", (await as(A, "select * from public.automations")).length === 1);
+ok("outra empresa não vê automações", (await as(B, "select * from public.automations")).length === 0);
+ok("ninguém lê a fila de acontecimentos pelo banco", (await as(A, "select * from public.automation_events")).length === 0);
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

@@ -8,6 +8,7 @@ import { linkLidsAfter, mapLidsBefore } from "@/lib/whatsapp/zapi-lid";
 import { refreshAvatars } from "@/lib/whatsapp/avatars";
 import { aiAfterIngest } from "@/lib/ai/trigger";
 import { trackAfterIngest } from "@/lib/tracking/attribute";
+import { processAutomations } from "@/lib/automations/engine";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -57,7 +58,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ channelId: str
       // Lead novo: busca a foto de perfil logo
       after(() => refreshAvatars(3).then(() => undefined));
       // Agente de IA: responde o cliente / pausa quando a equipe responde
-      after(() => trackAfterIngest(channelId, evt.messages).then(() => aiAfterIngest(channelId, evt.messages)));
+      after(() => trackAfterIngest(channelId, evt.messages).then(() => Promise.all([aiAfterIngest(channelId, evt.messages), processAutomations().catch(() => null)])).then(() => undefined));
     }
     if (evt.statuses.length) await applyStatuses(channelId, evt.statuses);
     if (evt.changes.length) await applyChanges(channelId, evt.changes);
