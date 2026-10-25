@@ -57,6 +57,42 @@ export async function listAssets(cred: string): Promise<{ accounts: AdAccountInf
   return { accounts: out, pages: pg.map((p) => ({ id: p.id, name: p.name ?? p.id })) };
 }
 
+/**
+ * API oficial: ao conectar o número pelo Cadastro Incorporado (com os produtos "Anúncios de clique para o WhatsApp"
+ * e "API de Conversões" na configuração), o mesmo acesso já enxerga a conta de anúncios e o conjunto de dados do WhatsApp.
+ * Aqui ligamos tudo sozinho: conta de anúncios, conjunto de dados (pixel) e envio de vendas.
+ */
+export async function autoConnectFromWhatsApp(orgId: string, cred: string, wabaId: string) {
+  const db = supabaseAdmin();
+  // Conjunto de dados ligado à conta do WhatsApp (é ele que recebe as vendas de anúncios de clique para o WhatsApp)
+  let datasetId: string | null = null;
+  try {
+    const r = await graph<{ data?: { id: string }[]; id?: string }>(`${wabaId}/dataset`, cred);
+    datasetId = r.data?.[0]?.id ?? r.id ?? null;
+    if (!datasetId) datasetId = (await graph<{ id?: string }>(`${wabaId}/dataset`, cred, { method: "POST" })).id ?? null;
+  } catch { /* sem a permissão de eventos: segue sem */ }
+  let assets: Awaited<ReturnType<typeof listAssets>> | null = null;
+  try { assets = await listAssets(cred); } catch { /* sem a permissão de anúncios: segue sem */ }
+  const account = assets?.accounts[0] ?? null;
+  if (!datasetId && !account) return { connected: false as const };
+
+  const { conn: prev, cred: prevCred } = await loadConn(orgId);
+  // Já conectado pelo "Conectar com o Facebook": só completa o que faltar
+  if (!prevCred) {
+    await db.from("meta_secrets").upsert({ organization_id: orgId, ["access_token"]: cred, updated_at: new Date().toISOString() });
+  }
+  await db.from("meta_connections").upsert({
+    organization_id: orgId,
+    ad_account_id: prev?.ad_account_id ?? account?.id ?? null, ad_account_name: prev?.ad_account_name ?? account?.name ?? null,
+    currency: prev?.currency ?? account?.currency ?? "BRL",
+    pixel_id: prev?.pixel_id ?? datasetId ?? account?.pixels[0]?.id ?? null,
+    page_id: prev?.page_id ?? (assets?.pages.length === 1 ? assets.pages[0]!.id : null),
+    send_purchase: prev?.send_purchase ?? true, send_lead: prev?.send_lead ?? true, updated_at: new Date().toISOString(),
+  });
+  if (account && !prevCred) await syncAds(orgId, new Date(Date.now() - 30 * 86_400_000), new Date()).catch(() => undefined);
+  return { connected: true as const, account: account?.name ?? null, dataset: Boolean(datasetId) };
+}
+
 /** Confere a chave, a conta de anúncios e o pixel antes de salvar. */
 export async function verify(cred: string, adAccountId: string | null, pixelId: string | null) {
   const out: { account?: { name: string; currency: string; status: number }; pixel?: { name: string } } = {};

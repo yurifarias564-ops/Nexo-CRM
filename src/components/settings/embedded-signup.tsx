@@ -84,6 +84,7 @@ export function EmbeddedSignup({ open, onClose, onDone }: { open: boolean; onClo
           const body = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(body.error ?? "Não foi possível concluir a conexão.");
           toast.success(`WhatsApp conectado${body.phone ? ` (${body.phone})` : ""}!${body.calling ? " Ligações já ativadas." : ""}`);
+          if (body.ads?.connected) toast.success("Anúncios e pixel ligados automaticamente", { description: [body.ads.account ? `Conta de anúncios: ${body.ads.account}` : null, body.ads.dataset ? "Vendas de anúncios de clique para o WhatsApp vão direto para o Meta" : null].filter(Boolean).join(" · "), duration: 8000 });
           if (body.warning) toast.warning(body.warning);
           onDone();
         } catch (e) {

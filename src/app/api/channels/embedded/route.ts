@@ -6,9 +6,10 @@ import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
 import * as es from "@/lib/whatsapp/embedded";
 import { setCallingEnabled } from "@/lib/whatsapp/meta-calls";
+import { autoConnectFromWhatsApp } from "@/lib/meta-ads";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const Body = z.object({
   code: z.string().min(10).max(2000),
@@ -73,7 +74,9 @@ export async function POST(req: Request) {
         calling = true;
       } catch { /* ligações podem ser ativadas depois em Configurações */ }
     }
-    return ok({ id: channelId, name: fields.name, phone: fields.phone_number, coexistence, calling, warning: warn }, 201);
+    // Mesmo acesso já liga os anúncios e o pixel (se a configuração da Meta pedir essas permissões)
+    const ads = await autoConnectFromWhatsApp(ctx.org.id, token, b.wabaId).catch(() => ({ connected: false as const }));
+    return ok({ id: channelId, name: fields.name, phone: fields.phone_number, coexistence, calling, warning: warn, ads }, 201);
   } catch (e) {
     return fail(e);
   }
