@@ -556,3 +556,21 @@ test("Apagar e editar no celular chegam como alteração (Z-API e Evolution)", a
   const evDel = parseEvo({ event: "MESSAGES_DELETE", data: { id: "E2", remoteJid: "5585@s.whatsapp.net", fromMe: true, status: "DELETED" } });
   assert.deepEqual(evDel.changes, [{ external_id: "E2", kind: "delete" }]);
 });
+
+import { splitReply, systemPrompt } from "@/lib/ai/agent";
+
+test("agente de IA: quebra a resposta em até 3 mensagens e limpa markdown", () => {
+  assert.deepEqual(splitReply("Oi! Tudo bem?\n\nTemos a **MT-03** sim."), ["Oi! Tudo bem?", "Temos a *MT-03* sim."]);
+  assert.deepEqual(splitReply("a\n\nb\n\nc\n\nd"), ["a", "b", "c\n\nd"]);
+  assert.deepEqual(splitReply("   "), []);
+});
+
+test("agente de IA: prompt traz instruções da empresa, memória e etapas", () => {
+  const s = systemPrompt({ name: "Bia", prompt: "Vendemos motos Yamaha.", time_zone: "America/Fortaleza", auto_tags: true }, "Moto Center",
+    { name: "Yuri", phone: "5585999990000", stage: "Novo", stages: ["Novo", "Ganho"], tags: ["MT-03"], value: 0, memory: ["Mora em Maracanaú"], summary: null, seller: null }, ["Ana"]);
+  assert.match(s, /Você é Bia/);
+  assert.match(s, /Vendemos motos Yamaha/);
+  assert.match(s, /Mora em Maracanaú/);
+  assert.match(s, /etapas: Novo, Ganho/);
+  assert.match(s, /MT-03/);
+});

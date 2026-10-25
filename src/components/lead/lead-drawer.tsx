@@ -205,6 +205,7 @@ export function LeadDrawer({
       return <>{who} moveu de <b className="text-slate-300">{from}</b> <ArrowRight className="inline h-3 w-3" /> <b className="text-slate-300">{to}</b></>;
     }
     if (a.type === "lead_created") return <>{who} criou o lead</>;
+    if (a.type === "ai_handoff") return <>🤖 A IA passou o atendimento {a.payload.seller ? <>para <b className="text-slate-300">{String(a.payload.seller)}</b></> : "para a equipe"}{a.payload.reason ? <span className="text-slate-300"> — {String(a.payload.reason)}</span> : null}</>;
     if (a.type === "appointment_created") return <>{who} agendou <b className="text-slate-300">{String(a.payload.title ?? "")}</b> para {formatWhen(String(a.payload.starts_at), Intl.DateTimeFormat().resolvedOptions().timeZone)}</>;
     if (a.type === "appointment_canceled") return <>{who} cancelou <b className="text-slate-300">{String(a.payload.title ?? "")}</b></>;
     if (a.type === "message_scheduled") return <>{who} agendou mensagem para {formatWhen(String(a.payload.send_at), Intl.DateTimeFormat().resolvedOptions().timeZone)}: <span className="text-slate-300">“{String(a.payload.preview ?? "")}”</span></>;

@@ -1,4 +1,6 @@
+import { after } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import { aiAfterIngest } from "@/lib/ai/trigger";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { webhookVerifyToken } from "@/lib/meta-config";
 import { parseWebhook, verifySignature } from "@/lib/whatsapp/meta";
@@ -7,6 +9,7 @@ import { parseCallWebhook } from "@/lib/whatsapp/meta-calls";
 import { handleCallBatch } from "@/lib/calls";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 /** Verificação do webhook pela Meta (hub.challenge). */
 export async function GET(req: Request) {
@@ -45,6 +48,7 @@ export async function POST(req: Request) {
       if (!ch) continue; // número não cadastrado neste sistema
       const historical = batch.historical;
       if (batch.messages.length) await ingestBatch(ch.id, batch.messages, historical);
+      if (batch.messages.length && !historical) { const id = ch.id, msgs = batch.messages; after(() => aiAfterIngest(id, msgs)); }
       if (batch.statuses.length) await applyStatuses(ch.id, batch.statuses);
       if (historical) {
         await db.from("whatsapp_channels").update({ history_imported_at: new Date().toISOString() }).eq("id", ch.id);

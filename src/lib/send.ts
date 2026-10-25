@@ -94,7 +94,30 @@ async function record(r: Resolved, externalId: string, type: MsgType, body: stri
     p_status: "sent", p_sent_at: new Date().toISOString(), p_sent_by: userId, p_is_history: false,
   });
   if (error) throw error;
+  // Vendedor respondeu pelo CRM: a IA dá uma pausa nesta conversa
+  if (userId && r.conversationId) await pauseAiForHuman(r.conversationId).catch(() => undefined);
   return data as string;
+}
+
+/** Pausa a IA numa conversa quando uma pessoa responde (se a empresa deixou assim). */
+export async function pauseAiForHuman(conversationId: string) {
+  const db = supabaseAdmin();
+  const { data: conv } = await db.from("conversations").select("organization_id, ai_state").eq("id", conversationId).maybeSingle();
+  if (!conv || conv.ai_state !== "auto") return;
+  const { data: agent } = await db.from("ai_agents").select("enabled, pause_on_human, pause_hours").eq("organization_id", conv.organization_id).maybeSingle();
+  if (!agent?.enabled || !agent.pause_on_human) return;
+  await db.from("conversations").update({ ai_state: "paused", ai_paused_until: new Date(Date.now() + agent.pause_hours * 3600_000).toISOString() })
+    .eq("id", conversationId).eq("ai_state", "auto");
+}
+
+/** Mensagem escrita pela IA (sem usuário): envia e marca como da IA. */
+export async function sendAiText(orgId: string, conversationId: string, text: string) {
+  const r = await resolveTarget(supabaseAdmin(), orgId, { conversationId });
+  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  const externalId = await sendTextVia(r.channel, r.sendTo, text);
+  const id = await record(r, externalId, "text", text, null, null, null);
+  await supabaseAdmin().from("messages").update({ by_ai: true }).eq("id", id);
+  return id;
 }
 
 export class WindowClosedError extends HttpError {

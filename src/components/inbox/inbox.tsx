@@ -13,6 +13,7 @@ import { TemplateModal } from "./template-modal";
 import { VideoNoteModal } from "./video-note";
 import { LocationModal, type LocationPick } from "./location-modal";
 import { PixIcon, PixModal } from "./pix-modal";
+import { AiChip } from "./ai-chip";
 import { ScheduleMessageModal } from "@/components/scheduled/schedule-message-modal";
 import { cn, formatPhone } from "@/lib/utils";
 import { CallButton, CallEntry, type ChatCall } from "@/components/calls/call-button";
@@ -449,6 +450,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
             {tagIds.map((id) => { const t = ws.tagById.get(id); return t ? <TagPill key={id} name={t.name} color={t.color} className="text-[10px]" /> : null; })}
           </div>
         </div>
+        <AiChip conv={conv as ConvRow & { ai_state?: string; ai_paused_until?: string | null }} />
         <VoipCallButton conversationId={conv.id} leadId={conv.lead_id} name={name} phone={conv.wa_id} compact />
         <Button variant="outline" size="sm" onClick={startVideoCall} loading={videoBusy} title="Chamada de vídeo: manda o link para o cliente entrar pelo celular">
           {!videoBusy && <Video className="h-3.5 w-3.5" />} <span className="hidden sm:inline">Vídeo</span>
@@ -664,6 +666,7 @@ function Bubble({ m, canChange }: { m: Message; canChange: boolean }) {
           </>
         )}
         <div className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", out ? "text-blue-100/70" : "text-slate-500")}>
+          {(m as Message & { by_ai?: boolean }).by_ai && <span title="Respondida pelo agente de IA">🤖 IA ·</span>}
           {m.edited_at && !m.deleted_at && <span title={m.original_body ? `Antes: ${m.original_body}` : undefined}>Editada ·</span>}
           {time} {out && <StatusIcon s={m.status} />}
         </div>
