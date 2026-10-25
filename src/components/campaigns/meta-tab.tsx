@@ -95,16 +95,16 @@ function ConnectForm({ st, onSaved, embedded }: { st: ConnState; onSaved: () => 
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="ID da conta de anúncios" hint="Gerenciador de Anúncios → menu da conta (só os números).">
-          <input className="field" inputMode="numeric" placeholder="123456789012345" value={f.ad_account_id} onChange={(e) => setF({ ...f, ad_account_id: e.target.value })} />
+          <input className="field" name="meta_ad_account" autoComplete="off" inputMode="numeric" placeholder="123456789012345" value={f.ad_account_id} onChange={(e) => setF({ ...f, ad_account_id: e.target.value })} />
         </Field>
         <Field label="ID do pixel (conjunto de dados)" hint="Gerenciador de Eventos → seu pixel → ID.">
-          <input className="field" inputMode="numeric" placeholder="987654321098765" value={f.pixel_id} onChange={(e) => setF({ ...f, pixel_id: e.target.value })} />
+          <input className="field" name="meta_pixel" autoComplete="off" inputMode="numeric" placeholder="987654321098765" value={f.pixel_id} onChange={(e) => setF({ ...f, pixel_id: e.target.value })} />
         </Field>
         <Field label="ID da página do Facebook (opcional)" hint="Melhora o envio das vendas que vieram de anúncio de clique para o WhatsApp.">
-          <input className="field" inputMode="numeric" value={f.page_id} onChange={(e) => setF({ ...f, page_id: e.target.value })} />
+          <input className="field" name="meta_page" autoComplete="off" inputMode="numeric" placeholder="Opcional" value={f.page_id} onChange={(e) => setF({ ...f, page_id: e.target.value })} />
         </Field>
         <Field label="Chave de acesso do Business Manager" hint={st.hasCred ? `Já cadastrada (${st.credHint}). Cole outra só para trocar.` : "Usuário do sistema com acesso à conta de anúncios e ao pixel."}>
-          <input className="field" type="password" autoComplete="off" placeholder={st.hasCred ? "••••••••" : "Cole a chave aqui"} value={f.credential} onChange={(e) => setF({ ...f, credential: e.target.value })} />
+          <input className="field" type="password" name="meta_business_key" autoComplete="new-password" data-lpignore="true" data-1p-ignore placeholder={st.hasCred ? "••••••••" : "Cole a chave aqui"} value={f.credential} onChange={(e) => setF({ ...f, credential: e.target.value })} />
         </Field>
       </div>
       <div className="space-y-2 rounded-lg border border-line bg-ink-850 p-3 text-sm">

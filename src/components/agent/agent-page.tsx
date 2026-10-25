@@ -322,7 +322,7 @@ function KeyBox({ provider, info, onChange }: { provider: Provider; info: KeyInf
         </span>
       </p>
       <div className="mt-2 flex gap-2">
-        <input className="field flex-1" type="password" autoComplete="off" placeholder={info.own ? "Colar nova chave para trocar" : "Cole aqui a chave (opcional se a plataforma já tiver)"} value={value} onChange={(e) => setValue(e.target.value)} />
+        <input className="field flex-1" type="password" name="ai_provider_key" autoComplete="new-password" data-lpignore="true" data-1p-ignore placeholder={info.own ? "Colar nova chave para trocar" : "Cole aqui a chave (opcional se a plataforma já tiver)"} value={value} onChange={(e) => setValue(e.target.value)} />
         <Button variant="secondary" onClick={() => void put(value.trim())} disabled={value.trim().length < 20} loading={busy}>Salvar</Button>
         {info.own && <Button variant="ghost" onClick={() => void put(null)} disabled={busy} aria-label="Remover chave"><Trash2 className="h-4 w-4" /></Button>}
       </div>
