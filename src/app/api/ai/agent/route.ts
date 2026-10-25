@@ -47,6 +47,7 @@ const Body = z.object({
   pause_on_human: z.boolean(),
   pause_hours: z.number().int().min(1).max(720),
   auto_tags: z.boolean(),
+  tone: z.enum(["executivo", "consultivo", "proximo"]),
   transcribe_audio: z.boolean(),
   time_zone: z.string().max(64).refine(isValidTimeZone, "Fuso horário inválido"),
 });

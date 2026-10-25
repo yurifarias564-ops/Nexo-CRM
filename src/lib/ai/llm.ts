@@ -25,6 +25,8 @@ export interface RunInput {
   exec: (name: string, args: Record<string, unknown>) => Promise<string>;
   maxRounds?: number;
   maxTokens?: number;
+  /** Claude: pensar antes de responder (padrão: sim). */
+  think?: boolean;
 }
 
 export const MODELS: Record<AiProvider, { id: string; label: string }[]> = {
@@ -90,10 +92,23 @@ function alternate(h: ChatTurn[]): ChatTurn[] {
 async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
   const messages: { role: string; content: unknown }[] = alternate(i.history).map((t) => ({ role: t.role, content: t.text }));
   const tools = i.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
+  let thinking = i.think !== false;
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
-    const data = await post("https://api.anthropic.com/v1/messages",
-      { "x-api-key": i.apiKey, "anthropic-version": "2023-06-01" },
-      { model: i.model, max_tokens: i.maxTokens ?? 1200, system: i.system, messages, tools }, "Claude");
+    // Raciocínio antes de responder (qualidade de atendimento); se o modelo não aceitar, segue sem
+    const base = { model: i.model, system: i.system, messages, tools };
+    let data: Record<string, unknown>;
+    try {
+      data = thinking
+        ? await post("https://api.anthropic.com/v1/messages", { "x-api-key": i.apiKey, "anthropic-version": "2023-06-01" },
+          { ...base, max_tokens: (i.maxTokens ?? 1200) + 2048, thinking: { type: "enabled", budget_tokens: 2048 } }, "Claude")
+        : await post("https://api.anthropic.com/v1/messages", { "x-api-key": i.apiKey, "anthropic-version": "2023-06-01" },
+          { ...base, max_tokens: i.maxTokens ?? 1200 }, "Claude");
+    } catch (e) {
+      if (!thinking || !/thinking/i.test((e as Error).message)) throw e;
+      thinking = false;
+      round--;
+      continue;
+    }
     const content = (data.content ?? []) as { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
     const uses = content.filter((c) => c.type === "tool_use");
     const text = content.filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n").trim();

@@ -571,6 +571,8 @@ test("agente de IA: prompt traz instruções da empresa, memória e etapas", () 
   assert.match(s, /Você é Bia/);
   assert.match(s, /Vendemos motos Yamaha/);
   assert.match(s, /Mora em Maracanaú/);
-  assert.match(s, /etapas: Novo, Ganho/);
+  assert.match(s, /etapas disponíveis: Novo, Ganho/);
+  assert.match(s, /Tom EXECUTIVO/);
+  assert.match(s, /UMA pergunta por mensagem/);
   assert.match(s, /MT-03/);
 });

@@ -16,6 +16,7 @@ const Body = z.object({
     provider: z.enum(["claude", "gemini", "groq"]),
     model: z.string().trim().max(80).nullable(),
     auto_tags: z.boolean(),
+    tone: z.enum(["executivo", "consultivo", "proximo"]).default("executivo"),
     time_zone: z.string().max(64).refine(isValidTimeZone),
   }),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) })).min(1).max(60),

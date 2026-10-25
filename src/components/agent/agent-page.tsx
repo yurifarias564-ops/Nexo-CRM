@@ -12,8 +12,9 @@ type Provider = "claude" | "gemini" | "groq";
 interface Agent {
   enabled: boolean; name: string; provider: Provider; model: string | null; prompt: string; channel_ids: string[] | null;
   start_mode: "new_leads" | "all"; reply_delay_seconds: number; pause_on_human: boolean; pause_hours: number;
-  auto_tags: boolean; transcribe_audio: boolean; time_zone: string;
+  auto_tags: boolean; transcribe_audio: boolean; time_zone: string; tone: Tone;
 }
+type Tone = "executivo" | "consultivo" | "proximo";
 interface KeyInfo { own: boolean; ownHint: string | null; platform: boolean }
 interface Channel { id: string; name: string; phone_number: string | null; provider: string; status: string }
 interface Config { agent: Agent; keys: Record<Provider, KeyInfo>; channels: Channel[]; models: Record<Provider, { id: string; label: string }[]> }
@@ -34,20 +35,46 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-const EXAMPLE_PROMPT = `Você atende os clientes da loja pelo WhatsApp. Seu objetivo é entender o que o cliente procura e levar ele para uma visita na loja ou para um vendedor.
+const TONES: { id: Tone; label: string; note: string; sample: string }[] = [
+  { id: "executivo", label: "Executivo", note: "Português culto e elegante, padrão de marca premium. Sem gírias.", sample: "Boa noite, Yuri. Será um prazer apresentar a MT-03. Para indicar a melhor condição, ela seria para uso diário?" },
+  { id: "consultivo", label: "Consultivo", note: "Profissional e caloroso, como um especialista.", sample: "Boa noite, Yuri! A MT-03 é uma ótima escolha. Você pensa em usar no dia a dia ou mais na estrada?" },
+  { id: "proximo", label: "Próximo", note: "Leve e simpático, linguagem do dia a dia.", sample: "Opa, boa noite, Yuri! Tem MT-03 sim 😄 Vai usar mais pra cidade?" },
+];
 
-Sobre a loja:
-- Nome: (nome da loja)
-- Endereço: (endereço) — horário: seg a sex 8h às 18h, sábado 8h às 12h
-- Vendemos: motos novas e seminovas (ex.: MT-03, Fazer 250, CG 160, Biz 125)
-- Formas de pagamento: à vista, cartão, financiamento e consórcio. Aceitamos moto usada na troca.
+const EXAMPLE_PROMPT = `# IDENTIDADE
+Você é o especialista de atendimento da (nome da loja), concessionária de motos em (cidade). Seu papel é receber cada cliente com excelência, entender exatamente o que ele procura e conduzi-lo para uma visita, um test drive ou para o especialista de vendas.
 
-Como atender:
-1. Cumprimente pelo nome e pergunte qual moto o cliente procura.
-2. Descubra: modelo, se é nova ou seminova, cidade, forma de pagamento, se tem entrada ou moto para troca.
-3. Não passe preço fechado: diga que o vendedor faz a melhor condição e ofereça agendar uma visita ou test drive.
-4. Se o cliente quiser financiar, avise que um vendedor faz a simulação e transfira.
-5. Quando o cliente quiser fechar, falar de valores finais ou pedir uma pessoa, transfira para um vendedor.`;
+# A EMPRESA
+- Endereço: (endereço completo) — (ponto de referência)
+- Horário: segunda a sexta, 8h às 18h; sábado, 8h às 12h
+- Diferenciais: (ex.: revisão gratuita nos primeiros 1.000 km, entrega em 24h, oficina própria, 15 anos de mercado)
+
+# PRODUTOS
+- Motos novas: (ex.: MT-03, Fazer 250, Factor 150, NMax 160)
+- Seminovas: com procedência e revisão, estoque muda toda semana
+- Preços: NÃO informe valores fechados. Diga que o especialista prepara a melhor condição de acordo com entrada e prazo.
+
+# CONDIÇÕES DE PAGAMENTO
+- À vista (Pix ou transferência), cartão de crédito, financiamento e consórcio
+- Aceitamos moto usada na troca, mediante avaliação presencial
+- Simulação de financiamento: sempre feita pelo especialista
+
+# ROTEIRO DE ATENDIMENTO
+1. Cumprimente e responda primeiro o que o cliente perguntou.
+2. Descubra, uma pergunta por vez: modelo de interesse → uso (cidade, estrada, trabalho) → forma de pagamento → se tem entrada ou moto para troca → prazo para comprar.
+3. Valorize o modelo de acordo com o uso que ele contou.
+4. Convide para visita ou test drive oferecendo dois horários.
+5. Cliente pronto para negociar valores → transfira para o especialista.
+
+# OBJEÇÕES FREQUENTES
+- "Está caro": reconheça, pergunte quanto pretende investir por mês e diga que o especialista monta uma condição dentro disso.
+- "Vou pensar": pergunte com delicadeza o que falta para decidir e ofereça enviar mais detalhes.
+- "Achei mais barato em outro lugar": pergunte as condições da outra proposta e diga que o especialista vai analisar para apresentar a melhor alternativa.
+
+# TRANSFERIR PARA O ESPECIALISTA QUANDO
+- O cliente pedir preço final, simulação ou desconto
+- Quiser fechar, reservar ou pagar
+- Pedir para falar com uma pessoa, fizer reclamação ou perguntar algo que não está aqui`;
 
 function useConfig() {
   const [cfg, setCfg] = useState<Config | null>(null);
@@ -106,8 +133,8 @@ export function AgentPage() {
 }
 
 function pick(a: Agent): Agent {
-  const { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone } = a;
-  return { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone };
+  const { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone, tone } = a;
+  return { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone, tone: tone ?? "executivo" };
 }
 
 function Soon({ title, text }: { title: string; text: string }) {
@@ -190,6 +217,19 @@ function ConfigTab({ cfg, agent, set, dirty, onSaved, reloadKeys }: {
         <Field label="Nome do agente" hint="Como ele se apresenta para o cliente.">
           <input className="field" maxLength={40} value={agent.name} onChange={(e) => set({ name: e.target.value })} />
         </Field>
+        <div>
+          <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-500">Tom de voz</p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {TONES.map((t) => (
+              <button key={t.id} type="button" onClick={() => set({ tone: t.id })}
+                className={cn("rounded-xl border p-3 text-left transition", agent.tone === t.id ? "border-brand-400/60 bg-brand-500/10" : "border-line hover:border-slate-500")}>
+                <span className="block font-medium text-white">{t.label}</span>
+                <span className="mt-1 block text-xs text-slate-400">{t.note}</span>
+                <span className="mt-1.5 block text-[11px] italic text-slate-500">“{t.sample}”</span>
+              </button>
+            ))}
+          </div>
+        </div>
         <textarea className="field min-h-[320px] font-mono text-[13px] leading-5" maxLength={30000} value={agent.prompt} onChange={(e) => set({ prompt: e.target.value })}
           placeholder="Explique a empresa, produtos, preços que pode falar, horários, endereço, regras e quando passar para o vendedor." />
         <p className="text-xs text-slate-500">{agent.prompt.length.toLocaleString("pt-BR")} / 30.000 · O CRM já ensina o agente a colocar tags, guardar a memória, resumir a negociação, agendar e transferir.</p>
@@ -330,7 +370,7 @@ function TestTab({ agent, keys }: { agent: Agent; keys: Record<Provider, KeyInfo
       const history = next.filter((m) => !m.error).map((m) => ({ role: m.role, text: m.text }));
       const res = await fetch("/api/ai/test", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent: { name: agent.name, prompt: agent.prompt, provider: agent.provider, model: agent.model, auto_tags: agent.auto_tags, time_zone: agent.time_zone }, history, lead }),
+        body: JSON.stringify({ agent: { name: agent.name, prompt: agent.prompt, provider: agent.provider, model: agent.model, auto_tags: agent.auto_tags, tone: agent.tone, time_zone: agent.time_zone }, history, lead }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
