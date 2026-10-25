@@ -134,19 +134,26 @@ function moneyTokens(text: string): string[] {
  * Filtro automático depois que a IA escreve: confere as regras que dá para checar sem IA.
  * Devolve a lista de violações (vazia = pode enviar).
  */
-export function checkReply(text: string, r: Rules): string[] {
+export function checkReply(text: string, r: Rules, customerText = ""): string[] {
   const v: string[] = [];
+  // Valores que o próprio cliente disse (renda, entrada…) podem ser repetidos pela IA
+  const fromCustomer = new Set(moneyTokens(customerText).map(cents));
   const t = strip(text);
   for (const w of r.forbidden_words) {
     const sw = strip(w).trim();
     if (sw && new RegExp(`(^|[^\\p{L}\\p{N}])${sw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`, "u").test(t)) v.push(`usou a palavra proibida "${w}"`);
   }
-  if (r.price_policy === "proibido" && MONEY.test(text)) v.push("informou valor/preço (proibido nas regras)");
+  if (r.price_policy === "proibido") {
+    const withoutCustomer = fromCustomer.size
+      ? text.replace(/R\$\s*([\d.,]+)|([\d.,]+)\s*(mil\s+)?reais/gi, (m, a: string | undefined, b: string | undefined) => (fromCustomer.has(cents((a ?? b ?? "").replace(/[.,]$/, ""))) ? "" : m))
+      : text;
+    if (MONEY.test(withoutCustomer)) v.push("informou valor/preço (proibido nas regras)");
+  }
   if (r.price_policy !== "proibido") {
     // Só pode citar valores que existem nas informações/condições/FAQ
     const said = [...text.matchAll(/R\$\s*([\d.,]+)|([\d.,]+)\s*(?:mil\s+)?reais/gi)].map((m) => (m[1] ?? m[2] ?? "").replace(/[.,]$/, "")).filter((n) => /\d/.test(n));
     const allowed = new Set(moneyTokens(`${r.knowledge}\n${r.conditions}\n${r.faq.map((f) => f.a).join("\n")}`).map(cents));
-    const bad = said.filter((n) => !allowed.has(cents(n)));
+    const bad = said.filter((n) => !allowed.has(cents(n)) && !fromCustomer.has(cents(n)));
     if (bad.length) v.push(`citou valor que não está nas informações (${bad.slice(0, 3).join(", ")})`);
   }
   const pct = [...text.matchAll(/(\d{1,3})\s*%/g)].map((m) => Number(m[1]));

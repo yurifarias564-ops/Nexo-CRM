@@ -32,14 +32,24 @@ export const BANKS = ["Santander", "BV", "PAN", "Safra", "Itaú", "Bradesco", "C
 export type BankStatus = "aprovado" | "analise" | "reprovado";
 export interface BankResult { banco: string; status: BankStatus; parcela: number | null; taxa: number | null; prazo: number | null; valor_liberado: number | null; mensagem: string | null }
 
-const BANK_WORDS: [RegExp, BankStatus][] = [
-  [/^(aprovad|approv|pre.?aprovad|liberad|sim$|true$)/i, "aprovado"],
-  [/^(reprovad|negad|recusad|denied|reject|nao$|não$|false$)/i, "reprovado"],
-];
-export function bankStatus(v: unknown): BankStatus {
-  const w = String(v ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
-  return BANK_WORDS.find(([re]) => re.test(w))?.[1] ?? "analise";
+const plain = (v: unknown) => String(v ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+/** Lê "aprovado", "Não aprovado", "recusado", "pendente", true/false… → situação (null = não reconhecido). */
+export function wordStatus(v: unknown): BankStatus | null {
+  if (v === true) return "aprovado";
+  if (v === false) return "reprovado";
+  const w = plain(v);
+  if (!w) return null;
+  if (/\bnao\b.*aprovad|reprovad|negad|recusad|denied|declined|reject|^nao$/.test(w)) return "reprovado";
+  if (/aprovad|approv|liberad|^sim$|^true$|^ok$/.test(w)) return "aprovado";
+  if (/analise|pendente|pending|review|processando|aguardando/.test(w)) return "analise";
+  return null;
 }
+export const bankStatus = (v: unknown): BankStatus => wordStatus(v) ?? "analise";
+
+/** Tira CPF de qualquer texto (memória da IA, resumo, mensagens de erro). */
+export const scrubCpf = (t: string) => t.replace(/\b\d{3}\.?\d{3}\.?\d{3}[-.\s]?\d{2}\b/g, "[CPF]");
+
 function numOrNull(v: unknown): number | null {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   let t = String(v ?? "").replace(/[^\d.,-]/g, "");

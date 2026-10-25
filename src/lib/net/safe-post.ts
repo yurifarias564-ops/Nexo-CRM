@@ -43,9 +43,10 @@ export function postPinnedFull(t: { url: URL; ip: string; family: 4 | 6 }, body:
     }, (res) => {
       if (!opts.readBody) { res.resume(); resolve({ status: res.statusCode ?? 0, text: "" }); return; }
       const chunks: Buffer[] = []; let size = 0;
-      res.on("data", (c: Buffer) => { size += c.length; if (size <= 262_144) chunks.push(c); else res.destroy(); });
+      res.on("data", (c: Buffer) => { size += c.length; if (size <= 262_144) chunks.push(c); else res.destroy(new Error("Resposta grande demais")); });
       res.on("end", () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString("utf8") }));
       res.on("error", reject);
+      res.on("close", () => { if (!res.complete) reject(new Error("Conexão encerrada antes do fim da resposta")); });
     });
     req.on("timeout", () => req.destroy(new Error(`Tempo esgotado (${Math.round((opts.timeoutMs ?? 15_000) / 1000)}s)`)));
     req.on("error", reject);

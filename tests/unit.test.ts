@@ -803,3 +803,17 @@ test("crédito: configuração exige bancos e endereço na opção Bancos", () =
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "webhook", webhook_url: "http://x.com" }).success, false);
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, review_score: 700, min_score: 600 }).success, false);
 });
+
+test("crédito: 'Não aprovado' é recusado, CPF some dos textos, valor do cliente pode ser repetido", async () => {
+  const { wordStatus, scrubCpf } = await import("@/lib/credit/shared");
+  assert.equal(wordStatus("Não aprovado"), "reprovado");
+  assert.equal(wordStatus("NAO APROVADO"), "reprovado");
+  assert.equal(wordStatus("Aprovado com ressalvas"), "aprovado");
+  assert.equal(wordStatus("em processamento"), null);
+  assert.equal(wordStatus(false), "reprovado");
+  assert.equal(scrubCpf("Cliente CPF 529.982.247-25, renda 5 mil"), "Cliente CPF [CPF], renda 5 mil");
+  assert.equal(scrubCpf("cpf 52998224725"), "cpf [CPF]");
+  const r = { ...DEFAULT_RULES, price_policy: "proibido" as const };
+  assert.deepEqual(checkReply("Perfeito, com entrada de R$ 5.000 fica ótimo.", r, "tenho R$ 5.000 de entrada"), []);
+  assert.ok(checkReply("A moto sai por R$ 33.990.", r, "tenho R$ 5.000 de entrada").length > 0);
+});

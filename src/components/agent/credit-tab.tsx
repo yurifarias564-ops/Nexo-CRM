@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Spinner } from "@/components/ui/misc";
 import { cn, relativeTime } from "@/lib/utils";
-import { BANKS, CREDIT_DEFAULTS, installment, isCpf, PROVIDERS, STATUS_LABEL, type BankResult, type CreditProvider, type CreditSettings } from "@/lib/credit/shared";
+import { BANKS, installment, isCpf, PROVIDERS, STATUS_LABEL, type BankResult, type CreditProvider, type CreditSettings } from "@/lib/credit/shared";
 
 interface Check {
   id: number; source: "ia" | "teste"; cpf_masked: string; income: number | null; vehicle_value: number | null; down_payment: number | null; months: number | null;
@@ -70,7 +70,7 @@ export function CreditTab() {
   const set = (p: Partial<CreditSettings>) => setS({ ...s, ...p });
   const prov = PROVIDERS[s.provider];
 
-  async function save(extra?: { credential: null }) {
+  async function save(extra?: { credential?: null; rotateCallback?: boolean }) {
     setBusy(true);
     const res = await fetch("/api/credit/settings", {
       method: "PUT", headers: { "content-type": "application/json" },
@@ -126,7 +126,10 @@ export function CreditTab() {
               <p className="mt-1">Os bancos não liberam API direto para lojas: a ficha passa por uma plataforma multibanco em que a loja já é credenciada.
                 A <b>Zinix</b> tem API para CRM com Santander, BV, PAN, Safra, Itaú e Bradesco; a <b>Credere</b> libera API sob consulta. Peça a eles o endereço da API e a chave, ou use um fluxo do n8n no meio.</p>
               <p className="mt-2">Endereço de retorno (os bancos que respondem depois mandam o resultado aqui):</p>
-              <code className="mt-1 block select-all break-all rounded bg-ink-900 px-2 py-1 text-[11px] text-slate-300">{callbackUrl ?? "salve a configuração para gerar o endereço"}</code>
+              <code className="mt-1 block select-all break-all rounded bg-ink-900 px-2 py-1 text-[11px] text-slate-300">{callbackUrl ?? "…"}</code>
+              <p className="mt-1">Mande em JSON: <code>{`{"consulta_id": 123, "banco": "Santander", "status": "aprovado", "parcela": 1290.5, "taxa": 1.89, "prazo": 48}`}</code> (um banco por vez ou vários em <code>bancos</code>).</p>
+              <button type="button" className="mt-2 text-[11px] text-brand-300 hover:text-brand-200" disabled={busy}
+                onClick={() => { if (confirm("Gerar um novo endereço de retorno? O endereço atual para de funcionar e precisa ser trocado na plataforma de bancos.")) void save({ rotateCallback: true }); }}>Gerar novo endereço</button>
             </div>
           </div>
         )}
@@ -135,9 +138,9 @@ export function CreditTab() {
             <input className="field font-mono text-xs" value={s.webhook_url ?? ""} placeholder="https://seu-sistema.com/credito" onChange={(e) => set({ webhook_url: e.target.value.trim() || null })} />
           </Field>
         )}
-        {(prov.needsCredential || prov.needsUrl) && (
-          <Field label={prov.needsCredential ? "Token de acesso da Direct Data" : "Chave de acesso (opcional, vai no cabeçalho Authorization: Bearer)"}
-            hint={cred.has ? `Chave salva (${cred.hint}). Cole outra só se quiser trocar.` : "Fica guardada só no servidor; ninguém da equipe consegue ver depois."}>
+        {s.provider !== "manual" && (
+          <Field label={s.provider === "directd" ? "Token de acesso da Direct Data" : s.provider === "bancos" ? "Chave de acesso da plataforma de bancos (vai no cabeçalho Authorization: Bearer)" : "Chave de acesso (opcional, vai no cabeçalho Authorization: Bearer)"}
+            hint={cred.has ? `Chave salva (${cred.hint}). Cole outra só se quiser trocar.` : "Fica guardada só no servidor e só é usada nesta opção; ninguém da equipe consegue ver depois."}>
             <div className="flex gap-2">
               <input className="field flex-1 font-mono text-xs" type="password" name="credito-chave" autoComplete="new-password" value={newCred}
                 placeholder={cred.has ? "••••••••" : "Cole aqui"} onChange={(e) => setNewCred(e.target.value)} />
@@ -179,7 +182,7 @@ export function CreditTab() {
         <Button onClick={() => void save()} disabled={busy || !dirty}>{busy ? <Spinner /> : null} Salvar</Button>
       </div>
 
-      <TestBox settings={s} onDone={load} />
+      <TestBox settings={s} onDone={load} dirty={dirty} />
 
       <Section icon={History} title="Consultas feitas" hint="Pela IA e pelos testes. O CPF nunca fica guardado inteiro.">
         {!checks ? <Spinner /> : !checks.length ? <p className="text-sm text-slate-500">Nenhuma consulta ainda.</p> : (
@@ -214,7 +217,7 @@ export function CreditTab() {
   );
 }
 
-function TestBox({ settings, onDone }: { settings: CreditSettings; onDone: () => void }) {
+function TestBox({ settings, onDone, dirty }: { settings: CreditSettings; onDone: () => void; dirty: boolean }) {
   const [f, setF] = useState({ cpf: "", income: "", vehicle: "", down: "", months: "48" });
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -227,7 +230,7 @@ function TestBox({ settings, onDone }: { settings: CreditSettings; onDone: () =>
     const r = await fetch("/api/credit/test", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        consent, settings: { ...CREDIT_DEFAULTS, ...settings },
+        consent,
         input: { cpf: f.cpf, income: money(f.income), vehicle_value: money(f.vehicle), down_payment: money(f.down), months: Number(f.months) || 48 },
       }),
     });
@@ -252,7 +255,8 @@ function TestBox({ settings, onDone }: { settings: CreditSettings; onDone: () =>
         <span><ShieldCheck className="mr-1 inline h-3.5 w-3.5 text-brand-300" />O dono deste CPF autorizou a consulta de crédito (LGPD).</span>
       </label>
       <div className="flex justify-end">
-        <Button onClick={() => void run()} disabled={busy || !consent || !cpfOk || !money(f.vehicle)}>{busy ? <Spinner /> : null} Consultar</Button>
+        {dirty && <span className="mr-2 self-center text-xs text-amber-300">Salve a configuração antes de testar</span>}
+        <Button onClick={() => void run()} disabled={busy || dirty || !consent || !cpfOk || !money(f.vehicle)}>{busy ? <Spinner /> : null} Consultar</Button>
       </div>
       {res && (
         <div className="rounded-lg border border-line bg-ink-800 p-3 text-sm">

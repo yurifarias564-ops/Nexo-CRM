@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { applyCreditToLead, loadCreditSettings, runCreditCheck } from "@/lib/credit";
-import { customerGuidance, decide, isCpf, maskCpf, STATUS_LABEL, type CreditSettings } from "@/lib/credit/shared";
+import { customerGuidance, decide, isCpf, maskCpf, scrubCpf, STATUS_LABEL, type CreditSettings } from "@/lib/credit/shared";
 import { envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { norm } from "@/lib/utils";
@@ -249,7 +249,7 @@ function makeExec(opts: {
           return "ok";
         }
         case "salvar_memoria": {
-          const facts = (Array.isArray(args.fatos) ? args.fatos : [args.fatos]).map((f) => String(f ?? "").trim().slice(0, 500)).filter(Boolean).slice(0, 15);
+          const facts = (Array.isArray(args.fatos) ? args.fatos : [args.fatos]).map((f) => scrubCpf(String(f ?? "")).trim().slice(0, 500)).filter(Boolean).slice(0, 15);
           if (!facts.length) return "nada para salvar";
           if (live && leadId) {
             for (const fact of facts) {
@@ -260,7 +260,7 @@ function makeExec(opts: {
           return "ok: guardado";
         }
         case "atualizar_resumo": {
-          const text = String(args.resumo ?? "").trim().slice(0, 4000);
+          const text = scrubCpf(String(args.resumo ?? "")).trim().slice(0, 4000);
           if (!text) return "resumo vazio";
           if (live && leadId) await db.from("leads").update({ ai_summary: text, ai_summary_at: new Date().toISOString() }).eq("id", leadId);
           effects.push({ kind: "summary", text });
@@ -332,12 +332,22 @@ function makeExec(opts: {
             effects.push({ kind: "credit", status: d.status, score: null, installment: d.installment, simulated: true });
             return `(SIMULAÇÃO — nenhuma consulta real foi feita) ${customerGuidance(d.status === "reprovado" ? "reprovado" : d.status, credit.handoff)}`;
           }
+          // Consentimento (LGPD): o cliente precisa ter respondido DEPOIS de a IA pedir a autorização
+          let consentMessageId: string | null = null;
+          if (opts.conversationId) {
+            const { data: recent } = await db.from("messages").select("id, direction, by_ai, body, sent_at").eq("conversation_id", opts.conversationId).order("sent_at", { ascending: false }).limit(30);
+            const rows = recent ?? [];
+            const askIdx = rows.findIndex((m) => m.direction === "out" && m.by_ai && /autoriz|consulta de cr[eé]dito|pr[eé].?an[aá]lise/i.test(m.body ?? ""));
+            const reply = askIdx > 0 ? rows.slice(0, askIdx).reverse().find((m) => m.direction === "in") : null;
+            if (!reply) return "erro: o cliente ainda não autorizou. Pergunte de forma explícita se ele autoriza a pré-análise de crédito com o CPF dele e espere a resposta.";
+            consentMessageId = reply.id;
+          }
           try {
-            const r = await runCreditCheck(orgId, input, { source: "ia", leadId, conversationId: opts.conversationId, leadName: opts.leadName, phone: opts.leadPhone, settings: credit });
+            const r = await runCreditCheck(orgId, input, { source: "ia", leadId, conversationId: opts.conversationId, leadName: opts.leadName, phone: opts.leadPhone, settings: credit, consentMessageId });
             if (leadId) {
               await applyCreditToLead(orgId, leadId, r.status, {
-                score: r.score, installment: r.installment, income_pct: r.incomePct, cpf: maskCpf(input.cpf), vehicle_value: input.vehicle_value,
-                down_payment: input.down_payment, months: input.months, reasons: r.reasons, provider: r.provider, banks: r.banks, pending: r.pending,
+                installment: r.installment, income_pct: r.incomePct, cpf: maskCpf(input.cpf), vehicle_value: input.vehicle_value,
+                down_payment: input.down_payment, months: input.months, reasons: r.reasons.filter((x) => !x.startsWith("score")), provider: r.provider, banks: r.banks, pending: r.pending,
               });
               const { data: lv } = await db.from("leads").select("value").eq("id", leadId).maybeSingle();
               if (!Number(lv?.value)) await db.from("leads").update({ value: input.vehicle_value }).eq("id", leadId);
@@ -451,13 +461,14 @@ async function generateGuarded(p: {
   const rules = p.agent.rules;
   const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: p.tools ?? TOOLS, exec: p.exec, deadline: p.deadline });
   let text = rules.emojis ? out.text : stripEmojis(out.text);
-  let reasons = checkReply(text, rules);
+  const customerText = p.history.filter((h) => h.role === "user").slice(-12).map((h) => h.text).join("\n");
+  let reasons = checkReply(text, rules, customerText);
   if (!reasons.length) return { text, calls: out.calls, blocked: null };
 
   const fix = `## CORREÇÃO OBRIGATÓRIA\nSua resposta anterior foi BLOQUEADA pelo filtro da empresa porque: ${reasons.join("; ")}.\nResposta bloqueada: «${text.slice(0, 1500)}»\nReescreva a resposta ao cliente cumprindo TODAS as regras. Não cite valores, palavras ou assuntos proibidos.`;
   const again = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: `${p.system}\n\n${fix}`, history: p.history, tools: [], exec: p.exec, maxRounds: 1, deadline: p.deadline });
   text = rules.emojis ? again.text : stripEmojis(again.text);
-  const still = checkReply(text, rules);
+  const still = checkReply(text, rules, customerText);
   if (!still.length && text.trim()) {
     p.effects.push({ kind: "filter", reasons, outcome: "corrigida" });
     return { text, calls: out.calls, blocked: null };

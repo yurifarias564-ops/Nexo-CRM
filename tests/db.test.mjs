@@ -460,5 +460,15 @@ ok("ninguém lê a chave da ferramenta de crédito pelo banco", (await as(A, "se
 await expectError("endereço sem https é recusado", () => su("update public.credit_settings set webhook_url='http://x.com' where organization_id=$1", [orgA]), "23514");
 await expectError("situação de consulta inválida é recusada", () => su("update public.credit_checks set status='talvez' where organization_id=$1", [orgA]), "23514");
 
+const ckId = (await su("select id from public.credit_checks where organization_id=$1 limit 1", [orgA]))[0].id;
+await su("select public.credit_merge_banks($1,$2,$3::jsonb)", [ckId, orgA, JSON.stringify([{ banco: "BV", status: "reprovado" }, { banco: "PAN", status: "analise" }])]);
+const merged = (await su("select public.credit_merge_banks($1,$2,$3::jsonb) b", [ckId, orgA, JSON.stringify([{ banco: "pan", status: "aprovado" }, { banco: "Santander", status: "aprovado" }])]))[0].b;
+ok("respostas dos bancos se juntam sem perder nenhuma (e o mais novo vale)", merged.length === 3 && merged.find((b) => b.banco.toLowerCase() === "pan").status === "aprovado" && merged.some((b) => b.banco === "BV"));
+const otherOrg = (await su("select public.credit_merge_banks($1,$2,$3::jsonb) b", [ckId, orgB, JSON.stringify([{ banco: "X", status: "aprovado" }])]))[0].b;
+ok("outra empresa não mexe na consulta", otherOrg === null && (await su("select jsonb_array_length(banks) n from public.credit_checks where id=$1", [ckId]))[0].n === 3);
+await expectError("usuário não chama a junção de bancos", () => as(A, "select public.credit_merge_banks($1,$2,'[]'::jsonb)", [ckId, orgA]), "42501");
+await su("delete from public.leads where id=$1", [leadA]);
+ok("apagar o lead apaga as consultas de crédito dele", (await su("select count(*) n from public.credit_checks where id=$1", [ckId]))[0].n == 0);
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);
