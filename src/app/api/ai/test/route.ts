@@ -5,6 +5,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { isValidTimeZone } from "@/lib/time";
 import { testAgent } from "@/lib/ai/agent";
 import { AiError } from "@/lib/ai/llm";
+import { Rules } from "@/lib/ai/rules";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -17,6 +18,7 @@ const Body = z.object({
     model: z.string().trim().max(80).nullable(),
     auto_tags: z.boolean(),
     tone: z.enum(["executivo", "consultivo", "proximo"]).default("executivo"),
+    rules: Rules,
     time_zone: z.string().max(64).refine(isValidTimeZone),
   }),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(4000) })).min(1).max(60),

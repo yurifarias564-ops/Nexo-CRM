@@ -576,3 +576,77 @@ test("agente de IA: prompt traz instruções da empresa, memória e etapas", () 
   assert.match(s, /UMA pergunta por mensagem/);
   assert.match(s, /MT-03/);
 });
+
+import { checkReply, DEFAULT_RULES, rulesPrompt, stripEmojis, withinHours, withDefaults } from "@/lib/ai/rules";
+
+test("filtro da IA: palavra proibida, preço proibido, desconto e emoji", () => {
+  const r = { ...DEFAULT_RULES, forbidden_words: ["garantido", "aprovação"], price_policy: "proibido" as const, emojis: false };
+  assert.deepEqual(checkReply("Boa noite, Yuri. Posso ajudar com a MT-03.", r), []);
+  assert.ok(checkReply("Seu crédito está garantido!", r).some((x) => x.includes("garantido")));
+  assert.ok(checkReply("A aprovacao é rápida", r).some((x) => x.includes("aprovação"))); // sem acento também pega
+  assert.ok(checkReply("Ela sai por R$ 33.990", r).some((x) => x.includes("preço")));
+  assert.ok(checkReply("Fica 12x de 2.890,00", r).length > 0);
+  assert.ok(checkReply("Que ótimo 😄", r).some((x) => x.includes("emoji")));
+  assert.equal(stripEmojis("Que ótimo 😄 Até já"), "Que ótimo Até já");
+  assert.ok(checkReply("Consigo te dar um desconto de 10%", r).length > 0);
+  const ok5 = { ...DEFAULT_RULES, max_discount_pct: 5 };
+  assert.deepEqual(checkReply("Posso fazer 5% de desconto à vista", ok5), []);
+  assert.ok(checkReply("Faço 8% de desconto", ok5).some((x) => x.includes("acima")));
+});
+
+test("filtro da IA: com preço liberado só aceita valores das informações", () => {
+  const r = { ...DEFAULT_RULES, price_policy: "liberado" as const, knowledge: "MT-03 a partir de R$ 33.990\nFazer 250: R$ 22.490,00" };
+  assert.deepEqual(checkReply("A MT-03 sai a partir de R$ 33.990.", r), []);
+  assert.deepEqual(checkReply("A Fazer está R$ 22.490", r), []);
+  assert.ok(checkReply("A MT-03 sai por R$ 31.500", r).some((x) => x.includes("31.500")));
+});
+
+test("regras da IA: prompt, padrão e horário", () => {
+  const r = withDefaults({ goal: "pre_atendimento", forbidden_topics: ["juros"], required_questions: ["Qual modelo?"] });
+  assert.equal(r.price_policy, "proibido");
+  const p = rulesPrompt(r);
+  assert.match(p, /PRÉ-ATENDIMENTO/);
+  assert.match(p, /juros/);
+  assert.match(p, /1\. Qual modelo\?/);
+  const h = { ...r, hours: { ...r.hours, enabled: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "18:00" } };
+  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-26T13:00:00Z")), true); // seg 10h
+  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-26T23:00:00Z")), false); // seg 20h
+  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-25T13:00:00Z")), false); // domingo
+});
+
+import { checkReply, DEFAULT_RULES, rulesPrompt, stripEmojis, withinHours, withDefaults } from "@/lib/ai/rules";
+
+test("filtro da IA: palavra proibida, preço proibido, desconto e emoji", () => {
+  const r = { ...DEFAULT_RULES, forbidden_words: ["garantido", "aprovação"], price_policy: "proibido" as const, emojis: false };
+  assert.deepEqual(checkReply("Boa noite, Yuri. Posso ajudar com a MT-03.", r), []);
+  assert.ok(checkReply("Seu crédito está garantido!", r).some((x) => x.includes("garantido")));
+  assert.ok(checkReply("A aprovacao é rápida", r).some((x) => x.includes("aprovação")));
+  assert.ok(checkReply("Ela sai por R$ 33.990", r).some((x) => x.includes("preço")));
+  assert.ok(checkReply("Fica 12x de 2.890,00", r).length > 0);
+  assert.ok(checkReply("Que ótimo 😄", r).some((x) => x.includes("emoji")));
+  assert.equal(stripEmojis("Que ótimo 😄 Até já"), "Que ótimo Até já");
+  assert.ok(checkReply("Consigo te dar um desconto de 10%", r).length > 0);
+  const ok5 = { ...DEFAULT_RULES, max_discount_pct: 5 };
+  assert.deepEqual(checkReply("Posso fazer 5% de desconto à vista", ok5), []);
+  assert.ok(checkReply("Faço 8% de desconto", ok5).some((x) => x.includes("acima")));
+});
+
+test("filtro da IA: com preço liberado só aceita valores das informações", () => {
+  const r = { ...DEFAULT_RULES, price_policy: "liberado" as const, knowledge: "MT-03 a partir de R$ 33.990\nFazer 250: R$ 22.490,00" };
+  assert.deepEqual(checkReply("A MT-03 sai a partir de R$ 33.990.", r), []);
+  assert.deepEqual(checkReply("A Fazer está R$ 22.490", r), []);
+  assert.ok(checkReply("A MT-03 sai por R$ 31.500", r).some((x) => x.includes("31.500")));
+});
+
+test("regras da IA: prompt, padrão e horário", () => {
+  const r = withDefaults({ goal: "pre_atendimento", forbidden_topics: ["juros"], required_questions: ["Qual modelo?"] });
+  assert.equal(r.price_policy, "proibido");
+  const p = rulesPrompt(r);
+  assert.match(p, /PRÉ-ATENDIMENTO/);
+  assert.match(p, /juros/);
+  assert.match(p, /1\. Qual modelo\?/);
+  const h = { ...r, hours: { ...r.hours, enabled: true, days: [1, 2, 3, 4, 5], start: "08:00", end: "18:00" } };
+  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-26T13:00:00Z")), true);
+  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-26T23:00:00Z")), false);
+  assert.equal(withinHours(h, "America/Fortaleza", new Date("2026-10-25T13:00:00Z")), false);
+});

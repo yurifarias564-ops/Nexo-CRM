@@ -11,6 +11,7 @@ import { transcribe } from "@/lib/voice";
 import { loadChannel } from "@/lib/whatsapp";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
+import { checkReply, rulesPrompt, stripEmojis, withDefaults, withinHours, type Rules } from "./rules";
 import { defaultModel, KEY_ENV, runWithTools, type AiProvider, type ChatTurn, type ToolCall, type ToolDef } from "./llm";
 
 // Agente de IA que atende no WhatsApp em nome da empresa.
@@ -19,18 +20,18 @@ export interface AgentRow {
   id: string; organization_id: string; enabled: boolean; enabled_at: string | null; name: string;
   provider: AiProvider; model: string | null; prompt: string; channel_ids: string[] | null;
   start_mode: "new_leads" | "all"; reply_delay_seconds: number; pause_on_human: boolean; pause_hours: number;
-  auto_tags: boolean; transcribe_audio: boolean; time_zone: string; tone: Tone;
+  auto_tags: boolean; transcribe_audio: boolean; time_zone: string; tone: Tone; rules: Rules;
 }
 
 export const AGENT_DEFAULTS: Omit<AgentRow, "id" | "organization_id"> = {
   enabled: false, enabled_at: null, name: "Assistente", provider: "claude", model: null, prompt: "", channel_ids: null,
   start_mode: "new_leads", reply_delay_seconds: 8, pause_on_human: true, pause_hours: 12, auto_tags: true, transcribe_audio: true,
-  time_zone: "America/Sao_Paulo", tone: "executivo",
+  time_zone: "America/Sao_Paulo", tone: "executivo", rules: withDefaults(null),
 };
 
 export async function loadAgent(orgId: string): Promise<AgentRow | null> {
   const { data } = await supabaseAdmin().from("ai_agents").select("*").eq("organization_id", orgId).maybeSingle();
-  return (data as AgentRow | null) ?? null;
+  return data ? ({ ...(data as AgentRow), rules: withDefaults((data as { rules?: unknown }).rules) }) : null;
 }
 
 /** Chave da própria empresa ou, se não houver, a da plataforma. */
@@ -68,7 +69,7 @@ const TONE_RULES: Record<Tone, string> = {
   ].join("\n"),
 };
 
-export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zone" | "auto_tags"> & { tone?: Tone }, orgName: string, lead: LeadCtx, sellers: string[]): string {
+export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zone" | "auto_tags"> & { tone?: Tone; rules?: Rules }, orgName: string, lead: LeadCtx, sellers: string[], extra = ""): string {
   const company = agent.prompt.trim() || "(A empresa ainda não escreveu instruções. Atenda com excelência, entenda a necessidade do cliente e transfira para um vendedor.)";
   const tone = TONE_RULES[agent.tone ?? "executivo"];
   return [
@@ -76,6 +77,9 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
     "",
     "## Instruções da empresa (prioridade máxima — siga à risca)",
     company,
+    "",
+    agent.rules ? rulesPrompt(agent.rules) : "",
+    extra ? `\n${extra}` : "",
     "",
     "## Postura e tom",
     tone,
@@ -157,7 +161,8 @@ export type Effect =
   | { kind: "stage"; name: string }
   | { kind: "value"; value: number }
   | { kind: "appointment"; when: string; title: string }
-  | { kind: "handoff"; reason: string; seller: string | null };
+  | { kind: "handoff"; reason: string; seller: string | null }
+  | { kind: "filter"; reasons: string[]; outcome: "corrigida" | "bloqueada" };
 
 const cleanTag = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
 
@@ -364,6 +369,34 @@ export function splitReply(text: string): string[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export const SAFE_FALLBACK = "Vou confirmar essa informação com o nosso especialista, que dará continuidade ao seu atendimento em instantes.";
+
+/**
+ * Gera a resposta e passa pelo filtro de regras. Se violar, pede para a IA reescrever (sem repetir ações);
+ * se ainda violar, a resposta é bloqueada: vai uma mensagem segura e o atendimento passa para a equipe.
+ */
+async function generateGuarded(p: {
+  agent: AgentRow; model: string; key: string; system: string; history: ChatTurn[]; exec: (n: string, a: Record<string, unknown>) => Promise<string>; effects: Effect[];
+}): Promise<{ text: string; calls: ToolCall[]; blocked: string[] | null }> {
+  const rules = p.agent.rules;
+  const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: TOOLS, exec: p.exec });
+  let text = rules.emojis ? out.text : stripEmojis(out.text);
+  let reasons = checkReply(text, rules);
+  if (!reasons.length) return { text, calls: out.calls, blocked: null };
+
+  const fix = `## CORREÇÃO OBRIGATÓRIA\nSua resposta anterior foi BLOQUEADA pelo filtro da empresa porque: ${reasons.join("; ")}.\nResposta bloqueada: «${text.slice(0, 1500)}»\nReescreva a resposta ao cliente cumprindo TODAS as regras. Não cite valores, palavras ou assuntos proibidos.`;
+  const again = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: `${p.system}\n\n${fix}`, history: p.history, tools: [], exec: p.exec, maxRounds: 1 });
+  text = rules.emojis ? again.text : stripEmojis(again.text);
+  const still = checkReply(text, rules);
+  if (!still.length && text.trim()) {
+    p.effects.push({ kind: "filter", reasons, outcome: "corrigida" });
+    return { text, calls: out.calls, blocked: null };
+  }
+  reasons = still.length ? still : reasons;
+  p.effects.push({ kind: "filter", reasons, outcome: "bloqueada" });
+  return { text: SAFE_FALLBACK, calls: out.calls, blocked: reasons };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Atendimento real
 // ---------------------------------------------------------------------------------------------
@@ -386,6 +419,11 @@ export async function respondToConversation(conversationId: string, triggerMessa
     await db.from("conversations").update({ ai_state: "auto", ai_paused_until: null }).eq("id", conv.id);
   }
 
+  // Horário de atendimento
+  const rules = agent.rules;
+  const inHours = withinHours(rules, agent.time_zone);
+  if (!inHours && rules.hours.mode === "silencio") return;
+
   await sleep(agent.reply_delay_seconds * 1000);
 
   // Só a última mensagem do cliente dispara; se alguém da equipe respondeu, a IA não entra
@@ -396,6 +434,31 @@ export async function respondToConversation(conversationId: string, triggerMessa
 
   const { data: locked } = await db.rpc("ai_try_lock", { p_conv: conv.id, p_seconds: 120 });
   if (!locked) return;
+
+  // Fora do horário, modo "só mensagem": avisa uma vez e para
+  if (!inHours && rules.hours.mode === "so_mensagem") {
+    try {
+      const { data: c } = await db.from("conversations").select("ai_offhours_sent_at").eq("id", conv.id).maybeSingle();
+      const lastSent = c?.ai_offhours_sent_at ? new Date(c.ai_offhours_sent_at).getTime() : 0;
+      if (rules.hours.off_message.trim() && Date.now() - lastSent > 10 * 3600_000) {
+        await sendAiText(conv.organization_id, conv.id, rules.hours.off_message.trim().slice(0, 1000));
+        await db.from("conversations").update({ ai_offhours_sent_at: new Date().toISOString() }).eq("id", conv.id);
+      }
+    } finally {
+      await db.from("conversations").update({ ai_lock_until: null }).eq("id", conv.id);
+    }
+    return;
+  }
+
+  // Limite de respostas da IA por conversa: passou do limite, a equipe assume
+  if (rules.max_ai_replies > 0) {
+    const { count } = await db.from("messages").select("id", { count: "exact", head: true }).eq("conversation_id", conv.id).eq("by_ai", true);
+    if ((count ?? 0) >= rules.max_ai_replies) {
+      await db.from("conversations").update({ ai_state: "paused", ai_paused_until: null, ai_lock_until: null }).eq("id", conv.id);
+      if (conv.lead_id) await db.from("activities").insert({ organization_id: conv.organization_id, lead_id: conv.lead_id, actor_id: null, type: "ai_handoff", payload: { reason: `limite de ${rules.max_ai_replies} respostas da IA atingido`, seller: null } });
+      return;
+    }
+  }
 
   const started = Date.now();
   const model = agent.model || defaultModel(agent.provider);
@@ -427,18 +490,23 @@ export async function respondToConversation(conversationId: string, triggerMessa
     };
     const effects: Effect[] = [];
     const exec = makeExec({ live: true, db, orgId: conv.organization_id, leadId: l?.id ?? null, conversationId: conv.id, agent, stages, sellers: team, leadSeller: l?.assigned_to ?? null, existingTags: [...tags], effects });
-    const out = await runWithTools({
-      provider: agent.provider, model, apiKey: key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name)),
-      history: toHistory(msgs), tools: TOOLS, exec,
+    const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento. Não prometa retorno imediato do vendedor." : "";
+    const out = await generateGuarded({
+      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote), history: toHistory(msgs), exec, effects,
     });
     calls = out.calls;
+    if (out.blocked) {
+      // Resposta barrada pelo filtro: mensagem segura + equipe assume
+      await db.from("conversations").update({ ai_state: "paused", ai_paused_until: null }).eq("id", conv.id);
+      if (l) await db.from("activities").insert({ organization_id: conv.organization_id, lead_id: l.id, actor_id: null, type: "ai_handoff", payload: { reason: `filtro bloqueou a resposta: ${out.blocked.join("; ")}`, seller: null } });
+    }
 
     const parts = splitReply(out.text);
     for (let i = 0; i < parts.length; i++) {
       if (i) await sleep(1200);
       await sendAiText(conv.organization_id, conv.id, parts[i]!.slice(0, 4000));
     }
-    await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: l?.id ?? null, provider: agent.provider, model, status: "ok", reply: out.text.slice(0, 8000), tools: calls, ms: Date.now() - started });
+    await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: l?.id ?? null, provider: agent.provider, model, status: "ok", reply: out.text.slice(0, 8000), tools: [...calls, ...effects.filter((e) => e.kind === "filter").map((e) => ({ name: "filtro", args: e, result: "" }))], ms: Date.now() - started });
   } catch (e) {
     console.error("[ia] resposta", e);
     await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: conv.lead_id, provider: agent.provider, model, status: "error", tools: calls, error: (e as Error).message?.slice(0, 1000), ms: Date.now() - started });
@@ -452,7 +520,7 @@ export async function respondToConversation(conversationId: string, triggerMessa
 // ---------------------------------------------------------------------------------------------
 
 export interface TestInput {
-  agent: Pick<AgentRow, "name" | "prompt" | "provider" | "model" | "auto_tags" | "time_zone" | "tone">;
+  agent: Pick<AgentRow, "name" | "prompt" | "provider" | "model" | "auto_tags" | "time_zone" | "tone" | "rules">;
   history: ChatTurn[];
   lead: { name: string; tags: string[]; memory: string[]; summary: string | null; stage: string | null; value: number };
 }
@@ -474,6 +542,13 @@ export async function testAgent(orgId: string, i: TestInput) {
   const ctx: LeadCtx = { name: i.lead.name, phone: null, stage: i.lead.stage ?? stages[0]?.name ?? null, stages: stages.map((s) => s.name), tags: i.lead.tags, value: i.lead.value, memory: i.lead.memory, summary: i.lead.summary, seller: null };
   const model = agent.model || defaultModel(agent.provider);
   const started = Date.now();
-  const out = await runWithTools({ provider: agent.provider, model, apiKey: key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name)), history: i.history, tools: TOOLS, exec });
-  return { messages: splitReply(out.text), effects, calls: out.calls, model, ms: Date.now() - started };
+  agent.rules = withDefaults(i.agent.rules);
+  const inHours = withinHours(agent.rules, agent.time_zone);
+  if (!inHours && agent.rules.hours.mode !== "responder_avisando") {
+    const msg = agent.rules.hours.mode === "so_mensagem" ? agent.rules.hours.off_message.trim() : "";
+    return { messages: msg ? [msg] : [], effects, calls: [], model, ms: 0, offHours: agent.rules.hours.mode };
+  }
+  const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento." : "";
+  const out = await generateGuarded({ agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote), history: i.history, exec, effects });
+  return { messages: splitReply(out.text), effects, calls: out.calls, model, ms: Date.now() - started, offHours: null };
 }

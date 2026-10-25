@@ -95,7 +95,7 @@ async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
   let thinking = i.think !== false;
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
     // Raciocínio antes de responder (qualidade de atendimento); se o modelo não aceitar, segue sem
-    const base = { model: i.model, system: i.system, messages, tools };
+    const base = { model: i.model, system: i.system, messages, ...(tools.length ? { tools } : {}) };
     let data: Record<string, unknown>;
     try {
       data = thinking
@@ -144,7 +144,7 @@ async function runGemini(i: RunInput, calls: ToolCall[]): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(i.model)}:generateContent`;
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
     const data = await post(url, { "x-goog-api-key": i.apiKey }, {
-      systemInstruction: { parts: [{ text: i.system }] }, contents, tools,
+      systemInstruction: { parts: [{ text: i.system }] }, contents, ...(i.tools.length ? { tools } : {}),
       generationConfig: { maxOutputTokens: i.maxTokens ?? 1200 },
     }, "Gemini");
     const cand = ((data.candidates ?? []) as { content?: { role?: string; parts?: { text?: string; thought?: boolean; functionCall?: { name: string; args?: unknown } }[] } }[])[0];
@@ -170,7 +170,7 @@ async function runGroq(i: RunInput, calls: ToolCall[]): Promise<string> {
   const tools = i.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
   for (let round = 0; round < (i.maxRounds ?? 5); round++) {
     const data = await post("https://api.groq.com/openai/v1/chat/completions", { Authorization: `Bearer ${i.apiKey}` },
-      { model: i.model, messages, tools, tool_choice: "auto", max_tokens: i.maxTokens ?? 1200 }, "Groq");
+      { model: i.model, messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}), max_tokens: i.maxTokens ?? 1200 }, "Groq");
     const msg = ((data.choices ?? []) as { message?: { content?: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[])[0]?.message;
     const tcs = msg?.tool_calls ?? [];
     if (!tcs.length) return (msg?.content ?? "").trim();

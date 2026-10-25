@@ -6,6 +6,7 @@ import { envOptional } from "@/lib/env";
 import { isValidTimeZone } from "@/lib/time";
 import { AGENT_DEFAULTS, loadAgent } from "@/lib/ai/agent";
 import { KEY_ENV, MODELS, type AiProvider } from "@/lib/ai/llm";
+import { Rules } from "@/lib/ai/rules";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,7 @@ const Body = z.object({
   pause_hours: z.number().int().min(1).max(720),
   auto_tags: z.boolean(),
   tone: z.enum(["executivo", "consultivo", "proximo"]),
+  rules: Rules,
   transcribe_audio: z.boolean(),
   time_zone: z.string().max(64).refine(isValidTimeZone, "Fuso horário inválido"),
 });

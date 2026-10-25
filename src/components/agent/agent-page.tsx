@@ -1,18 +1,20 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Brain, CreditCard, KeyRound, Plug, RotateCcw, Send, Sparkles, Tag as TagIcon, Trash2, Activity, Settings2, FlaskConical } from "lucide-react";
+import { Bot, Brain, CreditCard, KeyRound, Plug, RotateCcw, Send, Sparkles, Tag as TagIcon, Trash2, Activity, Settings2, FlaskConical, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Spinner } from "@/components/ui/misc";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { cn, relativeTime } from "@/lib/utils";
+import { RulesTab } from "./rules-tab";
+import { withDefaults, type Rules } from "@/lib/ai/rules";
 
 type Provider = "claude" | "gemini" | "groq";
 interface Agent {
   enabled: boolean; name: string; provider: Provider; model: string | null; prompt: string; channel_ids: string[] | null;
   start_mode: "new_leads" | "all"; reply_delay_seconds: number; pause_on_human: boolean; pause_hours: number;
-  auto_tags: boolean; transcribe_audio: boolean; time_zone: string; tone: Tone;
+  auto_tags: boolean; transcribe_audio: boolean; time_zone: string; tone: Tone; rules: Rules;
 }
 type Tone = "executivo" | "consultivo" | "proximo";
 interface KeyInfo { own: boolean; ownHint: string | null; platform: boolean }
@@ -27,6 +29,7 @@ const PROVIDERS: { id: Provider; label: string; note: string; keyUrl: string }[]
 
 const TABS = [
   { id: "config", label: "Configuração", icon: Settings2 },
+  { id: "rules", label: "Regras e filtros", icon: ShieldCheck },
   { id: "test", label: "Testar", icon: FlaskConical },
   { id: "memory", label: "Memória", icon: Brain },
   { id: "activity", label: "Atividade", icon: Activity },
@@ -95,8 +98,25 @@ export function AgentPage() {
   const agent = draft ?? cfg?.agent ?? null;
   const dirty = Boolean(draft && cfg && JSON.stringify(draft) !== JSON.stringify(pick(cfg.agent)));
 
+  const [busy, setBusy] = useState(false);
+
   if (!cfg || !agent) return <div className="flex h-full items-center justify-center"><Spinner /></div>;
   const set = (p: Partial<Agent>) => setDraft({ ...pick(agent), ...p });
+  const setRules = (p: Partial<Rules>) => set({ rules: { ...pick(agent).rules, ...p } });
+
+  async function save() {
+    const body = pick(agent!);
+    if (body.enabled && !cfg!.keys[body.provider].own && !cfg!.keys[body.provider].platform) { toast.error("Cadastre a chave da IA escolhida antes de ligar o agente."); return; }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/ai/agent", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setCfg({ ...cfg!, agent: { ...data.agent, rules: withDefaults(data.agent.rules) } });
+      setDraft(null);
+      toast.success(body.enabled ? "Agente salvo e atendendo" : "Agente salvo");
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -121,11 +141,18 @@ export function AgentPage() {
           ))}
         </div>
 
-        {tab === "config" && <ConfigTab cfg={cfg} agent={agent} set={set} dirty={dirty} onSaved={(a) => { setCfg({ ...cfg, agent: a }); setDraft(null); }} reloadKeys={load} />}
+        {tab === "config" && <ConfigTab cfg={cfg} agent={agent} set={set} dirty={dirty} save={save} busy={busy} reloadKeys={load} />}
+        {tab === "rules" && <RulesTab rules={pick(agent).rules} set={setRules} />}
         {tab === "test" && <TestTab agent={agent} keys={cfg.keys} />}
         {tab === "memory" && <MemoryTab />}
         {tab === "activity" && <ActivityTab />}
         {tab === "credit" && <Soon title="Análise de crédito" text="Na próxima etapa: a IA pede o CPF com o consentimento do cliente, consulta no sistema de crédito da loja (bureau, banco ou correspondente) e, se aprovar, passa para o vendedor com o resultado. Terá um teste para conferir com o seu próprio CPF." />}
+        {dirty && (tab === "config" || tab === "rules") && (
+          <div className="sticky bottom-3 z-10 flex items-center justify-end gap-2 rounded-xl border border-brand-400/30 bg-ink-850/95 p-3 shadow-xl backdrop-blur">
+            <span className="mr-auto text-sm text-slate-300">Alterações não salvas — dá para testar antes na aba Testar.</span>
+            <Button onClick={() => void save()} loading={busy}>Salvar</Button>
+          </div>
+        )}
         {tab === "api" && <Soon title="API aberta" text="Na próxima etapa: chave de API por empresa e avisos automáticos (webhooks) para ligar o agente e o CRM a outros sistemas — estoque, ERP, site, planilhas." />}
       </div>
     </div>
@@ -133,8 +160,8 @@ export function AgentPage() {
 }
 
 function pick(a: Agent): Agent {
-  const { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone, tone } = a;
-  return { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone, tone: tone ?? "executivo" };
+  const { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone, tone, rules } = a;
+  return { enabled, name, provider, model, prompt, channel_ids, start_mode, reply_delay_seconds, pause_on_human, pause_hours, auto_tags, transcribe_audio, time_zone, tone: tone ?? "executivo", rules: withDefaults(rules) };
 }
 
 function Soon({ title, text }: { title: string; text: string }) {
@@ -158,25 +185,11 @@ function Toggle({ on, onChange, label, hint }: { on: boolean; onChange: (v: bool
   );
 }
 
-function ConfigTab({ cfg, agent, set, dirty, onSaved, reloadKeys }: {
-  cfg: Config; agent: Agent; set: (p: Partial<Agent>) => void; dirty: boolean; onSaved: (a: Agent) => void; reloadKeys: () => Promise<void>;
+function ConfigTab({ cfg, agent, set, dirty, save, busy, reloadKeys }: {
+  cfg: Config; agent: Agent; set: (p: Partial<Agent>) => void; dirty: boolean; save: () => Promise<void>; busy: boolean; reloadKeys: () => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
   const key = cfg.keys[agent.provider];
   const hasKey = key.own || key.platform;
-
-  async function save(override?: Partial<Agent>) {
-    const body = { ...pick(agent), ...override };
-    if (body.enabled && !cfg.keys[body.provider].own && !cfg.keys[body.provider].platform) return toast.error("Cadastre a chave da IA escolhida antes de ligar o agente.");
-    setBusy(true);
-    try {
-      const res = await fetch("/api/ai/agent", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      onSaved(data.agent);
-      toast.success(body.enabled ? "Agente salvo e atendendo" : "Agente salvo");
-    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
-  }
 
   return (
     <div className="space-y-5">
@@ -282,12 +295,6 @@ function ConfigTab({ cfg, agent, set, dirty, onSaved, reloadKeys }: {
         </div>
       </section>
 
-      {dirty && (
-        <div className="sticky bottom-3 flex items-center justify-end gap-2 rounded-xl border border-brand-400/30 bg-ink-850/95 p-3 shadow-xl backdrop-blur">
-          <span className="mr-auto text-sm text-slate-300">Alterações não salvas — dá para testar antes na aba Testar.</span>
-          <Button onClick={() => void save()} loading={busy}>Salvar</Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -331,7 +338,8 @@ function KeyBox({ provider, info, onChange }: { provider: Provider; info: KeyInf
 type Effect =
   | { kind: "tag_add"; name: string } | { kind: "tag_remove"; name: string } | { kind: "memory"; facts: string[] }
   | { kind: "summary"; text: string } | { kind: "stage"; name: string } | { kind: "value"; value: number }
-  | { kind: "appointment"; when: string; title: string } | { kind: "handoff"; reason: string; seller: string | null };
+  | { kind: "appointment"; when: string; title: string } | { kind: "handoff"; reason: string; seller: string | null }
+  | { kind: "filter"; reasons: string[]; outcome: "corrigida" | "bloqueada" };
 type TMsg = { role: "user" | "assistant"; text: string; effects?: Effect[]; meta?: string; error?: boolean };
 interface SimLead { name: string; tags: string[]; memory: string[]; summary: string | null; stage: string | null; value: number }
 
@@ -345,6 +353,7 @@ function effectLabel(e: Effect): string {
     case "value": return `💰 Valor R$ ${e.value.toLocaleString("pt-BR")}`;
     case "appointment": return `📅 Agendou: ${e.title} (${e.when})`;
     case "handoff": return `🙋 Transferiu para ${e.seller ?? "um vendedor"}: ${e.reason}`;
+    case "filter": return e.outcome === "corrigida" ? `🛡️ Filtro corrigiu a resposta (${e.reasons.join("; ")})` : `🛡️ Filtro BLOQUEOU a resposta (${e.reasons.join("; ")}) — enviou mensagem segura e passou para a equipe`;
   }
 }
 
@@ -370,7 +379,7 @@ function TestTab({ agent, keys }: { agent: Agent; keys: Record<Provider, KeyInfo
       const history = next.filter((m) => !m.error).map((m) => ({ role: m.role, text: m.text }));
       const res = await fetch("/api/ai/test", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent: { name: agent.name, prompt: agent.prompt, provider: agent.provider, model: agent.model, auto_tags: agent.auto_tags, tone: agent.tone, time_zone: agent.time_zone }, history, lead }),
+        body: JSON.stringify({ agent: { name: agent.name, prompt: agent.prompt, provider: agent.provider, model: agent.model, auto_tags: agent.auto_tags, tone: agent.tone, time_zone: agent.time_zone, rules: withDefaults(agent.rules) }, history, lead }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -387,7 +396,8 @@ function TestTab({ agent, keys }: { agent: Agent; keys: Record<Provider, KeyInfo
       }
       setLead(l);
       const parts = (data.messages as string[]).length ? (data.messages as string[]) : [""];
-      const meta = `${data.model} · ${(data.ms / 1000).toFixed(1)}s`;
+      if (data.offHours) toast.message(data.offHours === "silencio" ? "Fora do horário: a IA ficaria em silêncio (regra de horário)." : "Fora do horário: a IA só enviaria o aviso de horário.");
+      const meta = data.offHours ? "fora do horário" : `${data.model} · ${(data.ms / 1000).toFixed(1)}s`;
       setMsgs((cur) => [...cur, ...parts.map((p, i) => ({ role: "assistant" as const, text: p, effects: i === parts.length - 1 ? effects : undefined, meta: i === parts.length - 1 ? meta : undefined }))]);
     } catch (e) {
       setMsgs((cur) => [...cur, { role: "assistant", text: `⚠️ ${(e as Error).message}`, error: true }]);
