@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/misc";
 import { Logo } from "@/components/logo";
 import type { Brand } from "@/lib/branding/shared";
+import { queueIntro } from "@/components/intro/intro";
 import { cn } from "@/lib/utils";
 
 type Mode = "login" | "signup" | "forgot";
@@ -37,6 +38,7 @@ export function LoginForm({ brand }: { brand?: Brand }) {
       if (mode === "login") {
         const { error } = await sb.auth.signInWithPassword({ email, password: pass });
         if (error) throw new Error(error.message === "Invalid login credentials" ? "E-mail ou senha incorretos" : error.message);
+        queueIntro();
         router.replace(safeNext(params.get("next")));
         router.refresh();
       } else if (mode === "signup") {

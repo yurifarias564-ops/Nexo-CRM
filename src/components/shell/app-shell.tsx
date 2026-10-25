@@ -2,12 +2,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Target, Handshake } from "lucide-react";
+import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Target, Handshake, PlayCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { Avatar } from "@/components/ui/misc";
 import { Logo } from "@/components/logo";
+import { Intro, replayIntro } from "@/components/intro/intro";
 import { VoiceCommand } from "@/components/voice/voice-command";
 import { CallProvider } from "@/components/calls/call-provider";
 import { VoipProvider } from "@/components/calls/voip-provider";
@@ -117,6 +118,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <p className="truncate text-sm font-medium text-slate-100">{ws.userName}</p>
               <p className="text-xs capitalize text-slate-500">{ws.role === "owner" ? "Proprietário" : ws.role === "admin" ? "Administrador" : "Vendedor"}</p>
             </div>
+            <button onClick={replayIntro} className="rounded-md p-1.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200" aria-label="Ver apresentação" title="Ver apresentação">
+              <PlayCircle className="h-4 w-4" />
+            </button>
             <button onClick={logout} className="rounded-md p-1.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200" aria-label="Sair" title="Sair">
               <LogOut className="h-4 w-4" />
             </button>
@@ -140,6 +144,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex shrink-0 items-center gap-2"><AssistantButton /><VoiceCommand /></div>
         </header>
         <ConnectionAlert />
+        <Intro />
         {ws.supportMode && <SupportBar orgId={ws.orgId} orgName={ws.orgName} />}
         <main className="min-h-0 flex-1 overflow-hidden"><CallProvider><VoipProvider>{children}</VoipProvider></CallProvider></main>
       </div>
