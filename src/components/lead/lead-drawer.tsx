@@ -206,6 +206,21 @@ export function LeadDrawer({
       return <>{who} moveu de <b className="text-slate-300">{from}</b> <ArrowRight className="inline h-3 w-3" /> <b className="text-slate-300">{to}</b></>;
     }
     if (a.type === "lead_created") return <>{who} criou o lead</>;
+    if (a.type === "credit_banks" || (a.type === "credit_check" && Array.isArray(a.payload.banks) && (a.payload.banks as unknown[]).length)) {
+      const banks = (a.payload.banks ?? []) as { banco: string; status: string; parcela: number | null; prazo: number | null; taxa: number | null }[];
+      const st = String(a.payload.status);
+      const color = st === "aprovado" ? "text-emerald-300" : st === "reprovado" ? "text-red-300" : "text-amber-300";
+      return <>🏦 {a.type === "credit_banks" ? "Resposta dos bancos" : "Ficha enviada aos bancos"}: <b className={color}>{String(a.payload.label ?? st)}</b>
+        {banks.map((b) => <span key={b.banco} className="block text-xs text-slate-400">· {b.banco}: {b.status === "aprovado" ? "aprovado" : b.status === "reprovado" ? "não aprovado" : "em análise"}{b.parcela ? ` · ${b.prazo ? `${b.prazo}x ` : ""}${Number(b.parcela).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}{b.taxa ? ` · ${b.taxa}% a.m.` : ""}</span>)}</>;
+    }
+    if (a.type === "credit_check") {
+      const st = String(a.payload.status);
+      const color = st === "aprovado" ? "text-emerald-300" : st === "reprovado" ? "text-red-300" : "text-amber-300";
+      const brl = (v: unknown) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      return <>💳 Análise de crédito pela IA: <b className={color}>{String(a.payload.label ?? st)}</b>{a.payload.score != null ? ` · score ${String(a.payload.score)}` : ""}
+        {Number(a.payload.installment) > 0 ? <> · {String(a.payload.months)}x de ~{brl(a.payload.installment)} (entrada {brl(a.payload.down_payment)}{a.payload.income_pct != null ? `, ${String(a.payload.income_pct)}% da renda` : ""})</> : null}
+        <span className="text-slate-500"> · CPF {String(a.payload.cpf ?? "")}</span></>;
+    }
     if (a.type === "ai_handoff") return <>🤖 A IA passou o atendimento {a.payload.seller ? <>para <b className="text-slate-300">{String(a.payload.seller)}</b></> : "para a equipe"}{a.payload.reason ? <span className="text-slate-300"> — {String(a.payload.reason)}</span> : null}</>;
     if (a.type === "appointment_created") return <>{who} agendou <b className="text-slate-300">{String(a.payload.title ?? "")}</b> para {formatWhen(String(a.payload.starts_at), Intl.DateTimeFormat().resolvedOptions().timeZone)}</>;
     if (a.type === "appointment_canceled") return <>{who} cancelou <b className="text-slate-300">{String(a.payload.title ?? "")}</b></>;

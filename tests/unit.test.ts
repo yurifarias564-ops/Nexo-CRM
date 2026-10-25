@@ -736,3 +736,70 @@ test("automações: variáveis, palavras-chave, espera e modelos", () => {
     assert.ok(AutomationBody.safeParse({ ...t.body, steps, enabled: false }).success, t.id);
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Análise de crédito
+// ---------------------------------------------------------------------------------------------
+import { bankStatus, CREDIT_DEFAULTS, CreditSettings as CreditSettingsSchema, customerGuidance, decide, installment as creditInstallment, isCpf, maskCpf, overallFromBanks, parseBanks } from "@/lib/credit/shared";
+
+test("crédito: CPF, máscara e parcela (tabela Price)", () => {
+  assert.equal(isCpf("529.982.247-25"), true);
+  assert.equal(isCpf("111.111.111-11"), false);
+  assert.equal(isCpf("123"), false);
+  assert.equal(maskCpf("52998224725"), "***.982.247-**");
+  assert.equal(creditInstallment(30000, 0, 30), 1000);
+  assert.equal(creditInstallment(30000, 2, 48), 978.06); // 600 / (1 - 1,02^-48)
+  assert.equal(creditInstallment(0, 2, 48), 0);
+});
+
+test("crédito: regra da loja (score + parcela x renda)", () => {
+  const s = { ...CREDIT_DEFAULTS, min_score: 600, review_score: 400, max_income_pct: 30, monthly_rate: 2 };
+  const input = { cpf: "52998224725", income: 6000, vehicle_value: 35000, down_payment: 5000, months: 48 };
+  const none = { band: null, capacity: null, status: null, reasons: [] };
+  assert.equal(decide(s, input, { ...none, score: 720 }).status, "aprovado");
+  assert.equal(decide(s, input, { ...none, score: 500 }).status, "analise");
+  assert.equal(decide(s, input, { ...none, score: 300 }).status, "reprovado");
+  assert.equal(decide(s, input, { ...none, score: null }).status, "analise");
+  // Parcela (~978) acima de 30% de uma renda de 2.000: aprovado vira "em análise"
+  const tight = decide(s, { ...input, income: 2000 }, { ...none, score: 800 });
+  assert.equal(tight.status, "analise");
+  assert.ok(tight.reasons.some((r) => r.includes("% da renda")));
+  // Sistema externo que já decide manda na decisão
+  assert.equal(decide(s, input, { ...none, score: 300, status: "aprovado" }).status, "aprovado");
+});
+
+test("crédito: o que a IA diz ao cliente nunca expõe score nem 'reprovado'", () => {
+  for (const st of ["aprovado", "analise", "reprovado"] as const) {
+    const g = customerGuidance(st, true);
+    assert.ok(/NÃO diga "reprovado"|Não prometa|Não cite score/.test(g), st);
+  }
+  assert.ok(customerGuidance("reprovado", false).includes("melhor alternativa"));
+});
+
+test("crédito: resposta dos bancos em formatos diferentes", () => {
+  const banks = parseBanks({ bancos: [
+    { banco: "Santander", status: "Aprovado", parcela: "1.290,50", taxa: 1.89, prazo: 48 },
+    { bank: "BV", resultado: "recusado", motivo: "renda insuficiente" },
+    { instituicao: "PAN", situacao: "pendente" },
+    { banco: "Itaú", aprovado: true, valor_parcela: 1310.2 },
+  ] });
+  assert.equal(banks.length, 4);
+  assert.deepEqual(banks.map((b) => b.status), ["aprovado", "reprovado", "analise", "aprovado"]);
+  assert.equal(banks[0]!.parcela, 1290.5);
+  assert.equal(banks[3]!.parcela, 1310.2);
+  assert.equal(banks[1]!.mensagem, "renda insuficiente");
+  assert.equal(overallFromBanks(banks), "aprovado");
+  assert.equal(overallFromBanks(banks.filter((b) => b.status === "reprovado")), "reprovado");
+  assert.equal(overallFromBanks([banks[1]!, banks[2]!]), "analise");
+  assert.equal(overallFromBanks([]), null);
+  assert.equal(bankStatus("NÃO"), "reprovado");
+  assert.equal(bankStatus("pré-aprovado"), "aprovado");
+});
+
+test("crédito: configuração exige bancos e endereço na opção Bancos", () => {
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: "https://x.com/api", banks: [] }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: null, banks: ["Santander"] }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: "https://x.com/api", banks: ["Santander", "BV"] }).success, true);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "webhook", webhook_url: "http://x.com" }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, review_score: 700, min_score: 600 }).success, false);
+});

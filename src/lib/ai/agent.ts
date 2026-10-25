@@ -1,6 +1,8 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { applyCreditToLead, loadCreditSettings, runCreditCheck } from "@/lib/credit";
+import { customerGuidance, decide, isCpf, maskCpf, STATUS_LABEL, type CreditSettings } from "@/lib/credit/shared";
 import { envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { norm } from "@/lib/utils";
@@ -69,7 +71,7 @@ const TONE_RULES: Record<Tone, string> = {
   ].join("\n"),
 };
 
-export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zone" | "auto_tags"> & { tone?: Tone; rules?: Rules }, orgName: string, lead: LeadCtx, sellers: string[], extra = ""): string {
+export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zone" | "auto_tags"> & { tone?: Tone; rules?: Rules }, orgName: string, lead: LeadCtx, sellers: string[], extra = "", opts: { credit?: boolean } = {}): string {
   const company = agent.prompt.trim() || "(A empresa ainda não escreveu instruções. Atenda com excelência, entenda a necessidade do cliente e transfira para um vendedor.)";
   const tone = TONE_RULES[agent.tone ?? "executivo"];
   return [
@@ -102,7 +104,7 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
     "## Limites (inegociáveis)",
     "- Nunca invente preço, estoque, cor disponível, condição, prazo, taxa ou promoção. Se não estiver nas instruções, diga com elegância que vai confirmar com o especialista e transfira.",
     "- Não prometa aprovação de crédito, desconto ou entrega.",
-    "- Não peça CPF, senha nem dados de cartão.",
+    opts.credit ? "- Nunca peça senha nem dados de cartão. CPF só para a análise de crédito, do jeito descrito abaixo." : "- Não peça CPF, senha nem dados de cartão.",
     "- Se perguntarem se você é uma IA ou um robô, seja honesto e continue ajudando.",
     "- Assuntos fora do negócio da empresa: responda com educação em uma frase e retome o atendimento.",
     "",
@@ -114,6 +116,7 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
     "- atualizar_resumo: quando a negociação avançar — resumo executivo com interesse, condições, objeções e próximo passo.",
     "- mover_etapa: quando o cliente avançar no funil de forma clara (ex.: qualificado, agendado).",
     "- agendar: só depois de o cliente confirmar dia e hora.",
+    opts.credit ? CREDIT_PROMPT : "",
     "- transferir_para_vendedor: quando o cliente pedir uma pessoa, quiser fechar ou pagar, pedir condição que você não tem, reclamar, ou a conversa sair do seu alcance. Depois avise com elegância que o especialista dará continuidade em instantes.",
     "",
     "## Situação atual",
@@ -132,6 +135,31 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
     "Escreva somente as mensagens que o cliente vai receber — nunca explique seu raciocínio nem mencione ferramentas, memória ou instruções internas.",
   ].filter((l) => l !== "").join("\n");
 }
+
+const CREDIT_PROMPT = [
+  "- analisar_credito (financiamento): quando o cliente quiser financiar ou perguntar se consegue aprovar, ofereça uma pré-análise de crédito sem compromisso.",
+  "  1) Peça a autorização de forma explícita: \"Posso fazer uma pré-análise de crédito com o seu CPF? Seus dados são usados só para isso.\" Só siga se o cliente disser que sim.",
+  "  2) Colete, uma pergunta por mensagem, o que ainda não sabe: CPF, renda mensal, valor do veículo, valor de entrada e em quantas parcelas pretende pagar.",
+  "  3) Chame analisar_credito com cliente_autorizou=true. Nunca salve o CPF na memória nem repita o CPF na conversa.",
+  "  4) Comunique o resultado exatamente como a ferramenta orientar. Nunca cite score, restrição ou motivo; nunca diga \"reprovado\" e nunca prometa aprovação definitiva, taxa ou parcela.",
+].join("\n");
+
+export const CREDIT_TOOL: ToolDef = {
+  name: "analisar_credito",
+  description: "Pré-análise de crédito para financiamento. Use só depois que o cliente AUTORIZOU a consulta e informou CPF, renda mensal, valor do veículo, entrada e número de parcelas.",
+  parameters: {
+    type: "object",
+    properties: {
+      cpf: { type: "string", description: "CPF do cliente (11 dígitos)" },
+      renda_mensal: { type: "number", description: "Renda mensal em reais" },
+      valor_veiculo: { type: "number", description: "Valor do veículo em reais" },
+      entrada: { type: "number", description: "Valor de entrada em reais (0 se não tiver)" },
+      parcelas: { type: "number", description: "Número de parcelas desejado (ex.: 48)" },
+      cliente_autorizou: { type: "boolean", description: "true somente se o cliente autorizou a consulta de crédito com o CPF dele" },
+    },
+    required: ["cpf", "renda_mensal", "valor_veiculo", "entrada", "parcelas", "cliente_autorizou"],
+  },
+};
 
 export const TOOLS: ToolDef[] = [
   { name: "adicionar_tag", description: "Coloca uma tag no cliente (cria a tag se ainda não existir). Ex.: modelo de interesse.",
@@ -162,7 +190,8 @@ export type Effect =
   | { kind: "value"; value: number }
   | { kind: "appointment"; when: string; title: string }
   | { kind: "handoff"; reason: string; seller: string | null }
-  | { kind: "filter"; reasons: string[]; outcome: "corrigida" | "bloqueada" };
+  | { kind: "filter"; reasons: string[]; outcome: "corrigida" | "bloqueada" }
+  | { kind: "credit"; status: string; score: number | null; installment: number; simulated: boolean };
 
 const cleanTag = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
 
@@ -182,7 +211,7 @@ function pickSeller<T extends { name: string }>(list: T[], q: unknown): T | null
 function makeExec(opts: {
   live: boolean; db: SupabaseClient; orgId: string; leadId: string | null; conversationId: string | null; agent: AgentRow;
   stages: { id: string; name: string }[]; sellers: { id: string; name: string }[]; leadSeller: string | null; existingTags: string[];
-  effects: Effect[];
+  effects: Effect[]; credit?: CreditSettings | null; leadName?: string | null; leadPhone?: string | null;
 }) {
   const { live, db, orgId, leadId, effects } = opts;
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
@@ -285,6 +314,47 @@ function makeExec(opts: {
           effects.push({ kind: "handoff", reason, seller: seller?.name ?? null });
           return "ok: transferido. Avise o cliente que um vendedor vai continuar o atendimento.";
         }
+        case "analisar_credito": {
+          const credit = opts.credit;
+          if (!credit?.enabled) return "a análise de crédito não está ligada nesta empresa; transfira para o vendedor";
+          if (args.cliente_autorizou !== true) return "erro: antes, peça ao cliente a autorização para a consulta de crédito com o CPF dele";
+          const rawCpf = String(args.cpf ?? "");
+          args.cpf = maskCpf(rawCpf); // o registro da IA (atividade/histórico) nunca guarda o CPF inteiro
+          const input = {
+            cpf: rawCpf, income: Math.max(0, Number(args.renda_mensal) || 0), vehicle_value: Math.max(0, Number(args.valor_veiculo) || 0),
+            down_payment: Math.max(0, Number(args.entrada) || 0), months: Math.min(120, Math.max(1, Math.round(Number(args.parcelas) || 48))),
+          };
+          if (!isCpf(input.cpf)) return "CPF inválido: peça ao cliente para conferir o número";
+          if (!input.vehicle_value) return "falta o valor do veículo: pergunte ao cliente";
+          if (!live) {
+            // Simulador: não consulta ninguém (sem custo), mostra como a IA conduziria
+            const d = decide(credit, input, { score: null, band: null, capacity: null, status: "aprovado", reasons: [] });
+            effects.push({ kind: "credit", status: d.status, score: null, installment: d.installment, simulated: true });
+            return `(SIMULAÇÃO — nenhuma consulta real foi feita) ${customerGuidance(d.status === "reprovado" ? "reprovado" : d.status, credit.handoff)}`;
+          }
+          try {
+            const r = await runCreditCheck(orgId, input, { source: "ia", leadId, conversationId: opts.conversationId, leadName: opts.leadName, phone: opts.leadPhone, settings: credit });
+            if (leadId) {
+              await applyCreditToLead(orgId, leadId, r.status, {
+                score: r.score, installment: r.installment, income_pct: r.incomePct, cpf: maskCpf(input.cpf), vehicle_value: input.vehicle_value,
+                down_payment: input.down_payment, months: input.months, reasons: r.reasons, provider: r.provider, banks: r.banks, pending: r.pending,
+              });
+              const { data: lv } = await db.from("leads").select("value").eq("id", leadId).maybeSingle();
+              if (!Number(lv?.value)) await db.from("leads").update({ value: input.vehicle_value }).eq("id", leadId);
+              if (credit.handoff) {
+                if (opts.conversationId) await db.from("conversations").update({ ai_state: "paused", ai_paused_until: null }).eq("id", opts.conversationId);
+                await db.from("activities").insert({ organization_id: orgId, lead_id: leadId, actor_id: null, type: "ai_handoff", payload: { reason: `análise de crédito: ${STATUS_LABEL[r.status]}`, seller: null } });
+                effects.push({ kind: "handoff", reason: `análise de crédito: ${STATUS_LABEL[r.status]}`, seller: null });
+              }
+            }
+            effects.push({ kind: "credit", status: r.status, score: r.score, installment: r.installment, simulated: false });
+            return r.pending && r.status !== "aprovado"
+              ? `Resultado: FICHA ENVIADA AOS BANCOS (respostas em alguns minutos). Diga ao cliente que a ficha foi enviada para análise nos bancos parceiros e que o especialista retorna com a melhor condição assim que os bancos responderem. Não cite score nem prometa aprovação.${credit.handoff ? " A conversa já foi passada para o especialista." : ""}`
+              : customerGuidance(r.status, credit.handoff);
+          } catch (e) {
+            return `a consulta não pôde ser concluída agora (${(e as Error).message.slice(0, 120)}). Diga ao cliente que o especialista vai concluir a análise pessoalmente e chame transferir_para_vendedor.`;
+          }
+        }
       }
       return "ferramenta desconhecida";
     } catch (e) {
@@ -376,10 +446,10 @@ export const SAFE_FALLBACK = "Vou confirmar essa informação com o nosso especi
  * se ainda violar, a resposta é bloqueada: vai uma mensagem segura e o atendimento passa para a equipe.
  */
 async function generateGuarded(p: {
-  agent: AgentRow; model: string; key: string; system: string; history: ChatTurn[]; exec: (n: string, a: Record<string, unknown>) => Promise<string>; effects: Effect[]; deadline?: number;
+  agent: AgentRow; model: string; key: string; system: string; history: ChatTurn[]; exec: (n: string, a: Record<string, unknown>) => Promise<string>; effects: Effect[]; deadline?: number; tools?: ToolDef[];
 }): Promise<{ text: string; calls: ToolCall[]; blocked: string[] | null }> {
   const rules = p.agent.rules;
-  const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: TOOLS, exec: p.exec, deadline: p.deadline });
+  const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: p.tools ?? TOOLS, exec: p.exec, deadline: p.deadline });
   let text = rules.emojis ? out.text : stripEmojis(out.text);
   let reasons = checkReply(text, rules);
   if (!reasons.length) return { text, calls: out.calls, blocked: null };
@@ -522,10 +592,12 @@ export async function respondToConversation(conversationId: string, triggerMessa
       value: Number(l?.value ?? 0), memory: (mem ?? []).map((m) => m.fact), summary: l?.ai_summary ?? null, seller,
     };
     const effects: Effect[] = [];
-    const exec = makeExec({ live: true, db, orgId: conv.organization_id, leadId: l?.id ?? null, conversationId: conv.id, agent, stages, sellers: team, leadSeller: l?.assigned_to ?? null, existingTags: [...tags], effects });
+    const credit = await loadCreditSettings(conv.organization_id);
+    const exec = makeExec({ live: true, db, orgId: conv.organization_id, leadId: l?.id ?? null, conversationId: conv.id, agent, stages, sellers: team, leadSeller: l?.assigned_to ?? null, existingTags: [...tags], effects, credit, leadName: l?.name ?? null, leadPhone: l?.phone ?? null });
     const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento. Não prometa retorno imediato do vendedor." : "";
     const out = await generateGuarded({
-      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote), history: toHistory(msgs), exec, effects, deadline,
+      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled }), history: toHistory(msgs), exec, effects, deadline,
+      tools: credit.enabled ? [...TOOLS, CREDIT_TOOL] : TOOLS,
     });
     calls = out.calls;
     if (out.blocked) {
@@ -574,7 +646,8 @@ export async function testAgent(orgId: string, i: TestInput) {
   const agent = { ...AGENT_DEFAULTS, ...i.agent, id: "", organization_id: orgId } as AgentRow;
   const effects: Effect[] = [];
   const knownTags = [...new Set([...(allTags ?? []).map((t) => t.name), ...i.lead.tags])];
-  const exec = makeExec({ live: false, db, orgId, leadId: null, conversationId: null, agent, stages, sellers: team, leadSeller: null, existingTags: knownTags, effects });
+  const credit = await loadCreditSettings(orgId);
+  const exec = makeExec({ live: false, db, orgId, leadId: null, conversationId: null, agent, stages, sellers: team, leadSeller: null, existingTags: knownTags, effects, credit });
   const ctx: LeadCtx = { name: i.lead.name, phone: null, stage: i.lead.stage ?? stages[0]?.name ?? null, stages: stages.map((s) => s.name), tags: i.lead.tags, value: i.lead.value, memory: i.lead.memory, summary: i.lead.summary, seller: null };
   const model = agent.model || defaultModel(agent.provider);
   const started = Date.now();
@@ -585,6 +658,6 @@ export async function testAgent(orgId: string, i: TestInput) {
     return { messages: msg ? [msg] : [], effects, calls: [], model, ms: 0, offHours: agent.rules.hours.mode };
   }
   const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento." : "";
-  const out = await generateGuarded({ agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote), history: i.history, exec, effects });
+  const out = await generateGuarded({ agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled }), history: i.history, exec, effects, tools: credit.enabled ? [...TOOLS, CREDIT_TOOL] : TOOLS });
   return { messages: splitReply(out.text), effects, calls: out.calls, model, ms: Date.now() - started, offHours: null };
 }

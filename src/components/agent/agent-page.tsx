@@ -8,6 +8,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { cn, relativeTime } from "@/lib/utils";
 import { RulesTab } from "./rules-tab";
+import { CreditTab } from "./credit-tab";
 import { withDefaults, type Rules } from "@/lib/ai/rules";
 
 type Provider = "claude" | "gemini" | "groq";
@@ -146,7 +147,7 @@ export function AgentPage() {
         {tab === "test" && <TestTab agent={agent} keys={cfg.keys} />}
         {tab === "memory" && <MemoryTab />}
         {tab === "activity" && <ActivityTab />}
-        {tab === "credit" && <Soon title="Análise de crédito" text="Na próxima etapa: a IA pede o CPF com o consentimento do cliente, consulta no sistema de crédito da loja (bureau, banco ou correspondente) e, se aprovar, passa para o vendedor com o resultado. Terá um teste para conferir com o seu próprio CPF." />}
+        {tab === "credit" && <CreditTab />}
         {dirty && (tab === "config" || tab === "rules") && (
           <div className="sticky bottom-3 z-10 flex items-center justify-end gap-2 rounded-xl border border-brand-400/30 bg-ink-850/95 p-3 shadow-xl backdrop-blur">
             <span className="mr-auto text-sm text-slate-300">Alterações não salvas — dá para testar antes na aba Testar.</span>
@@ -339,7 +340,8 @@ type Effect =
   | { kind: "tag_add"; name: string } | { kind: "tag_remove"; name: string } | { kind: "memory"; facts: string[] }
   | { kind: "summary"; text: string } | { kind: "stage"; name: string } | { kind: "value"; value: number }
   | { kind: "appointment"; when: string; title: string } | { kind: "handoff"; reason: string; seller: string | null }
-  | { kind: "filter"; reasons: string[]; outcome: "corrigida" | "bloqueada" };
+  | { kind: "filter"; reasons: string[]; outcome: "corrigida" | "bloqueada" }
+  | { kind: "credit"; status: string; score: number | null; installment: number; simulated: boolean };
 type TMsg = { role: "user" | "assistant"; text: string; effects?: Effect[]; meta?: string; error?: boolean };
 interface SimLead { name: string; tags: string[]; memory: string[]; summary: string | null; stage: string | null; value: number }
 
@@ -353,6 +355,7 @@ function effectLabel(e: Effect): string {
     case "value": return `💰 Valor R$ ${e.value.toLocaleString("pt-BR")}`;
     case "appointment": return `📅 Agendou: ${e.title} (${e.when})`;
     case "handoff": return `🙋 Transferiu para ${e.seller ?? "um vendedor"}: ${e.reason}`;
+    case "credit": return `💳 Análise de crédito: ${({ aprovado: "pré-aprovado", analise: "em análise", reprovado: "não aprovado" } as Record<string, string>)[e.status] ?? e.status}${e.score != null ? ` · score ${e.score}` : ""}${e.installment ? ` · parcela estimada R$ ${e.installment.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : ""}${e.simulated ? " (simulação, sem consulta real)" : ""}`;
     case "filter": return e.outcome === "corrigida" ? `🛡️ Filtro corrigiu a resposta (${e.reasons.join("; ")})` : `🛡️ Filtro BLOQUEOU a resposta (${e.reasons.join("; ")}) — enviou mensagem segura e passou para a equipe`;
   }
 }

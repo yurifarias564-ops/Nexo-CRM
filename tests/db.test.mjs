@@ -448,5 +448,17 @@ await su("insert into public.automation_runs (organization_id, automation_id, le
 ok("depois que a anterior termina, pode rodar de novo", Number((await su("select count(*) n from public.automation_runs where automation_id=$1", [autoId]))[0].n) === 2);
 await expectError("evento da Meta só aceita situações válidas", () => su("update public.meta_events set status='xx' where lead_id=$1", [leadA]), "23514");
 
+console.log("\n# Análise de crédito");
+await su("insert into public.credit_settings (organization_id, enabled, provider, banks, webhook_url) values ($1,true,'bancos','{Santander,BV}','https://x.com/api')", [orgA]);
+await su("insert into public.credit_secrets (organization_id, credential) values ($1,'chave-teste-123')", [orgA]);
+await su("insert into public.credit_checks (organization_id, lead_id, source, cpf_masked, cpf_hash, provider, status) values ($1,$2,'ia','***.982.247-**','h1','bancos','analise')", [orgA, leadA]);
+ok("dono vê configuração e consultas de crédito", (await as(A, "select * from public.credit_settings")).length === 1 && (await as(A, "select * from public.credit_checks")).length === 1);
+ok("endereço de retorno gerado sozinho (32 caracteres)", /^[0-9a-f]{32}$/.test((await su("select callback_token from public.credit_settings where organization_id=$1", [orgA]))[0].callback_token));
+ok("vendedor não vê consultas de crédito", (await as(C, "select * from public.credit_checks")).length === 0 && (await as(C, "select * from public.credit_settings")).length === 0);
+ok("outra empresa não vê consultas de crédito", (await as(B, "select * from public.credit_checks")).length === 0);
+ok("ninguém lê a chave da ferramenta de crédito pelo banco", (await as(A, "select * from public.credit_secrets")).length === 0);
+await expectError("endereço sem https é recusado", () => su("update public.credit_settings set webhook_url='http://x.com' where organization_id=$1", [orgA]), "23514");
+await expectError("situação de consulta inválida é recusada", () => su("update public.credit_checks set status='talvez' where organization_id=$1", [orgA]), "23514");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);
