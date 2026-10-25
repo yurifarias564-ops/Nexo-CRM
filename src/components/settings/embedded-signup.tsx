@@ -21,7 +21,7 @@ interface FBSdk {
 declare global { interface Window { FB?: FBSdk; fbAsyncInit?: () => void } }
 
 let sdkPromise: Promise<FBSdk> | null = null;
-function loadSdk(): Promise<FBSdk> {
+export function loadSdk(): Promise<FBSdk> {
   if (window.FB) return Promise.resolve(window.FB);
   if (sdkPromise) return sdkPromise;
   sdkPromise = new Promise((resolve, reject) => {

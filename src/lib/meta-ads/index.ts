@@ -40,6 +40,23 @@ async function graph<T = Record<string, unknown>>(url: string, cred: string, ini
   return data;
 }
 
+export interface AdAccountInfo { id: string; name: string; currency: string; status: number; pixels: { id: string; name: string }[] }
+
+/** Contas de anúncios e pixels que a chave enxerga (para escolher depois do "Conectar com o Facebook"). */
+export async function listAssets(cred: string): Promise<{ accounts: AdAccountInfo[]; pages: { id: string; name: string }[] }> {
+  type A = { id: string; name?: string; currency?: string; account_status?: number };
+  const accounts = await pages<A>("me/adaccounts?fields=id,name,currency,account_status&limit=100", cred, 5);
+  const out: AdAccountInfo[] = [];
+  for (const a of accounts.slice(0, 40)) {
+    const px = await pages<{ id: string; name?: string }>(`${a.id}/adspixels?fields=id,name&limit=50`, cred, 2).catch(() => []);
+    out.push({ id: a.id, name: a.name ?? a.id, currency: a.currency ?? "BRL", status: a.account_status ?? 1, pixels: px.map((p) => ({ id: p.id, name: p.name ?? p.id })) });
+  }
+  const pg = await pages<{ id: string; name?: string }>("me/accounts?fields=id,name&limit=100", cred, 3).catch(() => []);
+  // Conta ativa primeiro (status 1 = ativa), depois a que tem pixel
+  out.sort((x, y) => (x.status === 1 ? 0 : 1) - (y.status === 1 ? 0 : 1) || y.pixels.length - x.pixels.length);
+  return { accounts: out, pages: pg.map((p) => ({ id: p.id, name: p.name ?? p.id })) };
+}
+
 /** Confere a chave, a conta de anúncios e o pixel antes de salvar. */
 export async function verify(cred: string, adAccountId: string | null, pixelId: string | null) {
   const out: { account?: { name: string; currency: string; status: number }; pixel?: { name: string } } = {};

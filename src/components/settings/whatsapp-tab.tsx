@@ -9,6 +9,7 @@ import { Empty, Field, Modal, Spinner } from "@/components/ui/misc";
 import { Section } from "./section";
 import { EmbeddedSignup, embeddedSignupReady } from "./embedded-signup";
 import { PlatformMeta } from "./platform-meta";
+import { AdsConnectBanner } from "@/components/campaigns/meta-tab";
 import { cn, formatPhone, relativeTime } from "@/lib/utils";
 import type { Channel } from "@/lib/types";
 import { useLatest } from "@/lib/hooks";
@@ -101,6 +102,7 @@ export function WhatsAppTab() {
         )}
         onEmpty={<Button size="sm" onClick={() => setAdding("choose")}><Plus className="h-3.5 w-3.5" /> Conectar primeiro número</Button>}
       />
+      {channels?.some((c) => c.status === "connected") && <AdsConnectBanner />}
 
       <Modal open={adding === "choose"} onClose={() => setAdding(null)} title="Como deseja conectar?" wide>
         <div className="grid gap-3 sm:grid-cols-3">

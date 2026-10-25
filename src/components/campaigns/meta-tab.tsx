@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Modal, Spinner } from "@/components/ui/misc";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { cn, formatBRL, relativeTime } from "@/lib/utils";
+import { loadSdk } from "@/components/settings/embedded-signup";
+import { META_ADS_CONFIG_ID } from "@/lib/meta-public";
 
 interface Conn { ad_account_id: string | null; ad_account_name: string | null; currency: string; pixel_id: string | null; page_id: string | null; send_purchase: boolean; send_lead: boolean; last_sync_at: string | null; last_error: string | null }
 interface ConnState { conn: Conn | null; hasCred: boolean; credHint: string | null; waba: boolean }
@@ -41,7 +43,7 @@ export function MetaTab() {
 
   if (!st) return <div className="flex justify-center py-16"><Spinner /></div>;
   const connected = Boolean(st.conn?.ad_account_id && st.hasCred);
-  if (!connected) return <ConnectForm st={st} onSaved={() => void load()} />;
+  if (!connected) return <QuickConnect st={st} onDone={() => void load()} />;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -54,7 +56,7 @@ export function MetaTab() {
       <EventsLog />
       {settings && (
         <Modal open onClose={() => setSettings(false)} title="Conexão com o Meta" wide>
-          <ConnectForm st={st} embedded onSaved={() => { setSettings(false); void load(); }} />
+          <ChooseAssets st={st} onSaved={() => { setSettings(false); void load(); }} />
         </Modal>
       )}
     </div>
@@ -62,6 +64,129 @@ export function MetaTab() {
 }
 
 // ------------------------------------------------------------------------------------------------
+
+/** Aviso na tela do WhatsApp: depois de conectar o número, liga os anúncios em 1 clique. */
+export function AdsConnectBanner() {
+  const [st, setSt] = useState<ConnState | null>(null);
+  const load = useCallback(async () => {
+    const r = await fetch("/api/meta/connection");
+    if (r.ok) setSt(await r.json());
+  }, []);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
+  if (!st) return null;
+  if (st.conn?.ad_account_id && st.hasCred) {
+    return (
+      <a href="/campanhas" className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 hover:bg-emerald-500/10">
+        <Zap className="h-4 w-4" /> Anúncios ligados: {st.conn.ad_account_name ?? st.conn.ad_account_id}{st.conn.pixel_id && st.conn.send_purchase ? " · vendas indo para o pixel" : ""} <span className="ml-auto text-xs">Ver métricas →</span>
+      </a>
+    );
+  }
+  return <div className="mt-3"><QuickConnect st={st} onDone={() => void load()} compact /></div>;
+}
+
+/** Botão único: entra com o Facebook e o CRM descobre conta de anúncios, pixel e página sozinho. */
+function QuickConnect({ st, onDone, compact }: { st: ConnState; onDone: () => void; compact?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [manual, setManual] = useState(!META_ADS_CONFIG_ID);
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const FB = await loadSdk();
+      const code = await new Promise<string>((resolve, reject) => {
+        FB.login((r) => (r.authResponse?.code ? resolve(r.authResponse.code) : reject(new Error("Conexão cancelada."))),
+          { config_id: META_ADS_CONFIG_ID, response_type: "code", override_default_response_type: true });
+      });
+      const res = await fetch("/api/meta/oauth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      const s = data.synced as { ads?: number; error?: string };
+      toast.success(`Conectado à conta “${data.account.name}”`, {
+        description: [data.pixel ? `Pixel: ${data.pixel.name} — vendas indo automaticamente` : "Nenhum pixel encontrado nessa conta", s?.ads !== undefined ? `${s.ads} anúncios carregados` : s?.error].filter(Boolean).join(" · "),
+        duration: 8000,
+      });
+      onDone();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-[#1877F2]/40 bg-gradient-to-br from-[#1877F2]/15 to-transparent p-6">
+        <h3 className="text-lg font-semibold text-white">{compact ? "Agora ligue seus anúncios a este número" : "Ligue seus anúncios em 1 clique"}</h3>
+        <p className="mt-1 max-w-2xl text-sm text-slate-300">Entre com o Facebook da empresa e pronto: o CRM encontra sozinho a conta de anúncios, o pixel e a página, puxa investimento, cliques e conversas de cada anúncio, cruza com os leads e as vendas — e passa a enviar cada venda ao pixel para o Meta trazer mais compradores com esse perfil.</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {META_ADS_CONFIG_ID
+            ? <Button onClick={() => void connect()} loading={busy} className="bg-[#1877F2] hover:bg-[#2d86f5]">Conectar com o Facebook</Button>
+            : <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">O botão de 1 clique ainda não foi ativado no servidor (falta o ID da configuração de anúncios do app da Meta). Enquanto isso, use a conexão manual abaixo.</p>}
+          <button onClick={() => setManual((v) => !v)} className="text-xs text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline">{manual ? "Esconder conexão manual" : "Prefiro colar uma chave de acesso"}</button>
+        </div>
+        <ul className="mt-4 grid gap-1 text-xs text-slate-400 sm:grid-cols-3">
+          <li>✓ Sem copiar IDs nem chaves</li><li>✓ Atualiza sozinho a cada hora</li><li>✓ Vendas vão para o pixel automaticamente</li>
+        </ul>
+      </div>
+      {manual && !compact && <ConnectForm st={st} onSaved={onDone} />}
+      {manual && compact && <a href="/campanhas" className="text-xs text-brand-300">Abrir a conexão manual em Campanhas →</a>}
+    </div>
+  );
+}
+
+/** Depois de conectado: trocar conta de anúncios, pixel, página e o que enviar. */
+function ChooseAssets({ st, onSaved }: { st: ConnState; onSaved: () => void }) {
+  const c = st.conn!;
+  const [assets, setAssets] = useState<{ accounts: { id: string; name: string; status: number; pixels: { id: string; name: string }[] }[]; pages: { id: string; name: string }[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [f, setF] = useState({ ad_account_id: c.ad_account_id ?? "", pixel_id: c.pixel_id ?? "", page_id: c.page_id ?? "", send_purchase: c.send_purchase, send_lead: c.send_lead });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void fetch("/api/meta/assets").then(async (r) => { const d = await r.json(); if (r.ok) setAssets(d); else setErr(d.error); });
+  }, []);
+  const acc = assets?.accounts.find((a) => a.id === f.ad_account_id);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/meta/connection", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Conexão atualizada"); onSaved();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+  async function disconnect() {
+    if (!confirm("Desconectar o Meta? Para de enviar vendas ao pixel e de atualizar os anúncios. Os números já carregados continuam.")) return;
+    const res = await fetch("/api/meta/connection", { method: "DELETE" });
+    if (res.ok) { toast.success("Desconectado"); onSaved(); }
+  }
+
+  if (err) return <div className="space-y-3 text-sm"><p className="text-red-300">{err}</p><ConnectForm st={st} embedded onSaved={onSaved} /></div>;
+  if (!assets) return <div className="flex justify-center py-8"><Spinner /></div>;
+  return (
+    <div className="space-y-3 text-sm" data-modal-body>
+      <Field label="Conta de anúncios">
+        <select className="field" value={f.ad_account_id} onChange={(e) => { const a = assets.accounts.find((x) => x.id === e.target.value); setF({ ...f, ad_account_id: e.target.value, pixel_id: a?.pixels[0]?.id ?? "" }); }}>
+          {assets.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.status !== 1 ? " (inativa)" : ""}</option>)}
+        </select>
+      </Field>
+      <Field label="Pixel que recebe as vendas">
+        <select className="field" value={f.pixel_id} onChange={(e) => setF({ ...f, pixel_id: e.target.value })}>
+          <option value="">Nenhum (não enviar eventos)</option>
+          {(acc?.pixels ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Página do Facebook (anúncios de clique para o WhatsApp)">
+        <select className="field" value={f.page_id} onChange={(e) => setF({ ...f, page_id: e.target.value })}>
+          <option value="">Nenhuma</option>
+          {assets.pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </Field>
+      <label className="flex items-center gap-2 text-slate-200"><input type="checkbox" checked={f.send_purchase} onChange={(e) => setF({ ...f, send_purchase: e.target.checked })} /> Enviar cada venda ao pixel (Compra)</label>
+      <label className="flex items-center gap-2 text-slate-200"><input type="checkbox" checked={f.send_lead} onChange={(e) => setF({ ...f, send_lead: e.target.checked })} /> Enviar cada lead de anúncio (Lead)</label>
+      <div className="flex flex-wrap gap-2 pt-2">
+        <Button onClick={() => void save()} loading={busy}>Salvar</Button>
+        <Button variant="danger" onClick={() => void disconnect()}>Desconectar</Button>
+      </div>
+    </div>
+  );
+}
 
 function ConnectForm({ st, onSaved, embedded }: { st: ConnState; onSaved: () => void; embedded?: boolean }) {
   const c = st.conn;
