@@ -69,7 +69,7 @@ function LeadPhoto({ lead }: { lead: Lead }) {
       {badge && (
         badge.img ? (
           <span title={`Origem: ${badge.label}`} aria-label={`Origem: ${badge.label}`}
-            className="absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center overflow-hidden rounded-full bg-white p-[2px] ring-2 ring-ink-800">
+            className={cn("absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center overflow-hidden rounded-full ring-2 ring-ink-800", badge.label === "Instagram" && "bg-white p-[2px]")}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={badge.img} alt="" className={cn("h-full w-full object-contain", badge.label === "Instagram" && "rounded-[4px]")} />
           </span>
