@@ -650,3 +650,33 @@ test("rastreio: anúncio de clique para o WhatsApp (Meta oficial e Z-API)", () =
   assert.equal(z.messages[0]?.ad?.source_id, "999");
   assert.equal(z.messages[0]?.ad?.ctwa_clid, "CLID");
 });
+
+import { buildEvent } from "@/lib/meta-ads";
+import { resolveAd } from "@/lib/meta-ads/report";
+
+test("pixel: evento de Compra com dados criptografados e modo certo", () => {
+  const base = { eventName: "Purchase" as const, eventKey: "purchase:1", value: 2500, currency: "BRL", at: new Date("2026-10-25T12:00:00Z"),
+    lead: { id: "11111111-1111-1111-1111-111111111111", name: "Yuri Farias", phone: "5585999990000", email: null }, wabaId: null, pageId: null };
+  const px = buildEvent({ ...base, origin: { source_type: "link", ctwa_clid: null, fbclid: "IwAR1", clickAt: "2026-10-24T10:00:00Z" } });
+  assert.equal(px.mode, "pixel");
+  const u = px.event.user_data as Record<string, unknown>;
+  assert.equal((u.ph as string[])[0]!.length, 64); // SHA-256, nunca o telefone puro
+  assert.ok(!JSON.stringify(px.event).includes("5585999990000"));
+  assert.ok(!JSON.stringify(px.event).includes("Yuri"));
+  assert.equal(u.fbc, `fb.1.${new Date("2026-10-24T10:00:00Z").getTime()}.IwAR1`);
+  assert.deepEqual(px.event.custom_data, { currency: "BRL", value: 2500 });
+  assert.equal(px.event.event_id, "purchase:1");
+  const wa = buildEvent({ ...base, wabaId: "777", origin: { source_type: "anuncio_whatsapp", ctwa_clid: "CLID", fbclid: null, clickAt: null } });
+  assert.equal(wa.mode, "whatsapp_ctwa");
+  assert.equal(wa.event.action_source, "business_messaging");
+  assert.equal((wa.event.user_data as Record<string, unknown>).ctwa_clid, "CLID");
+});
+
+test("anúncio do lead: id do anúncio, {{ad.id}} na UTM ou nome", () => {
+  const byName = new Map([["video mt-03", "120001"]]);
+  const known = new Set(["120001", "120002"]);
+  assert.equal(resolveAd({ lead_id: "a", ad_id: "120002", utm_term: null, utm_content: null, ad_title: null }, byName, known), "120002");
+  assert.equal(resolveAd({ lead_id: "a", ad_id: null, utm_term: "120009876", utm_content: "x", ad_title: null }, byName, known), "120009876");
+  assert.equal(resolveAd({ lead_id: "a", ad_id: null, utm_term: null, utm_content: "Video MT-03", ad_title: null }, byName, known), "120001");
+  assert.equal(resolveAd({ lead_id: "a", ad_id: null, utm_term: null, utm_content: "bio", ad_title: null }, byName, known), null);
+});

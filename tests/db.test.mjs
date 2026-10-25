@@ -392,5 +392,22 @@ await su("update public.leads set assigned_to=$1 where id=$2", [donoLeadA, leadA
 await expectError("mesmo id da central não duplica", () => su("insert into public.wa_calls (organization_id, kind, wa_id, direction, voip_call_id) values ($1,'voip','1','out','c-1')", [orgA]), "23505");
 await expectError("tipo de ligação inválido é recusado", () => su("insert into public.wa_calls (organization_id, kind, wa_id, direction) values ($1,'skype','1','out')", [orgA]), "23514");
 
+console.log("\n# Agente de IA, rastreio e Meta Ads");
+ok("ninguém lê a chave da IA pelo banco", (await su("insert into public.ai_agent_secrets (organization_id, provider, api_key) values ($1,'claude','sk-teste-1234567890') returning 1", [orgA])).length === 1 && (await as(A, "select * from public.ai_agent_secrets")).length === 0);
+ok("ninguém lê a chave do Meta pelo banco", (await su("insert into public.meta_secrets (organization_id, access_token) values ($1,'EAAteste') returning 1", [orgA])).length === 1 && (await as(A, "select * from public.meta_secrets")).length === 0);
+await su("insert into public.lead_origins (lead_id, organization_id, channel, source_type, ad_id) values ($1,$2,'meta_ads','anuncio_whatsapp','120001')", [leadA, orgA]);
+ok("sem pixel configurado não gera evento", (await su("select 1 from public.meta_events where lead_id=$1", [leadA])).length === 0);
+ok("dono vê a origem do lead", (await as(A, "select channel from public.lead_origins where lead_id=$1", [leadA]))[0]?.channel === "meta_ads");
+ok("outra empresa não vê a origem", (await as(B, "select * from public.lead_origins")).length === 0);
+await su("insert into public.meta_connections (organization_id, ad_account_id, pixel_id) values ($1,'act_123456','987654321')", [orgA]);
+const wonStageM = (await su("select id from public.stages where organization_id=$1 and kind='won' limit 1", [orgA]))[0]?.id;
+await su("update public.leads set stage_id=$1, value=2500 where id=$2", [wonStageM, leadA]);
+const pev = await su("select event_name, value, status from public.meta_events where lead_id=$1 and event_name='Purchase'", [leadA]);
+ok("venda com valor vira evento Compra para o pixel", pev.length === 1 && Number(pev[0].value) === 2500 && pev[0].status === "pending");
+await su("update public.leads set value=3000 where id=$1", [leadA]);
+const pev2 = await su("select value from public.meta_events where lead_id=$1 and event_name='Purchase'", [leadA]);
+ok("valor corrigido antes do envio atualiza o evento (sem duplicar)", pev2.length === 1 && Number(pev2[0].value) === 3000);
+ok("vendedor não vê a fila de eventos", (await as(C, "select * from public.meta_events")).length === 0);
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

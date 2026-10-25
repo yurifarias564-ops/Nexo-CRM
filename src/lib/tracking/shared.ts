@@ -71,7 +71,7 @@ export const slugify = (s: string) =>
 export const LINK_TEMPLATES: { id: string; label: string; utm: Utms; hint: string }[] = [
   { id: "bio", label: "Link da bio do Instagram", utm: { utm_source: "instagram", utm_medium: "bio", utm_campaign: "bio" }, hint: "Cole na bio do Instagram." },
   { id: "stories", label: "Stories", utm: { utm_source: "instagram", utm_medium: "stories", utm_campaign: "stories" }, hint: "Use no adesivo de link dos stories." },
-  { id: "meta", label: "Anúncio Meta (Facebook/Instagram)", utm: { utm_source: "facebook", utm_medium: "paid", utm_campaign: "{{campaign.name}}", utm_content: "{{ad.name}}", utm_term: "{{adset.name}}" }, hint: "Use como URL do site no anúncio. O Meta troca {{campaign.name}} e {{ad.name}} pelo nome real." },
+  { id: "meta", label: "Anúncio Meta (Facebook/Instagram)", utm: { utm_source: "facebook", utm_medium: "paid", utm_campaign: "{{campaign.name}}", utm_content: "{{ad.name}}", utm_term: "{{ad.id}}" }, hint: "Use como URL do site no anúncio. O Meta troca {{campaign.name}}, {{ad.name}} e {{ad.id}} pelos dados reais — assim o CRM liga cada venda ao anúncio exato." },
   { id: "google", label: "Google Ads", utm: { utm_source: "google", utm_medium: "cpc", utm_campaign: "{campaignid}", utm_content: "{creative}" }, hint: "URL final do anúncio no Google." },
   { id: "youtube", label: "YouTube", utm: { utm_source: "youtube", utm_medium: "video", utm_campaign: "youtube" }, hint: "Descrição ou comentário fixado do vídeo." },
   { id: "tiktok", label: "TikTok", utm: { utm_source: "tiktok", utm_medium: "bio", utm_campaign: "tiktok" }, hint: "Bio ou anúncio do TikTok." },

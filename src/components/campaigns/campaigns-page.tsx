@@ -7,6 +7,7 @@ import { Field, Modal, Spinner } from "@/components/ui/misc";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { cn, formatBRL, relativeTime } from "@/lib/utils";
+import { MetaTab } from "./meta-tab";
 import { CHANNELS, LINK_TEMPLATES, NOT_TRACKED, trackedUrl, type Channel } from "@/lib/tracking/shared";
 
 interface Row { key: string; label: string; color?: string; clicks: number; leads: number; sales: number; revenue: number }
@@ -19,10 +20,10 @@ interface Report {
 interface TLink { id: string; slug: string; name: string; kind: "link" | "site"; channel_id: string | null; phone: string | null; message: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; created_at: string }
 
 const TABS = [
-  { id: "painel", label: "Painel", icon: BarChart3 },
+  { id: "meta", label: "Anúncios Meta", icon: Megaphone },
+  { id: "painel", label: "Todas as origens", icon: BarChart3 },
   { id: "links", label: "Links rastreados", icon: Link2 },
   { id: "site", label: "Site", icon: Code2 },
-  { id: "meta", label: "Meta Ads", icon: Megaphone },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
@@ -43,7 +44,7 @@ const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1).replace
 const chLabel = (k: string | null) => (k && k in CHANNELS ? CHANNELS[k as Channel] : NOT_TRACKED);
 
 export function CampaignsPage() {
-  const [tab, setTab] = useState<TabId>("painel");
+  const [tab, setTab] = useState<TabId>("meta");
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-8">
@@ -65,16 +66,7 @@ export function CampaignsPage() {
         {tab === "painel" && <Dashboard />}
         {tab === "links" && <LinksTab />}
         {tab === "site" && <SiteTab />}
-        {tab === "meta" && (
-          <div className="rounded-xl border border-dashed border-line bg-ink-900/60 p-6">
-            <p className="font-semibold text-white">Meta Ads <span className="ml-2 rounded-full bg-brand-500/15 px-2 py-0.5 text-[11px] text-brand-200">próxima etapa</span></p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-400">
-              <li><b className="text-slate-200">Investimento por campanha e criativo</b> puxado do Gerenciador de Anúncios → custo por lead, custo por venda e <b className="text-slate-200">ROAS</b> aqui no painel.</li>
-              <li><b className="text-slate-200">Eventos de volta para o Meta</b> (API de Conversões): Lead quando o cliente chama, Compra quando o lead vai para Ganho com o valor — para o Meta otimizar por venda, não por clique.</li>
-            </ul>
-            <p className="mt-3 text-xs text-slate-500">Os anúncios de clique para o WhatsApp já são reconhecidos automaticamente: o lead chega marcado com o anúncio de origem.</p>
-          </div>
-        )}
+        {tab === "meta" && <MetaTab />}
       </div>
     </div>
   );
@@ -122,7 +114,7 @@ function Dashboard() {
             <Kpi icon={TrendingUp} label="Vendas" value={t!.sales.toLocaleString("pt-BR")} sub={`conversão ${pct(t!.sales, t!.leads)}`} />
             <Kpi icon={Wallet} label="Faturamento" value={formatBRL(t!.revenue)} />
             <Kpi icon={Target} label="Ticket médio" value={t!.sales ? formatBRL(t!.revenue / t!.sales) : "—"} />
-            <Kpi icon={Megaphone} label="ROAS" value="—" sub="conecte o Meta Ads" muted />
+            <Kpi icon={Megaphone} label="Ver ROAS por anúncio" value="→" sub="aba Anúncios Meta" muted />
           </div>
 
           <section className="rounded-xl border border-line bg-ink-900 p-4">
