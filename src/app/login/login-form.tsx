@@ -7,6 +7,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/misc";
 import { Logo } from "@/components/logo";
+import type { Brand } from "@/lib/branding/shared";
 import { cn } from "@/lib/utils";
 
 type Mode = "login" | "signup" | "forgot";
@@ -18,7 +19,8 @@ function safeNext(n: string | null) {
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/";
 }
 
-export function LoginForm() {
+export function LoginForm({ brand }: { brand?: Brand }) {
+  const custom = Boolean(brand?.custom);
   const router = useRouter();
   const params = useSearchParams();
   const [mode, setMode] = useState<Mode>("login");
@@ -69,11 +71,18 @@ export function LoginForm() {
     <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
       <aside className="relative hidden overflow-hidden border-r border-line bg-ink-900/60 p-12 lg:flex lg:flex-col lg:justify-between">
         <div className="pointer-events-none absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-brand-600/20 blur-3xl" />
-        <Logo />
+        <Logo brand={brand} />
         <div className="relative space-y-8">
+          {custom ? (
+            <div className="space-y-3">
+              <h1 className="max-w-md text-4xl font-semibold leading-tight tracking-tight text-white">{brand!.loginTitle || `Bem-vindo ao ${brand!.appName}`}</h1>
+              {brand!.loginSubtitle && <p className="max-w-md text-lg text-slate-300">{brand!.loginSubtitle}</p>}
+            </div>
+          ) : (
           <h1 className="max-w-md text-4xl font-semibold leading-tight tracking-tight text-white">
             Seu comercial inteiro em <span className="text-brand-300">uma tela</span>.
           </h1>
+          )}
           <ul className="space-y-4 text-slate-300">
             {[
               { icon: MessageCircle, t: "WhatsApp com histórico completo das conversas" },
@@ -87,12 +96,14 @@ export function LoginForm() {
             ))}
           </ul>
         </div>
-        <p className="relative text-xs text-slate-500">Dados protegidos com isolamento por empresa e criptografia em trânsito.</p>
+        <p className="relative text-xs text-slate-500">
+          Dados protegidos com isolamento por empresa e criptografia em trânsito.{custom && !brand!.hidePoweredBy ? " · Tecnologia Nexo CRM" : ""}
+        </p>
       </aside>
 
       <main className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm animate-fadeIn">
-          <div className="mb-8 lg:hidden"><Logo /></div>
+          <div className="mb-8 lg:hidden"><Logo brand={brand} /></div>
           <h2 className="text-2xl font-semibold tracking-tight text-white">
             {mode === "login" ? "Entrar na sua conta" : mode === "signup" ? "Criar conta" : "Recuperar senha"}
           </h2>
@@ -100,7 +111,7 @@ export function LoginForm() {
             {mode === "login" ? "Bem-vindo de volta." : mode === "signup" ? "Comece a organizar suas vendas hoje." : "Enviaremos um link para o seu e-mail."}
           </p>
 
-          {mode !== "forgot" && (
+          {mode !== "forgot" && !custom && (
             <div className="mt-6 grid grid-cols-2 rounded-lg border border-line bg-ink-900 p-1 text-sm">
               {(["login", "signup"] as const).map((m) => (
                 <button key={m} type="button" onClick={() => setMode(m)}
@@ -130,6 +141,9 @@ export function LoginForm() {
           <button type="button" onClick={() => setMode(mode === "forgot" ? "login" : "forgot")} className="mt-4 text-sm text-slate-400 hover:text-brand-300">
             {mode === "forgot" ? "← Voltar para o login" : "Esqueci minha senha"}
           </button>
+          {custom && brand!.supportWhatsapp && (
+            <a href={`https://wa.me/${brand!.supportWhatsapp}`} target="_blank" rel="noopener noreferrer" className="mt-2 block text-sm text-slate-400 hover:text-brand-300">Precisa de ajuda? Fale com o suporte</a>
+          )}
         </div>
       </main>
     </div>

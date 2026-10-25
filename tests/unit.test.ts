@@ -694,3 +694,20 @@ test("parceiros: mensagem de cobrança no grupo", () => {
   assert.match(late, /venceu em 05\/11\/2026/);
   assert.ok(!late.includes("Linha digitável"));
 });
+
+import { brandCss, cleanDomain, isApex, palette } from "@/lib/branding/shared";
+
+test("marca: tons da cor, CSS e domínio", () => {
+  const p = palette("#16a34a");
+  assert.equal(p["--brand-500"], "22 163 74");
+  assert.ok(p["--brand-50"]!.split(" ").every((n) => Number(n) > 200)); // bem clarinho
+  assert.equal(brandCss("#2563eb"), ""); // cor padrão: nada a sobrescrever
+  assert.match(brandCss("#16a34a"), /--brand-500:22 163 74/);
+  assert.equal(brandCss("vermelho"), "");
+  assert.equal(cleanDomain(" https://CRM.MotoCenter.com.br/login "), "crm.motocenter.com.br");
+  assert.equal(cleanDomain("sem ponto"), null);
+  assert.equal(isApex("motocenter.com.br"), true);
+  assert.equal(isApex("crm.motocenter.com.br"), false);
+  assert.equal(isApex("motocenter.com"), true);
+  assert.equal(isApex("app.motocenter.com"), false);
+});

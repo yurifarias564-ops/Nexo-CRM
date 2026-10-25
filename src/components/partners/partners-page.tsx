@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CalendarDays, CheckCircle2, CreditCard, ExternalLink, Handshake, LogIn, MessageCircle, Receipt, Search, Send, Settings2, Users, Wallet } from "lucide-react";
+import { BrandingEditor } from "@/components/branding/branding-editor";
+import { AlertTriangle, Palette, CalendarDays, CheckCircle2, CreditCard, ExternalLink, Handshake, LogIn, MessageCircle, Receipt, Search, Send, Settings2, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Modal, Spinner } from "@/components/ui/misc";
@@ -226,6 +227,7 @@ function PartnerModal({ p, canBill, onClose, onChanged, onEnter }: { p: Partner;
   const [notes, setNotes] = useState(p.notes ?? "");
   const [groups, setGroups] = useState<{ id: string; subject: string }[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [branding, setBranding] = useState(false);
 
   const loadDetail = useCallback(async () => {
     const r = await fetch(`/api/platform/partners/${p.id}`);
@@ -267,7 +269,8 @@ function PartnerModal({ p, canBill, onClose, onChanged, onEnter }: { p: Partner;
         <div className="flex flex-wrap items-center gap-2">
           <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", SITU[s].c)}>{SITU[s].l}</span>
           <span className="text-slate-400">{p.owner_name ?? "—"} · {p.owner_email ?? "—"}</span>
-          <Button size="sm" className="ml-auto" onClick={onEnter}><LogIn className="h-3.5 w-3.5" /> Acessar conta</Button>
+          <Button size="sm" variant="outline" className="ml-auto" onClick={() => setBranding(true)}><Palette className="h-3.5 w-3.5" /> Marca e domínio</Button>
+          <Button size="sm" onClick={onEnter}><LogIn className="h-3.5 w-3.5" /> Acessar conta</Button>
         </div>
 
         <section className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
@@ -337,6 +340,12 @@ function PartnerModal({ p, canBill, onClose, onChanged, onEnter }: { p: Partner;
             <div key={String(l)} className="rounded-lg bg-ink-850 p-2"><p className="text-slate-500">{l}</p><p className="text-base font-semibold text-white">{v}</p></div>
           ))}
         </section>
+
+        {branding && (
+          <Modal open onClose={() => setBranding(false)} title={`Marca e domínio — ${p.name}`} wide>
+            <div data-modal-body><BrandingEditor orgId={p.id} /></div>
+          </Modal>
+        )}
 
         {detail?.log.length ? (
           <section>

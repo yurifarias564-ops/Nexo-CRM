@@ -416,5 +416,13 @@ await expectError("usuário comum não chama a visão de parceiros", () => as(A,
 await su("insert into public.partner_settings (organization_id, billing_group_id, billing_group_name) values ($1,'120363-group','Grupo A')", [orgA]);
 ok("cliente não lê configuração de cobrança nem histórico", (await as(A, "select * from public.partner_settings")).length === 0 && (await as(A, "select * from public.platform_audit")).length === 0);
 
+console.log("\n# Marca (white label)");
+await su("insert into public.org_branding (organization_id, app_name, primary_color, custom_domain) values ($1,'Moto Center CRM','#16a34a','crm.motocenter.com.br')", [orgA]);
+ok("equipe vê a marca da própria empresa", (await as(C, "select app_name from public.org_branding"))[0]?.app_name === "Moto Center CRM");
+ok("outra empresa não vê a marca", (await as(B, "select * from public.org_branding")).length === 0);
+await expectError("usuário não altera a marca direto no banco", () => as(A, "update public.org_branding set app_name='x' where organization_id=$1 returning 1", [orgA]).then((r) => { if (!r.length) throw Object.assign(new Error("sem permissão"), { code: "42501" }); }), "42501");
+await expectError("domínio repetido em outra empresa é recusado", () => su("insert into public.org_branding (organization_id, custom_domain) values ($1,'crm.motocenter.com.br')", [orgB]), "23505");
+await expectError("cor inválida é recusada", () => su("update public.org_branding set primary_color='azul' where organization_id=$1", [orgA]), "23514");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

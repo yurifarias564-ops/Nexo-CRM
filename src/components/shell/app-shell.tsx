@@ -74,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-ink-900/70 backdrop-blur md:flex">
-        <div className="px-5 pb-4 pt-5"><Logo /></div>
+        <div className="px-5 pb-4 pt-5"><Logo brand={ws.brand} /></div>
 
         <div className="relative px-3">
           <button onClick={() => setOrgMenu((v) => !v)} className="flex w-full items-center gap-2 rounded-lg border border-line bg-ink-850 px-3 py-2 text-left text-sm hover:border-brand-400/40">
@@ -126,7 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-ink-950/60 px-4 backdrop-blur md:px-6">
-          <div className="md:hidden"><Logo compact /></div>
+          <div className="md:hidden"><Logo compact brand={ws.brand} /></div>
           <nav className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] md:hidden">
             {nav.map(({ href, icon: I, label }) => (
               <Link key={href} href={href} aria-label={label} className={cn("shrink-0 rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>

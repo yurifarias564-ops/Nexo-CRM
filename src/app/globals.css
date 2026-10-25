@@ -4,6 +4,10 @@
 
 :root {
   color-scheme: dark;
+  /* Cores padrão (azul Nexo). A personalização de cada empresa sobrescreve estas variáveis. */
+  --brand-50: 239 246 255; --brand-100: 219 234 254; --brand-200: 191 219 254; --brand-300: 96 165 250;
+  --brand-400: 59 130 246; --brand-500: 37 99 235; --brand-600: 29 78 216; --brand-700: 29 64 175;
+  --navy-500: 30 58 138; --navy-400: 37 71 168;
 }
 
 @layer base {
@@ -11,12 +15,12 @@
   body {
     @apply bg-ink-950 text-slate-200 antialiased;
     background-image:
-      radial-gradient(1200px 600px at 10% -10%, rgba(30, 58, 138, 0.22), transparent 60%),
-      radial-gradient(900px 500px at 110% 10%, rgba(37, 99, 235, 0.10), transparent 60%);
+      radial-gradient(1200px 600px at 10% -10%, rgb(var(--navy-500) / 0.22), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, rgb(var(--brand-500) / 0.10), transparent 60%);
     background-attachment: fixed;
     font-feature-settings: "cv11", "ss01";
   }
-  ::selection { background: rgba(59, 130, 246, 0.35); }
+  ::selection { background: rgb(var(--brand-400) / 0.35); }
   *:focus-visible { @apply outline-none ring-2 ring-brand-400/70 ring-offset-0; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }

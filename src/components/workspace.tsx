@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Member, Pipeline, QuickReply, Role, Stage, Tag } from "@/lib/types";
+import type { Brand } from "@/lib/branding/shared";
 
 export interface WorkspaceData {
   orgId: string;
@@ -19,6 +20,8 @@ export interface WorkspaceData {
   isHouse?: boolean;
   /** Está dentro da conta de um cliente como suporte. */
   supportMode?: boolean;
+  /** Marca da empresa (logo, nome e cores próprios). */
+  brand?: Brand;
 }
 
 interface Ctx extends WorkspaceData {

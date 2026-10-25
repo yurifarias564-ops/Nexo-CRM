@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CreditCard, KanbanSquare, MessageCircle, Tags, Users, Zap } from "lucide-react";
+import { CalendarDays, CreditCard, KanbanSquare, MessageCircle, Palette, Tags, Users, Zap } from "lucide-react";
 import { useWorkspace } from "@/components/workspace";
 import { WhatsAppTab } from "./whatsapp-tab";
 import { QuickRepliesTab } from "./quick-replies-tab";
@@ -11,6 +11,7 @@ import { TeamTab } from "./team-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { cn } from "@/lib/utils";
 import { Section } from "./section";
+import { BrandingEditor } from "@/components/branding/branding-editor";
 
 const TABS = [
   { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
@@ -19,6 +20,7 @@ const TABS = [
   { id: "pipeline", label: "Funil", icon: KanbanSquare },
   { id: "tags", label: "Tags", icon: Tags },
   { id: "team", label: "Equipe", icon: Users },
+  { id: "brand", label: "Marca", icon: Palette },
   { id: "billing", label: "Assinatura", icon: CreditCard },
 ];
 
@@ -39,13 +41,16 @@ export function Settings({ initialTab, subscription, googleStatus, googleMsg }: 
         ))}
       </nav>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl p-4 md:p-8">
+        <div className={cn("mx-auto p-4 md:p-8", tab === "brand" ? "max-w-5xl" : "max-w-3xl")}>
           {tab === "whatsapp" && <WhatsAppTab />}
           {tab === "integrations" && <IntegrationsTab googleStatus={googleStatus} googleMsg={googleMsg} />}
           {tab === "quick" && <QuickRepliesTab />}
           {tab === "pipeline" && <PipelineTab />}
           {tab === "tags" && <TagsTab />}
           {tab === "team" && <TeamTab />}
+          {tab === "brand" && (ws.canManage || ws.isHouse
+            ? <Section title="Marca" text="Logo, nome, cores e tela de login próprios — o sistema com a cara da sua empresa."><BrandingEditor /></Section>
+            : <Section title="Marca" text="Apenas administradores podem personalizar."><span /></Section>)}
           {tab === "billing" && (
             <Section title="Assinatura" text="Situação do plano da sua empresa.">
               <div className="card flex items-center justify-between p-5">
