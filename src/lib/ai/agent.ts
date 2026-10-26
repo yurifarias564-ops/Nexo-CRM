@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { applyCreditToLead, loadCreditSettings, notifyCreditResult, runCreditCheck } from "@/lib/credit";
-import { customerGuidance, decide, isCpf, maskCpf, scrubCpf, type CreditSettings } from "@/lib/credit/shared";
+import { cpfDigits, customerGuidance, decide, isCpf, maskCpf, scrubCpf, type CreditSettings } from "@/lib/credit/shared";
 import { envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { norm } from "@/lib/utils";
@@ -215,6 +215,9 @@ function makeExec(opts: {
   effects: Effect[]; credit?: CreditSettings | null; leadName?: string | null; leadPhone?: string | null;
 }) {
   const { live, db, orgId, leadId, effects } = opts;
+  // Análise de crédito já feita nesta resposta: não repete (nem cobra de novo)
+  const creditDone = new Map<string, string>();
+  let creditCalls = 0;
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
     try {
       switch (name) {
@@ -327,11 +330,16 @@ function makeExec(opts: {
           };
           if (!isCpf(input.cpf)) return "CPF inválido: peça ao cliente para conferir o número";
           if (!input.vehicle_value) return "falta o valor do veículo: pergunte ao cliente";
+          const key = [cpfDigits(input.cpf), input.income, input.vehicle_value, input.down_payment, input.months].join("|");
+          const done = creditDone.get(key);
+          if (done) return `A análise com estes dados JÁ FOI FEITA. Não chame analisar_credito de novo: responda ao cliente agora. ${done}`;
+          if (++creditCalls > 2) return "Limite de análises nesta resposta. Não chame analisar_credito de novo agora: responda ao cliente.";
+          const remember = (msg: string) => { creditDone.set(key, msg); return msg; };
           if (!live) {
             // Simulador: não consulta ninguém (sem custo), mostra como a IA conduziria
             const d = decide(credit, input, { score: null, band: null, capacity: null, status: "aprovado", reasons: [] });
             effects.push({ kind: "credit", status: d.status, score: null, installment: d.installment, simulated: true });
-            return `(SIMULAÇÃO — nenhuma consulta real foi feita) ${customerGuidance(d.status, { handoff: credit.handoff, incomeIssue: d.reasons.some((x) => x.includes("% da renda")) })}`;
+            return remember(`${customerGuidance(d.status, { handoff: credit.handoff, incomeIssue: d.reasons.some((x) => x.includes("% da renda")) })} (Modo teste: a consulta foi simulada; responda normalmente ao cliente.)`);
           }
           // Consentimento (LGPD): o cliente precisa ter respondido DEPOIS de a IA pedir a autorização
           let consentMessageId: string | null = null;
@@ -366,7 +374,7 @@ function makeExec(opts: {
             }
             effects.push({ kind: "credit", status: r.status, score: r.score, installment: r.installment, simulated: false });
             const bestBank = r.banks.find((b) => b.status === "aprovado")?.banco ?? null;
-            return customerGuidance(r.status, { handoff: credit.handoff, bank: bestBank, pending: r.pending && r.status !== "aprovado", incomeIssue: r.reasons.some((x) => x.includes("% da renda")) });
+            return remember(customerGuidance(r.status, { handoff: credit.handoff, bank: bestBank, pending: r.pending && r.status !== "aprovado", incomeIssue: r.reasons.some((x) => x.includes("% da renda")) }));
           } catch (e) {
             return `a consulta não pôde ser concluída agora (${(e as Error).message.slice(0, 120)}). Diga ao cliente que o especialista vai concluir a análise pessoalmente e chame transferir_para_vendedor.`;
           }

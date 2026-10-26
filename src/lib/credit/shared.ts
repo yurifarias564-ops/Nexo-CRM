@@ -190,7 +190,7 @@ export function decide(s: Pick<CreditSettings, "min_score" | "review_score" | "m
  */
 export function customerGuidance(status: Exclude<CreditStatus, "erro">, o: { handoff: boolean; bank?: string | null; pending?: boolean; incomeIssue?: boolean }): string {
   if (status === "aprovado") {
-    return `Resultado: CRÉDITO PRÉ-APROVADO${o.bank ? ` (banco ${o.bank})` : ""}. Dê a boa notícia ao cliente com entusiasmo e elegância: a análise de crédito dele foi pré-aprovada${o.bank ? ` pelo ${o.bank}` : ""}. Não cite score, taxa ou parcela exata e não diga que é aprovação definitiva (falta formalizar).${o.handoff ? " Diga que o especialista já recebeu a ficha aprovada e vai chamar em instantes para fechar as condições e a documentação." : " Conduza para o próximo passo: visita à loja ou envio dos documentos."}`;
+    return `Resultado: CRÉDITO PRÉ-APROVADO${o.bank ? ` (banco ${o.bank})` : ""}. Dê a boa notícia ao cliente com entusiasmo e elegância: a análise de crédito dele foi pré-aprovada${o.bank ? ` pelo ${o.bank}` : ""}. Não cite score, taxa ou parcela exata e não diga que é aprovação definitiva (falta formalizar).${o.handoff ? " Diga que o especialista já recebeu a ficha aprovada e vai chamar em instantes para fechar as condições e a documentação (o sistema já passou a conversa para ele; não chame transferir_para_vendedor)." : " Conduza para o próximo passo: visita à loja ou envio dos documentos."}`;
   }
   if (o.pending) {
     return "Resultado: FICHA EM ANÁLISE NOS BANCOS (as respostas chegam em alguns minutos). Diga ao cliente que você já enviou a ficha para os bancos parceiros e que você mesma avisa aqui assim que sair a resposta. Enquanto isso, continue o atendimento normalmente. Não cite score.";
