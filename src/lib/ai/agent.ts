@@ -323,7 +323,6 @@ function makeExec(opts: {
           if (!credit?.enabled) return "a análise de crédito não está ligada nesta empresa; transfira para o vendedor";
           if (args.cliente_autorizou !== true) return "erro: antes, peça ao cliente a autorização para a consulta de crédito com o CPF dele";
           const rawCpf = String(args.cpf ?? "");
-          args.cpf = maskCpf(rawCpf); // o registro da IA (atividade/histórico) nunca guarda o CPF inteiro
           const input = {
             cpf: rawCpf, income: Math.max(0, Number(args.renda_mensal) || 0), vehicle_value: Math.max(0, Number(args.valor_veiculo) || 0),
             down_payment: Math.max(0, Number(args.entrada) || 0), months: Math.min(120, Math.max(1, Math.round(Number(args.parcelas) || 48))),
@@ -385,6 +384,11 @@ function makeExec(opts: {
       return `erro: ${(e as Error).message?.slice(0, 200) ?? "falha"}`;
     }
   };
+}
+
+/** Registros da IA (histórico, tela de teste) nunca guardam o CPF inteiro. */
+function safeCalls(calls: ToolCall[]): ToolCall[] {
+  return calls.map((c) => c.name === "analisar_credito" ? { ...c, args: { ...c.args, cpf: maskCpf(String(c.args.cpf ?? "")) } } : c);
 }
 
 async function teamOf(db: SupabaseClient, orgId: string) {
@@ -639,10 +643,10 @@ export async function respondToConversation(conversationId: string, triggerMessa
     // Até qual mensagem do cliente esta resposta leu (para não responder duas vezes à mesma)
     const seen = msgs.filter((m) => m.direction === "in").map((m) => m.sent_at).sort().pop();
     if (seen) await db.from("conversations").update({ ai_answered_until: seen }).eq("id", conv.id);
-    await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: l?.id ?? null, provider: agent.provider, model, status: "ok", reply: out.text.slice(0, 8000), tools: [...calls, ...effects.filter((e) => e.kind === "filter").map((e) => ({ name: "filtro", args: e, result: "" }))], ms: Date.now() - started });
+    await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: l?.id ?? null, provider: agent.provider, model, status: "ok", reply: out.text.slice(0, 8000), tools: [...safeCalls(calls), ...effects.filter((e) => e.kind === "filter").map((e) => ({ name: "filtro", args: e, result: "" }))], ms: Date.now() - started });
   } catch (e) {
     console.error("[ia] resposta", e);
-    await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: conv.lead_id, provider: agent.provider, model, status: "error", tools: calls, error: (e as Error).message?.slice(0, 1000), ms: Date.now() - started });
+    await db.from("ai_runs").insert({ organization_id: conv.organization_id, conversation_id: conv.id, lead_id: conv.lead_id, provider: agent.provider, model, status: "error", tools: safeCalls(calls), error: (e as Error).message?.slice(0, 1000), ms: Date.now() - started });
   } finally {
     await db.from("conversations").update({ ai_lock_until: null, ai_last_run_at: new Date().toISOString() }).eq("id", conv.id);
   }
@@ -684,5 +688,5 @@ export async function testAgent(orgId: string, i: TestInput) {
   }
   const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento." : "";
   const out = await generateGuarded({ agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled }), history: i.history, exec, effects, tools: credit.enabled ? [...TOOLS, CREDIT_TOOL] : TOOLS });
-  return { messages: splitReply(out.text), effects, calls: out.calls, model, ms: Date.now() - started, offHours: null };
+  return { messages: splitReply(out.text), effects, calls: safeCalls(out.calls), model, ms: Date.now() - started, offHours: null };
 }
