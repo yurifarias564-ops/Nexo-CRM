@@ -611,7 +611,8 @@ async function generateGuarded(p: {
   const rules = p.agent.rules;
   const out = await runWithTools({ provider: p.agent.provider, model: p.model, apiKey: p.key, system: p.system, history: p.history, tools: p.tools ?? TOOLS, exec: p.exec, deadline: p.deadline });
   let text = rules.emojis ? out.text : stripEmojis(out.text);
-  const customerText = p.history.filter((h) => h.role === "user").slice(-12).map((h) => h.text).join("\n");
+  // Valores que o cliente disse ou que as ferramentas calcularam (ex.: entrada sugerida na análise de crédito) podem ser citados
+  const customerText = [...p.history.filter((h) => h.role === "user").slice(-12).map((h) => h.text), ...out.calls.map((c) => c.result)].join("\n");
   let reasons = checkReply(text, rules, customerText);
   if (!reasons.length) return { text, calls: out.calls, blocked: null };
 
