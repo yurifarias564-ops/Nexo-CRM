@@ -1,8 +1,8 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { applyCreditToLead, loadCreditSettings, runCreditCheck } from "@/lib/credit";
-import { customerGuidance, decide, isCpf, maskCpf, scrubCpf, STATUS_LABEL, type CreditSettings } from "@/lib/credit/shared";
+import { applyCreditToLead, loadCreditSettings, notifyCreditResult, runCreditCheck } from "@/lib/credit";
+import { customerGuidance, decide, isCpf, maskCpf, scrubCpf, type CreditSettings } from "@/lib/credit/shared";
 import { envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { norm } from "@/lib/utils";
@@ -137,11 +137,12 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
 }
 
 const CREDIT_PROMPT = [
-  "- analisar_credito (financiamento): quando o cliente quiser financiar ou perguntar se consegue aprovar, ofereça uma pré-análise de crédito sem compromisso.",
+  "- analisar_credito (financiamento): VOCÊ é quem faz a análise de crédito — não transfira para o vendedor fazer. Quando o cliente quiser financiar ou perguntar se consegue aprovar, ofereça a análise na hora, sem compromisso.",
   "  1) Peça a autorização de forma explícita: \"Posso fazer uma pré-análise de crédito com o seu CPF? Seus dados são usados só para isso.\" Só siga se o cliente disser que sim.",
   "  2) Colete, uma pergunta por mensagem, o que ainda não sabe: CPF, renda mensal, valor do veículo, valor de entrada e em quantas parcelas pretende pagar.",
   "  3) Chame analisar_credito com cliente_autorizou=true. Nunca salve o CPF na memória nem repita o CPF na conversa.",
-  "  4) Comunique o resultado exatamente como a ferramenta orientar. Nunca cite score, restrição ou motivo; nunca diga \"reprovado\" e nunca prometa aprovação definitiva, taxa ou parcela.",
+  "  4) Dê você mesma o resultado, exatamente como a ferramenta orientar. Nunca cite score, restrição ou motivo; nunca diga \"reprovado\" e nunca prometa aprovação definitiva, taxa ou parcela.",
+  "  5) Se não aprovou, negocie: proponha entrada maior, mais parcelas ou um veículo de valor menor e, se o cliente topar, rode analisar_credito de novo com os novos valores. O vendedor só entra para fechar a venda depois do crédito pré-aprovado.",
 ].join("\n");
 
 export const CREDIT_TOOL: ToolDef = {
@@ -330,7 +331,7 @@ function makeExec(opts: {
             // Simulador: não consulta ninguém (sem custo), mostra como a IA conduziria
             const d = decide(credit, input, { score: null, band: null, capacity: null, status: "aprovado", reasons: [] });
             effects.push({ kind: "credit", status: d.status, score: null, installment: d.installment, simulated: true });
-            return `(SIMULAÇÃO — nenhuma consulta real foi feita) ${customerGuidance(d.status === "reprovado" ? "reprovado" : d.status, credit.handoff)}`;
+            return `(SIMULAÇÃO — nenhuma consulta real foi feita) ${customerGuidance(d.status, { handoff: credit.handoff, incomeIssue: d.reasons.some((x) => x.includes("% da renda")) })}`;
           }
           // Consentimento (LGPD): o cliente precisa ter respondido DEPOIS de a IA pedir a autorização
           let consentMessageId: string | null = null;
@@ -351,16 +352,21 @@ function makeExec(opts: {
               });
               const { data: lv } = await db.from("leads").select("value").eq("id", leadId).maybeSingle();
               if (!Number(lv?.value)) await db.from("leads").update({ value: input.vehicle_value }).eq("id", leadId);
-              if (credit.handoff) {
+              // Crédito pré-aprovado: o vendedor entra só para fechar a venda (a análise foi da IA)
+              if (credit.handoff && r.status === "aprovado") {
                 if (opts.conversationId) await db.from("conversations").update({ ai_state: "paused", ai_paused_until: null }).eq("id", opts.conversationId);
-                await db.from("activities").insert({ organization_id: orgId, lead_id: leadId, actor_id: null, type: "ai_handoff", payload: { reason: `análise de crédito: ${STATUS_LABEL[r.status]}`, seller: null } });
-                effects.push({ kind: "handoff", reason: `análise de crédito: ${STATUS_LABEL[r.status]}`, seller: null });
+                await db.from("activities").insert({ organization_id: orgId, lead_id: leadId, actor_id: null, type: "ai_handoff", payload: { reason: "crédito pré-aprovado: vendedor fecha a venda", seller: null } });
+                effects.push({ kind: "handoff", reason: "crédito pré-aprovado: vendedor fecha a venda", seller: null });
               }
             }
+            // Resultado fechado vai para o WhatsApp do vendedor (o dos bancos que ainda vão responder vai quando chegar)
+            if (r.id && !r.pending) {
+              await db.from("credit_checks").update({ notified_at: new Date().toISOString() }).eq("id", r.id).is("notified_at", null);
+              await notifyCreditResult(orgId, r.id, credit);
+            }
             effects.push({ kind: "credit", status: r.status, score: r.score, installment: r.installment, simulated: false });
-            return r.pending && r.status !== "aprovado"
-              ? `Resultado: FICHA ENVIADA AOS BANCOS (respostas em alguns minutos). Diga ao cliente que a ficha foi enviada para análise nos bancos parceiros e que o especialista retorna com a melhor condição assim que os bancos responderem. Não cite score nem prometa aprovação.${credit.handoff ? " A conversa já foi passada para o especialista." : ""}`
-              : customerGuidance(r.status, credit.handoff);
+            const bestBank = r.banks.find((b) => b.status === "aprovado")?.banco ?? null;
+            return customerGuidance(r.status, { handoff: credit.handoff, bank: bestBank, pending: r.pending && r.status !== "aprovado", incomeIssue: r.reasons.some((x) => x.includes("% da renda")) });
           } catch (e) {
             return `a consulta não pôde ser concluída agora (${(e as Error).message.slice(0, 120)}). Diga ao cliente que o especialista vai concluir a análise pessoalmente e chame transferir_para_vendedor.`;
           }

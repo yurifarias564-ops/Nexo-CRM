@@ -5,6 +5,8 @@ import { HttpError } from "@/lib/http";
 import { cronSecret } from "@/lib/cron";
 import { postPinnedFull, publicTarget } from "@/lib/net/safe-post";
 import { appUrl } from "@/lib/env";
+import { sendAiText } from "@/lib/send";
+import { loadChannel, sendTextVia } from "@/lib/whatsapp";
 import {
   CREDIT_DEFAULTS, CreditInput, cpfDigits, decide, isCpf, maskCpf, overallFromBanks, parseBanks, scrubCpf, STATUS_LABEL, STATUS_TAG, wordStatus,
   type BankResult, type CreditProvider, type CreditSettings, type CreditStatus, type ProviderResult,
@@ -16,8 +18,9 @@ export async function loadCreditSettings(orgId: string): Promise<CreditSettings>
   const { data } = await db().from("credit_settings").select("*").eq("organization_id", orgId).maybeSingle();
   if (!data) return { ...CREDIT_DEFAULTS };
   return {
-    enabled: data.enabled, provider: data.provider, banks: data.banks ?? [], webhook_url: data.webhook_url, min_score: data.min_score, review_score: data.review_score,
+    enabled: data.enabled, provider: data.provider === "manual" ? "directd" : data.provider, banks: data.banks ?? [], webhook_url: data.webhook_url, min_score: data.min_score, review_score: data.review_score,
     max_income_pct: Number(data.max_income_pct), monthly_rate: Number(data.monthly_rate), handoff: data.handoff, max_per_day: data.max_per_day,
+    notify_phone: data.notify_phone ?? null,
   };
 }
 
@@ -144,6 +147,58 @@ export async function applyCreditToLead(orgId: string, leadId: string, status: E
 
 type CheckRow = { id: number; organization_id: string; lead_id: string | null; status: string; banks: BankResult[]; cpf_masked: string; income: number | null; vehicle_value: number | null; down_payment: number | null; months: number | null };
 
+const brl = (v: unknown) => Number(v ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+/** Resposta dos bancos chegou depois: a própria IA avisa o cliente na conversa. */
+async function tellCustomer(orgId: string, c: CheckRow & { conversation_id: string | null }, status: string, bank: string | null, s: CreditSettings) {
+  if (!c.conversation_id || !c.lead_id) return;
+  const { data: lead } = await db().from("leads").select("name, assigned_to").eq("id", c.lead_id).maybeSingle();
+  const first = String(lead?.name ?? "").trim().split(/\s+/)[0] ?? "";
+  const hi = /^\+?\d+$/.test(first) || !first ? "" : `${first}, `;
+  let text: string;
+  if (status === "aprovado") {
+    text = `${hi ? hi.charAt(0).toUpperCase() + hi.slice(1) : ""}ótima notícia! Sua análise de crédito foi pré-aprovada${bank ? ` pelo ${bank}` : ""}.`;
+    text += s.handoff ? " O especialista já está com a sua ficha aprovada e vai te chamar em instantes para fechar as condições." : " Podemos seguir para a documentação?";
+  } else {
+    text = `${hi ? hi.charAt(0).toUpperCase() + hi.slice(1) : ""}os bancos responderam e, nesta condição, não foi possível aprovar. Podemos tentar com uma entrada maior ou mais parcelas. Quer que eu refaça a análise?`;
+  }
+  try {
+    await sendAiText(orgId, c.conversation_id, text);
+    if (status === "aprovado" && s.handoff) {
+      await db().from("conversations").update({ ai_state: "paused", ai_paused_until: null }).eq("id", c.conversation_id);
+      await db().from("activities").insert({ organization_id: orgId, lead_id: c.lead_id, actor_id: null, type: "ai_handoff", payload: { reason: "crédito pré-aprovado: vendedor fecha a venda", seller: null } });
+    }
+  } catch (e) {
+    console.error("[crédito] aviso ao cliente", (e as Error).message);
+  }
+}
+
+/** Manda o resultado da análise para o WhatsApp do vendedor/equipe. */
+export async function notifyCreditResult(orgId: string, checkId: number, s?: CreditSettings) {
+  const cfg = s ?? (await loadCreditSettings(orgId));
+  if (!cfg.notify_phone) return;
+  const { data: c } = await db().from("credit_checks").select("*, leads(name, phone)").eq("id", checkId).eq("organization_id", orgId).maybeSingle();
+  if (!c) return;
+  const lead = (Array.isArray(c.leads) ? c.leads[0] : c.leads) as { name: string; phone: string | null } | null;
+  const banks = (c.banks ?? []) as BankResult[];
+  const mark = (b: BankResult) => (b.status === "aprovado" ? "✅" : b.status === "reprovado" ? "❌" : "⏳");
+  const lines = [
+    `💳 *Análise de crédito feita pela IA*`,
+    `Cliente: ${lead?.name ?? "—"}${lead?.phone ? ` (${lead.phone})` : ""}`,
+    `Resultado: *${STATUS_LABEL[c.status as CreditStatus] ?? c.status}*${c.score != null ? ` · score ${c.score}` : ""}`,
+    banks.length ? `Bancos: ${banks.map((b) => `${mark(b)} ${b.banco}${b.parcela ? ` ${b.prazo ? `${b.prazo}x ` : ""}${brl(b.parcela)}` : ""}${b.taxa ? ` ${b.taxa}% a.m.` : ""}`).join(" · ")}` : "",
+    `Veículo ${brl(c.vehicle_value)} · entrada ${brl(c.down_payment)} · ${c.months}x de ~${brl(c.installment)}${c.income ? ` · renda ${brl(c.income)}` : ""}`,
+    c.conversation_id ? `Conversa: ${appUrl()}/inbox?c=${c.conversation_id}` : "",
+  ].filter(Boolean);
+  try {
+    const { data: ch } = await db().from("whatsapp_channels").select("id").eq("organization_id", orgId).eq("status", "connected").order("created_at").limit(1).maybeSingle();
+    if (!ch) return;
+    await sendTextVia(await loadChannel(ch.id), cfg.notify_phone, lines.join("\n"));
+  } catch (e) {
+    console.error("[crédito] aviso ao vendedor", (e as Error).message);
+  }
+}
+
 /** Status da consulta a partir dos bancos, respeitando a regra da loja (parcela x renda). */
 function statusFromBanks(s: CreditSettings, c: CheckRow, banks: BankResult[]) {
   const overall = overallFromBanks(banks) ?? "analise";
@@ -174,8 +229,19 @@ export async function receiveBankCallback(token: string, body: Record<string, un
   const s = await loadCreditSettings(orgId);
   const status = statusFromBanks(s, check as CheckRow, banks);
   await db().from("credit_checks").update({ status, reasons: banks.filter((b) => b.mensagem).map((b) => `${b.banco}: ${b.mensagem}`).slice(0, 10) }).eq("id", check.id);
+  const answered = new Set(banks.map((b) => b.banco.toLowerCase()));
+  const allAnswered = s.banks.every((b) => answered.has(b.toLowerCase()));
+  // Resultado fechado: saiu aprovação, ou todos os bancos responderam
+  const final = status === "aprovado" || allAnswered;
+  const wasFinal = check.status === "aprovado" || check.status === "reprovado" || Boolean(check.notified_at);
   if (check.lead_id) {
     await applyCreditToLead(orgId, check.lead_id, status, { banks, cpf: check.cpf_masked, vehicle_value: check.vehicle_value, down_payment: check.down_payment, months: check.months }, "credit_banks");
+  }
+  if (final && !wasFinal) {
+    await db().from("credit_checks").update({ notified_at: new Date().toISOString() }).eq("id", check.id).is("notified_at", null);
+    const best = banks.find((b) => b.status === "aprovado")?.banco ?? null;
+    if (check.source === "ia") await tellCustomer(orgId, check as CheckRow & { conversation_id: string | null }, status, best, s);
+    await notifyCreditResult(orgId, check.id as number, s);
   }
   return { status, banks: banks.length };
 }
@@ -210,7 +276,8 @@ export async function runCreditCheck(orgId: string, raw: CreditInput, ctx: {
     .neq("status", "erro").gte("created_at", new Date(Date.now() - reuseDays * 86_400_000).toISOString())
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
 
-  if (prev && s.provider !== "directd") {
+  const sameDeal = prev && Number(prev.vehicle_value) === input.vehicle_value && Number(prev.down_payment) === input.down_payment && Number(prev.months) === input.months && Number(prev.income) === input.income;
+  if (prev && sameDeal && s.provider !== "directd") {
     // Bancos / sistema próprio: devolve a mesma consulta (a resposta dos bancos continua chegando nela)
     const d = decide(s, input, { score: prev.score, band: prev.score_band, capacity: prev.payment_capacity, status: prev.status === "analise" ? null : prev.status, reasons: [] });
     const banks = (prev.banks ?? []) as BankResult[];
@@ -218,6 +285,11 @@ export async function runCreditCheck(orgId: string, raw: CreditInput, ctx: {
     return { id: prev.id, status, score: prev.score, band: prev.score_band, installment: d.installment, incomePct: d.incomePct, reasons: ["consulta reaproveitada (mesmo CPF nas últimas 24h)"], reused: true, provider: s.provider, banks, pending: s.provider === "bancos" && banks.length < s.banks.length };
   }
 
+  // Por cliente: no máximo 5 tentativas por dia (a IA pode refazer com outra entrada/prazo)
+  if (ctx.leadId) {
+    const { count: perLead } = await db().from("credit_checks").select("id", { count: "exact", head: true }).eq("lead_id", ctx.leadId).gte("created_at", new Date(Date.now() - 86_400_000).toISOString());
+    if ((perLead ?? 0) >= 5) throw new HttpError(429, "Limite de 5 análises por cliente no dia");
+  }
   // Limite diário da empresa (protege o saldo na ferramenta de crédito)
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
   const { count } = await db().from("credit_checks").select("id", { count: "exact", head: true }).eq("organization_id", orgId).gte("created_at", dayAgo);

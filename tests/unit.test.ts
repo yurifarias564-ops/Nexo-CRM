@@ -768,12 +768,14 @@ test("crédito: regra da loja (score + parcela x renda)", () => {
   assert.equal(decide(s, input, { ...none, score: 300, status: "aprovado" }).status, "aprovado");
 });
 
-test("crédito: o que a IA diz ao cliente nunca expõe score nem 'reprovado'", () => {
-  for (const st of ["aprovado", "analise", "reprovado"] as const) {
-    const g = customerGuidance(st, true);
-    assert.ok(/NÃO diga "reprovado"|Não prometa|Não cite score/.test(g), st);
-  }
-  assert.ok(customerGuidance("reprovado", false).includes("melhor alternativa"));
+test("crédito: a IA dá o resultado ao cliente sem expor score nem 'reprovado'", () => {
+  const ok1 = customerGuidance("aprovado", { handoff: true, bank: "Santander" });
+  assert.ok(ok1.includes("PRÉ-APROVADO") && ok1.includes("Santander") && ok1.includes("fechar"));
+  assert.ok(!customerGuidance("aprovado", { handoff: false }).includes("especialista já recebeu"));
+  const no = customerGuidance("reprovado", { handoff: true });
+  assert.ok(no.includes('Nunca diga "reprovado"') && no.includes("analisar_credito de novo") && no.includes("entrada maior"));
+  assert.ok(customerGuidance("analise", { handoff: true, pending: true }).includes("você mesma avisa"));
+  assert.ok(customerGuidance("analise", { handoff: true, incomeIssue: true }).includes("parcela ficou alta"));
 });
 
 test("crédito: resposta dos bancos em formatos diferentes", () => {
@@ -802,6 +804,9 @@ test("crédito: configuração exige bancos e endereço na opção Bancos", () =
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: "https://x.com/api", banks: ["Santander", "BV"] }).success, true);
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "webhook", webhook_url: "http://x.com" }).success, false);
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, review_score: 700, min_score: 600 }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, enabled: true, provider: "manual" }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, notify_phone: "85 9999" }).success, false);
+  assert.equal(CreditSettingsSchema.parse({ ...CREDIT_DEFAULTS, notify_phone: "+55 (85) 99999-0000" }).notify_phone, "5585999990000");
 });
 
 test("crédito: 'Não aprovado' é recusado, CPF some dos textos, valor do cliente pode ser repetido", async () => {

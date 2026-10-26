@@ -3,7 +3,7 @@ import { requireApiContext } from "@/lib/auth";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { creditCallbackUrl, creditCredentialInfo, ensureCreditSettings, loadCreditSettings, rotateCallback } from "@/lib/credit";
-import { CreditSettings, PROVIDERS } from "@/lib/credit/shared";
+import { CreditSettings } from "@/lib/credit/shared";
 
 export const runtime = "nodejs";
 
@@ -40,7 +40,7 @@ export async function PUT(req: Request) {
     const s = b.settings;
     if (b.credential === null) await db.from("credit_secrets").delete().eq("organization_id", ctx.org.id);
     else if (b.credential) {
-      if (!PROVIDERS[s.provider].needsCredential && s.provider !== "webhook") throw new HttpError(422, "Esta opção não usa chave de acesso");
+      if (s.provider === "manual") throw new HttpError(422, "Escolha a ferramenta de crédito");
       const { error } = await db.from("credit_secrets").upsert({ organization_id: ctx.org.id, credential: b.credential, provider: s.provider, updated_at: new Date().toISOString() });
       if (error) throw error;
     }

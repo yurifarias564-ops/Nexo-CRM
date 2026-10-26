@@ -18,11 +18,6 @@ export const PROVIDERS = {
     text: "O CRM envia os dados para o endereço que você indicar (seu sistema, o do banco/correspondente ou um fluxo do n8n) e recebe a resposta de aprovação.",
     needsCredential: false, needsUrl: true,
   },
-  manual: {
-    label: "Sem consulta automática (ficha para o vendedor)",
-    text: "A IA coleta os dados e monta a ficha de financiamento; o vendedor faz a análise no banco.",
-    needsCredential: false, needsUrl: false,
-  },
 } as const;
 export type CreditProvider = keyof typeof PROVIDERS;
 
@@ -87,6 +82,7 @@ export function overallFromBanks(list: BankResult[]): BankStatus | null {
 
 export const CreditSettings = z.object({
   enabled: z.boolean(),
+  // "manual" ficou só por compatibilidade: a análise é sempre da IA
   provider: z.enum(["directd", "bancos", "webhook", "manual"]),
   banks: z.array(z.string().trim().min(1).max(60)).max(40),
   webhook_url: z.string().trim().max(500).nullable().transform((v) => v || null)
@@ -95,15 +91,20 @@ export const CreditSettings = z.object({
   review_score: z.number().int().min(0).max(1000),
   max_income_pct: z.number().min(5).max(100),
   monthly_rate: z.number().min(0).max(15),
+  /** Crédito pré-aprovado: passa a conversa para o vendedor fechar a venda. */
   handoff: z.boolean(),
+  /** WhatsApp do vendedor/equipe que recebe o resultado de cada análise. */
+  notify_phone: z.string().trim().max(20).nullable().transform((v) => (v ? v.replace(/\D/g, "") : null))
+    .refine((v) => !v || /^\d{10,15}$/.test(v), "WhatsApp inválido (DDI + DDD + número)"),
   max_per_day: z.number().int().min(1).max(5000),
-}).refine((s) => s.review_score <= s.min_score, { message: "O score de \"em análise\" precisa ser menor ou igual ao de aprovação", path: ["review_score"] })
+}).refine((s) => !s.enabled || s.provider !== "manual", { message: "Escolha a ferramenta de crédito que a IA vai consultar", path: ["provider"] })
+  .refine((s) => s.review_score <= s.min_score, { message: "O score de \"em análise\" precisa ser menor ou igual ao de aprovação", path: ["review_score"] })
   .refine((s) => !["webhook", "bancos"].includes(s.provider) || Boolean(s.webhook_url), { message: "Informe o endereço do sistema de crédito / plataforma de bancos", path: ["webhook_url"] })
   .refine((s) => s.provider !== "bancos" || s.banks.length > 0, { message: "Marque os bancos em que a loja é credenciada", path: ["banks"] });
 export type CreditSettings = z.infer<typeof CreditSettings>;
 
 export const CREDIT_DEFAULTS: CreditSettings = {
-  enabled: false, provider: "manual", banks: [], webhook_url: null, min_score: 600, review_score: 400,
+  enabled: false, provider: "directd", banks: [], webhook_url: null, notify_phone: null, min_score: 600, review_score: 400,
   max_income_pct: 30, monthly_rate: 2, handoff: true, max_per_day: 50,
 };
 
@@ -183,10 +184,19 @@ export function decide(s: Pick<CreditSettings, "min_score" | "review_score" | "m
   return { status, installment: parcel, financed, incomePct: Number.isFinite(pct) ? Math.round(pct) : null, reasons };
 }
 
-/** O que a IA pode dizer ao cliente (nunca score, nunca "reprovado"). */
-export function customerGuidance(status: Exclude<CreditStatus, "erro">, handoff: boolean): string {
-  const next = handoff ? " Em seguida avise que o especialista dará continuidade em instantes (a conversa já foi passada para ele)." : "";
-  if (status === "aprovado") return `Resultado: PRÉ-ANÁLISE POSITIVA. Diga ao cliente, com entusiasmo e elegância, que a pré-análise foi positiva e que o especialista vai confirmar as condições finais com o banco. Não prometa aprovação definitiva, taxa nem parcela.${next}`;
-  if (status === "analise") return `Resultado: EM ANÁLISE. Diga ao cliente que a pré-análise foi registrada e que o especialista vai finalizar a análise e apresentar a melhor condição. Não cite score nem motivo.${next}`;
-  return `Resultado: NÃO APROVADO NESTE MOMENTO (informação interna). NÃO diga "reprovado" nem cite score, restrição ou motivo. Diga com empatia que o especialista vai buscar a melhor alternativa para o caso (por exemplo, outra condição de entrada, prazo ou outro banco).${next}`;
+/**
+ * O que a IA diz ao cliente: a própria IA dá o resultado (nunca score nem a palavra "reprovado").
+ * Aprovado → comemora e (se a loja quiser) o vendedor entra para fechar. Não aprovado → a IA negocia outra condição e refaz.
+ */
+export function customerGuidance(status: Exclude<CreditStatus, "erro">, o: { handoff: boolean; bank?: string | null; pending?: boolean; incomeIssue?: boolean }): string {
+  if (status === "aprovado") {
+    return `Resultado: CRÉDITO PRÉ-APROVADO${o.bank ? ` (banco ${o.bank})` : ""}. Dê a boa notícia ao cliente com entusiasmo e elegância: a análise de crédito dele foi pré-aprovada${o.bank ? ` pelo ${o.bank}` : ""}. Não cite score, taxa ou parcela exata e não diga que é aprovação definitiva (falta formalizar).${o.handoff ? " Diga que o especialista já recebeu a ficha aprovada e vai chamar em instantes para fechar as condições e a documentação." : " Conduza para o próximo passo: visita à loja ou envio dos documentos."}`;
+  }
+  if (o.pending) {
+    return "Resultado: FICHA EM ANÁLISE NOS BANCOS (as respostas chegam em alguns minutos). Diga ao cliente que você já enviou a ficha para os bancos parceiros e que você mesma avisa aqui assim que sair a resposta. Enquanto isso, continue o atendimento normalmente. Não cite score.";
+  }
+  const alt = o.incomeIssue
+    ? "a parcela ficou alta para a renda informada"
+    : "nesta condição a aprovação não saiu";
+  return `Resultado: AINDA NÃO APROVADO NESTA CONDIÇÃO (informação interna: ${alt}). Nunca diga "reprovado", nem score, restrição ou motivo do banco. Com empatia, diga que nesta condição não foi possível e ofereça alternativas concretas: entrada maior, mais parcelas ou um veículo de valor menor. Se o cliente aceitar outra condição, chame analisar_credito de novo com os novos valores (não precisa pedir o CPF de novo).`;
 }

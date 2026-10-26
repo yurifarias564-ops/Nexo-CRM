@@ -68,7 +68,7 @@ export function CreditTab() {
   const dirty = useMemo(() => Boolean(s) && (JSON.stringify(s) !== saved || newCred.trim().length > 0), [s, saved, newCred]);
   if (!s) return <div className="flex justify-center py-10"><Spinner /></div>;
   const set = (p: Partial<CreditSettings>) => setS({ ...s, ...p });
-  const prov = PROVIDERS[s.provider];
+  const prov = PROVIDERS[s.provider === "manual" ? "directd" : s.provider];
 
   async function save(extra?: { credential?: null; rotateCallback?: boolean }) {
     setBusy(true);
@@ -87,9 +87,9 @@ export function CreditTab() {
     <div className="space-y-5">
       <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-4 text-sm text-slate-300">
         <p className="font-semibold text-white">Como funciona</p>
-        <p className="mt-1">Quando o cliente quer financiar, a IA oferece uma pré-análise. Ela pede a <b>autorização</b> do cliente, coleta CPF, renda, valor do veículo, entrada e parcelas,
-          consulta a ferramenta escolhida abaixo e aplica a <b>regra da sua loja</b>. O cliente ouve só “pré-análise positiva” ou “o especialista vai finalizar” — nunca o score.
-          O lead recebe a tag do resultado, a ficha completa fica no histórico e o vendedor assume.</p>
+        <p className="mt-1">A <b>IA faz a análise de crédito</b> do começo ao fim: oferece, pede a <b>autorização</b> do cliente, coleta CPF, renda, valor do veículo, entrada e parcelas,
+          consulta a ferramenta escolhida abaixo, aplica a <b>regra da sua loja</b> e dá o resultado ao cliente (nunca o score). Se não aprovar, ela mesma negocia outra entrada ou prazo e refaz.
+          O <b>vendedor recebe o resultado pronto</b> no WhatsApp e no histórico do lead — e, com o crédito pré-aprovado, entra só para fechar a venda.</p>
       </div>
 
       <Section icon={CreditCard} title="Análise de crédito pela IA">
@@ -171,9 +171,12 @@ export function CreditTab() {
             <input type="number" min={1} max={5000} className="field" value={s.max_per_day} onChange={(e) => set({ max_per_day: Math.round(Number(e.target.value) || 1) })} />
           </Field>
         </div>
+        <Field label="WhatsApp do vendedor / equipe que recebe o resultado" hint="A cada análise concluída, a IA manda o resultado (bancos, parcela, score, link da conversa) para este número. DDI + DDD + número, ex.: 5585999990000.">
+          <input className="field" inputMode="numeric" value={s.notify_phone ?? ""} placeholder="5585999990000" onChange={(e) => set({ notify_phone: e.target.value.replace(/\D/g, "") || null })} />
+        </Field>
         <label className="flex items-center gap-3 text-sm text-slate-200">
           <input type="checkbox" checked={s.handoff} onChange={(e) => set({ handoff: e.target.checked })} />
-          Depois da análise, passar a conversa para o vendedor
+          Crédito pré-aprovado: passar a conversa para o vendedor fechar a venda
         </label>
       </Section>
 
