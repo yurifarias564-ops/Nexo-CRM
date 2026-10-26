@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
-import { Avatar, Field, Portal, Spinner, TagPill } from "@/components/ui/misc";
+import { Field, Portal, Spinner, TagPill } from "@/components/ui/misc";
+import { LeadPhoto } from "@/components/lead/lead-photo";
 import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
 import { useLatest } from "@/lib/hooks";
 import { TemplateModal } from "@/components/inbox/template-modal";
@@ -247,7 +248,7 @@ export function LeadDrawer({
         ) : (
           <>
             <header className="flex items-center gap-3 border-b border-line px-5 py-4">
-              <Avatar name={lead.name} />
+              <LeadPhoto size="md" lead={lead} />
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold text-white">{lead.name}</p>
                 <p className="text-xs text-slate-500">Criado {relativeTime(lead.created_at)} · {lead.source ?? "Manual"}</p>

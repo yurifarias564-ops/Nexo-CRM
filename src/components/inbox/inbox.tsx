@@ -7,7 +7,8 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { LeadDrawer } from "@/components/lead/lead-drawer";
 import { Button } from "@/components/ui/button";
-import { Avatar, Empty, Spinner, TagPill } from "@/components/ui/misc";
+import { Empty, Spinner, TagPill } from "@/components/ui/misc";
+import { LeadPhoto } from "@/components/lead/lead-photo";
 import { QuickReplyMenu, fillTemplate, useQuickReplyMatches } from "./quick-replies";
 import { TemplateModal } from "./template-modal";
 import { VideoNoteModal } from "./video-note";
@@ -32,7 +33,7 @@ function kindOf(mime: string): MsgType {
   return "document";
 }
 
-type ConvRow = Conversation & { leads: Pick<Lead, "id" | "name" | "stage_id"> | null };
+type ConvRow = Conversation & { leads: Pick<Lead, "id" | "name" | "stage_id" | "avatar_url" | "source" | "last_message_at"> | null };
 const CONV_PAGE = 40;
 const MSG_PAGE = 50;
 
@@ -50,7 +51,7 @@ export function Inbox({ initialConversationId }: { initialConversationId: string
 
   const loadConvs = useCallback(async (reset: boolean, from = 0) => {
     const sb = supabaseBrowser();
-    let q = sb.from("conversations").select("*, leads(id, name, stage_id)")
+    let q = sb.from("conversations").select("*, leads(id, name, stage_id, avatar_url, source, last_message_at)")
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .range(from, from + CONV_PAGE - 1);
     if (onlyUnread) q = q.gt("unread_count", 0);
@@ -90,7 +91,7 @@ export function Inbox({ initialConversationId }: { initialConversationId: string
           const hit = leadCache.get(row.lead_id);
           if (hit && Date.now() - hit.at < 30_000) lead = hit.lead;
           else {
-            const { data } = await sb.from("leads").select("id, name, stage_id").eq("id", row.lead_id).maybeSingle();
+            const { data } = await sb.from("leads").select("id, name, stage_id, avatar_url, source, last_message_at").eq("id", row.lead_id).maybeSingle();
             lead = data as ConvRow["leads"];
             leadCache.set(row.lead_id, { at: Date.now(), lead });
           }
@@ -136,7 +137,7 @@ export function Inbox({ initialConversationId }: { initialConversationId: string
             return (
               <button key={c.id} onClick={() => open(c.id)}
                 className={cn("flex w-full items-center gap-3 border-b border-line/50 px-3 py-3 text-left transition hover:bg-ink-800/70", selected === c.id && "bg-brand-500/10 shadow-[inset_2px_0_0_0_#3b82f6]")}>
-                <Avatar name={name} className="h-10 w-10" />
+                <LeadPhoto size="md" lead={{ name, avatar_url: c.leads?.avatar_url, source: "whatsapp", last_message_at: c.last_message_at }} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className={cn("flex-1 truncate text-sm", c.unread_count ? "font-semibold text-white" : "font-medium text-slate-200")}>{name}</p>
@@ -173,7 +174,7 @@ export function Inbox({ initialConversationId }: { initialConversationId: string
       </section>
 
       <LeadDrawer leadId={drawerLead} onClose={() => setDrawerLead(null)}
-        onSaved={(l) => setConvs((cur) => cur.map((c) => (c.lead_id === l.id ? { ...c, leads: { id: l.id, name: l.name, stage_id: l.stage_id } } : c)))} />
+        onSaved={(l) => setConvs((cur) => cur.map((c) => (c.lead_id === l.id ? { ...c, leads: { ...c.leads, id: l.id, name: l.name, stage_id: l.stage_id, avatar_url: l.avatar_url ?? c.leads?.avatar_url ?? null, source: l.source, last_message_at: l.last_message_at } } : c)))} />
     </div>
   );
 }
@@ -441,7 +442,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-line bg-ink-900/70 px-4 py-2.5">
         <button onClick={onBack} className="rounded-md p-1.5 text-slate-400 hover:bg-ink-800 md:hidden" aria-label="Voltar"><ArrowLeft className="h-4 w-4" /></button>
-        <Avatar name={name} />
+        <LeadPhoto size="md" lead={{ name, avatar_url: conv.leads?.avatar_url, source: "whatsapp", last_message_at: conv.last_message_at }} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-white">{name}</p>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">

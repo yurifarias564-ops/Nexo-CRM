@@ -7,7 +7,8 @@ import { useWorkspace } from "@/components/workspace";
 import { LeadDrawer } from "@/components/lead/lead-drawer";
 import { ImportModal } from "./import-modal";
 import { Button } from "@/components/ui/button";
-import { Avatar, Empty, Field, Modal, Spinner, TagPill } from "@/components/ui/misc";
+import { Empty, Field, Modal, Spinner, TagPill } from "@/components/ui/misc";
+import { LeadPhoto } from "@/components/lead/lead-photo";
 import { formatBRL, formatPhone, normalizePhone } from "@/lib/utils";
 import { TimeAgo } from "@/components/ui/time-ago";
 import type { Lead } from "@/lib/types";
@@ -144,7 +145,7 @@ export function LeadsTable() {
                   </td>
                   <td className="px-2 py-2.5">
                     <div className="flex items-center gap-3">
-                      <Avatar name={l.name} className="h-8 w-8" />
+                      <LeadPhoto lead={l} />
                       <div className="min-w-0">
                         <p className="truncate font-medium text-slate-100">{l.name}</p>
                         <p className="truncate text-xs text-slate-500">{formatPhone(l.phone) || l.email || "—"}</p>
