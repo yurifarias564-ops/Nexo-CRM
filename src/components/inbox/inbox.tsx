@@ -350,6 +350,14 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
     stickToBottom.current = true;
   }
 
+  async function chargePix(p: { value: number; description?: string; payerName: string; payerDoc: string }) {
+    const res = await fetch("/api/pix/charge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: conv.id, ...p }) });
+    const data = await res.json();
+    if (!res.ok) { if (data.code === "window_closed") setLastInAt(null); throw new Error(data.error); }
+    toast.success("Cobrança Pix enviada — o CRM avisa quando for paga");
+    stickToBottom.current = true;
+  }
+
   async function startVideoCall() {
     if (videoBusy) return;
     if (windowClosed) return toast.error("A janela de 24h está fechada: envie um modelo antes de mandar o link da chamada.");
@@ -562,7 +570,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
         )}
       </footer>
       <VideoNoteModal open={noteOpen} onClose={() => setNoteOpen(false)} onSend={(f) => void sendFile(f, true)} />
-      <PixModal open={pixOpen} onClose={() => setPixOpen(false)} contactName={name} onSend={sendPix} />
+      <PixModal open={pixOpen} onClose={() => setPixOpen(false)} contactName={name} onSend={sendPix} onCharge={chargePix} />
       <LocationModal open={locOpen} onClose={() => setLocOpen(false)} onSend={sendLocationPin} />
       <ScheduleMessageModal open={schedOpen} onClose={() => setSchedOpen(false)} conversationId={conv.id} leadId={conv.lead_id} contactName={name} />
       <TemplateModal open={tplOpen} onClose={() => setTplOpen(false)} target={{ conversationId: conv.id }} channelId={conv.channel_id}

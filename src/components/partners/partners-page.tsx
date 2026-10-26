@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BrandingEditor } from "@/components/branding/branding-editor";
+import { PixRevenue } from "./pix-revenue";
 import { AlertTriangle, Palette, CalendarDays, CheckCircle2, CreditCard, ExternalLink, Handshake, LogIn, MessageCircle, Receipt, Search, Send, Settings2, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -140,6 +141,8 @@ export function PartnersPage() {
           <K icon={Wallet} l="Receita mensal" v={formatBRL(kpi.mrr)} />
           <K icon={CreditCard} l="No cartão (débito automático)" v={String(kpi.cartao)} />
         </div>
+
+        <PixRevenue />
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1">

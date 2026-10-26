@@ -470,5 +470,20 @@ await expectError("usuário não chama a junção de bancos", () => as(A, "selec
 await su("delete from public.leads where id=$1", [leadA]);
 ok("apagar o lead apaga as consultas de crédito dele", (await su("select count(*) n from public.credit_checks where id=$1", [ckId]))[0].n == 0);
 
+console.log("\n# Pix Nexo (split)");
+await su("insert into public.pix_charges (organization_id, value, fee_cents, fee_status) values ($1, 150, 10, 'pending')", [orgA]);
+ok("ninguém da loja lê as cobranças (e a taxa) direto pelo banco", (await as(A, "select * from public.pix_charges")).length === 0 && (await as(C, "select * from public.pix_charges")).length === 0);
+await su("insert into public.org_payment_secrets (organization_id, api_key, webhook_token) values ($1,'k','t')", [orgA]);
+ok("ninguém lê a chave Asaas da loja pelo banco", (await as(A, "select * from public.org_payment_secrets")).length === 0);
+await expectError("taxa negativa é recusada", () => su("update public.pix_charges set fee_cents=-1 where organization_id=$1", [orgA]), "23514");
+await su("insert into public.org_payment_accounts (organization_id, wallet_id, person_type, account_name, doc_masked) values ($1,'w','PJ','Loja A','12.345.678/0001-**')", [orgA]);
+await su("insert into public.payouts (organization_id, value, key_display) values ($1, 50, 'chave')", [orgA]);
+ok("o dono vê a conta e os saques da loja dele", (await as(A, "select * from public.org_payment_accounts")).length === 1 && (await as(A, "select * from public.payouts")).length === 1);
+ok("vendedor não vê a conta nem os saques", (await as(C, "select * from public.org_payment_accounts")).length === 0 && (await as(C, "select * from public.payouts")).length === 0);
+ok("outra empresa não vê a conta nem os saques", (await as(B, "select * from public.org_payment_accounts")).length === 0 && (await as(B, "select * from public.payouts")).length === 0);
+await expectError("usuário não muda a conta de recebimento direto pelo banco", async () => { const r = await as(A, "update public.org_payment_accounts set payout_key='x' where organization_id=$1 returning 1", [orgA]); if (!r.length) throw Object.assign(new Error("rls"), { code: "42501" }); }, "42501");
+await expectError("usuário não descobre se uma empresa é da casa", () => as(A, "select public.org_is_house($1)", [orgA]), "42501");
+await expectError("saque de valor zero é recusado", () => su("insert into public.payouts (organization_id, value, key_display) values ($1, 0, 'x')", [orgA]), "23514");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

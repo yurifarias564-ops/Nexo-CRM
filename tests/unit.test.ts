@@ -889,3 +889,20 @@ test("automações: fluxo em canvas — saídas, validação e conversão das an
   for (const t of TEMPLATES.filter((x) => x.body.graph)) assert.deepEqual(graphIssues(t.body.graph!), [], t.id);
   assert.equal(AutomationBody.safeParse({ ...base, graph: { ...g, nodes: [...g.nodes, { id: "n9", x: 0, y: 0, step: { type: "split", percent_a: 100 } }] } }).success, false);
 });
+
+test("Pix Nexo: taxa da plataforma — R$ 0,10 no 1º mês da loja, depois R$ 1,00", async () => {
+  const { feeFor } = await import("@/lib/payments/fees");
+  const s = { firstCents: 10, afterCents: 100, firstDays: 30 };
+  const created = new Date("2026-10-01T12:00:00Z");
+  assert.equal(feeFor(s, created, new Date("2026-10-15T12:00:00Z"), 15000), 10);   // dia 14: R$ 0,10
+  assert.equal(feeFor(s, created, new Date("2026-10-31T11:59:00Z"), 15000), 10);   // ainda dentro dos 30 dias
+  assert.equal(feeFor(s, created, new Date("2026-11-01T12:00:00Z"), 15000), 100);  // depois: R$ 1,00
+  assert.equal(feeFor(s, created, new Date("2026-12-01T12:00:00Z"), 150), 75);     // venda de R$ 1,50: no máximo metade
+  assert.equal(feeFor({ ...s, afterCents: 0 }, created, new Date("2026-12-01T12:00:00Z"), 15000), 0);
+});
+
+test("Pix Nexo: documento da loja aparece mascarado", async () => {
+  const { maskDoc } = await import("@/lib/payments/fees");
+  assert.equal(maskDoc("12345678901"), "***.456.789-**");
+  assert.equal(maskDoc("12.345.678/0001-95"), "12.345.678/0001-**");
+});

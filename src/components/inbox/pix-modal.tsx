@@ -27,11 +27,15 @@ const PLACEHOLDER: Record<PixKeyType, string> = {
 };
 
 /** "Solicitar pagamento" via Pix, como no WhatsApp: escolhe a chave, valor opcional e envia. */
-export function PixModal({ open, onClose, contactName, onSend }: {
+export function PixModal({ open, onClose, contactName, onSend, onCharge }: {
   open: boolean; onClose: () => void; contactName: string;
   onSend: (p: { keyId: string; amount: number | null; description?: string }) => Promise<void>;
+  /** Pix Nexo: cobrança com confirmação automática */
+  onCharge?: (p: { value: number; description?: string; payerName: string; payerDoc: string }) => Promise<void>;
 }) {
   const ws = useWorkspace();
+  const [nexo, setNexo] = useState<boolean | null>(null);
+  const [payer, setPayer] = useState({ name: "", doc: "" });
   const [keys, setKeys] = useState<PixKey[] | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
@@ -51,9 +55,13 @@ export function PixModal({ open, onClose, contactName, onSend }: {
 
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => { setAmount(""); setDesc(""); setPicking(false); setAdding(false); void load(); }, 0);
+    const t = setTimeout(() => {
+      setAmount(""); setDesc(""); setPicking(false); setAdding(false); setPayer({ name: /^\+?\d/.test(contactName) ? "" : contactName, doc: "" });
+      void load();
+      void fetch("/api/pix/charge").then(async (r) => setNexo(r.ok ? Boolean((await r.json()).enabled) : false)).catch(() => setNexo(false));
+    }, 0);
     return () => clearTimeout(t);
-  }, [open, load]);
+  }, [open, load, contactName]);
 
   const key = keys?.find((k) => k.id === sel) ?? null;
   const value = Number(amount.replace(/\./g, "").replace(",", ".")) || null;
@@ -87,7 +95,37 @@ export function PixModal({ open, onClose, contactName, onSend }: {
     finally { setBusy(false); }
   }
 
-  const showForm = adding && ws.canManage;
+  const showForm = adding && ws.canManage && !nexo;
+
+  async function charge() {
+    if (!onCharge || !value) return;
+    setBusy(true);
+    try { await onCharge({ value, description: desc.trim() || undefined, payerName: payer.name.trim(), payerDoc: payer.doc }); onClose(); }
+    catch (e) { toast.error((e as Error).message || "Não consegui gerar a cobrança"); }
+    finally { setBusy(false); }
+  }
+
+  if (open && nexo && onCharge) {
+    return (
+      <Modal open={open} onClose={onClose} title="Cobrar com Pix Nexo"
+        footer={<Button className="w-full" onClick={() => void charge()} loading={busy} disabled={!value || value < 1 || payer.name.trim().length < 2 || payer.doc.replace(/\D/g, "").length < 11}>Gerar e enviar cobrança</Button>}>
+        <div className="space-y-3 text-sm" data-modal-body>
+          <p className="flex items-center gap-2 rounded-lg bg-emerald-500/10 p-3 text-emerald-100"><PixIcon className="h-5 w-5 shrink-0 text-emerald-300" />
+            {contactName} recebe o Pix Copia e Cola. Quando pagar, o CRM confirma sozinho, avisa o cliente e registra a venda.</p>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">R$</span>
+            <input className="field rounded-full pl-11" inputMode="decimal" placeholder="Valor" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ""))} />
+          </div>
+          <input className="field rounded-full" maxLength={120} placeholder="Referente a… (opcional)" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Field label="Nome do pagador"><input className="field" value={payer.name} maxLength={100} onChange={(e) => setPayer({ ...payer, name: e.target.value })} /></Field>
+            <Field label="CPF ou CNPJ do pagador"><input className="field" inputMode="numeric" value={payer.doc} maxLength={18} onChange={(e) => setPayer({ ...payer, doc: e.target.value })} placeholder="000.000.000-00" /></Field>
+          </div>
+          <p className="text-[11px] text-slate-500">O banco exige nome e CPF/CNPJ de quem paga para gerar a cobrança com confirmação.</p>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal open={open} onClose={onClose} title={showForm ? "Nova chave Pix" : "Solicitar pagamento"}
