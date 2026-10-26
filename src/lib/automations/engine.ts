@@ -6,14 +6,20 @@ import { loadChannel, sendTextVia } from "@/lib/whatsapp";
 import { cronSecret } from "@/lib/cron";
 import { postPinned, publicTarget } from "@/lib/net/safe-post";
 import { norm } from "@/lib/utils";
-import { matchesKeywords, renderVars, Step, Trigger, waitMs, type AutomationBody } from "./schema";
+import { matchesKeywords, portsOf, renderVars, Step, Trigger, TRIGGER_NODE, waitMs, type AutomationBody, type Graph } from "./schema";
+import { apiKeyFor, loadAgent } from "@/lib/ai/agent";
+import { defaultModel, runWithTools } from "@/lib/ai/llm";
+import { checkReply, rulesPrompt, stripEmojis } from "@/lib/ai/rules";
 
 // Motor das automações: lê a fila de acontecimentos, cria as execuções e roda os passos.
 // Chamado a cada minuto pelo cron (e logo depois de mensagens recebidas).
 
-type Auto = AutomationBody & { id: string; organization_id: string; state: { rr?: number } };
-type Run = { id: number; organization_id: string; automation_id: string; lead_id: string | null; status: string; step_index: number; log: LogItem[]; created_at: string };
-type LogItem = { at: string; step: number; type: string; ok: boolean; info?: string };
+type Auto = AutomationBody & { id: string; organization_id: string; state: { rr?: number }; graph?: Graph | null };
+type Run = { id: number; organization_id: string; automation_id: string; lead_id: string | null; status: string; step_index: number; log: LogItem[]; created_at: string; node_id: string | null; reply_node: string | null; waiting_for: string | null };
+type LogItem = { at: string; step: number; type: string; ok: boolean; info?: string; node?: string };
+
+/** Bloco ligado na saída `port` do bloco `from` (null = fim do fluxo). */
+const nextOf = (g: Graph, from: string, port: string) => g.edges.find((e) => e.from === from && e.port === port)?.to ?? null;
 
 const db = () => supabaseAdmin();
 const now = () => new Date().toISOString();
@@ -44,8 +50,11 @@ function matches(t: Trigger, ev: { type: string; data: Record<string, unknown> }
 const MAX_RUNS_PER_DAY = 5;
 
 async function insertRun(a: Auto, leadId: string) {
+  // Fluxo em canvas: começa no bloco ligado ao gatilho (sem nada ligado, não roda)
+  const start = a.graph ? nextOf(a.graph, TRIGGER_NODE, "out") : null;
+  if (a.graph && !start) return false;
   // O índice único do banco impede duas execuções ativas da mesma automação no mesmo lead
-  const { error } = await db().from("automation_runs").insert({ organization_id: a.organization_id, automation_id: a.id, lead_id: leadId, status: "running", resume_at: now() });
+  const { error } = await db().from("automation_runs").insert({ organization_id: a.organization_id, automation_id: a.id, lead_id: leadId, status: "running", resume_at: now(), node_id: start });
   if (error && error.code !== "23505") throw error;
   return !error;
 }
@@ -77,12 +86,20 @@ async function drainEvents(limit = 300) {
     if (!ev.lead_id) continue;
     let autos = cache.get(ev.organization_id);
     if (!autos) { autos = await enabledAutos(ev.organization_id); cache.set(ev.organization_id, autos); }
-    // Cliente respondeu: para os follow-ups que esperavam resposta
     if (ev.type === "message_received") {
+      // Bloco "Esperar o cliente responder": segue pela saída "Respondeu"
+      const { data: waiters } = await db().from("automation_runs").select("id, reply_node").eq("lead_id", ev.lead_id).eq("status", "waiting").eq("waiting_for", "reply");
+      for (const w of waiters ?? []) {
+        await db().from("automation_runs").update(w.reply_node
+          ? { status: "running", node_id: w.reply_node, waiting_for: null, reply_node: null, resume_at: now(), updated_at: now() }
+          : { status: "done", waiting_for: null, reply_node: null, resume_at: null, updated_at: now() })
+          .eq("id", w.id).eq("status", "waiting");
+      }
+      // Cliente respondeu: para os follow-ups que esperavam resposta (menos quem já trata a resposta no fluxo)
       const stopIds = autos.filter((a) => a.stop_on_reply).map((a) => a.id);
       if (stopIds.length) {
         await db().from("automation_runs").update({ status: "stopped", error: "Cliente respondeu", updated_at: now() })
-          .eq("lead_id", ev.lead_id).in("automation_id", stopIds).in("status", ["waiting", "running"]);
+          .eq("lead_id", ev.lead_id).in("automation_id", stopIds).in("status", ["waiting", "running"]).is("waiting_for", null);
       }
     }
     const kind = ev.type === "stage_changed" && ev.data?.to ? await stageKind(String(ev.data.to)) : null;
@@ -139,6 +156,18 @@ async function leadCtx(leadId: string) {
     db().from("lead_tags").select("tag_id").eq("lead_id", lead.id),
   ]);
   return { lead, stage: st?.name ?? null, org: org?.name ?? "", seller: (seller as { full_name: string | null } | null)?.full_name ?? null, tagIds: new Set((tags ?? []).map((t) => t.tag_id as string)) };
+}
+
+/** Quanto falta para o próximo horário comercial (0 = já está). */
+function msUntilBusiness(from = new Date()) {
+  if (inBusinessHours(from)) return 0;
+  const t = new Date(from);
+  t.setUTCMinutes(Math.ceil(t.getUTCMinutes() / 15) * 15, 0, 0);
+  for (let i = 0; i < 4 * 24 * 8; i++) {
+    if (inBusinessHours(t)) return t.getTime() - from.getTime();
+    t.setTime(t.getTime() + 15 * 60_000);
+  }
+  return 0;
 }
 
 function inBusinessHours(d = new Date()) {
@@ -259,7 +288,85 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
       for (const cv of convs ?? []) await db().from("conversations").update({ ai_state: state, ai_paused_until: null }).eq("id", cv.id);
       return { ok: true, info: state };
     }
+    // Estes três são tratados pelo executor do fluxo (saídas e espera)
+    case "wait_reply": return { ok: true, wait: waitMs(step), info: `até ${step.amount} ${step.unit === "minutes" ? "min" : step.unit === "hours" ? "h" : "dia(s)"}` };
+    case "split": return { ok: true };
+    case "wait_business": {
+      const ms = msUntilBusiness();
+      return ms ? { ok: true, wait: ms, info: "fora do horário — espera até abrir" } : { ok: true, info: "já em horário comercial" };
+    }
+    case "ai_message": {
+      const text = await aiWrite(lead, c.org, step.instruction, vars);
+      if (!text.ok) return { ok: false, info: text.info };
+      await sendText(db(), lead.organization_id, null, { leadId: lead.id }, text.text, { automation: true });
+      return { ok: true, info: text.text.slice(0, 120) };
+    }
   }
+}
+
+/** IA escreve uma mensagem curta para o cliente, com o contexto da conversa e as regras do agente. */
+async function aiWrite(lead: LeadRow, org: string, instruction: string, vars: Parameters<typeof renderVars>[1]): Promise<{ ok: true; text: string } | { ok: false; info: string }> {
+  const agent = await loadAgent(lead.organization_id);
+  const provider = agent?.provider ?? "claude";
+  const key = await apiKeyFor(lead.organization_id, provider);
+  if (!key) return { ok: false, info: "Falta a chave da IA (Agente de IA → Configuração)" };
+  const { data: convs } = await db().from("conversations").select("id").eq("lead_id", lead.id).limit(1);
+  const convId = convs?.[0]?.id;
+  const { data: msgs } = convId ? await db().from("messages").select("direction, body, type, transcript").eq("conversation_id", convId).order("sent_at", { ascending: false }).limit(20) : { data: [] };
+  const history = (msgs ?? []).reverse().map((m) => ({ role: m.direction === "in" ? "user" as const : "assistant" as const, text: m.type === "text" ? m.body ?? "" : m.transcript ? `[áudio] ${m.transcript}` : `[${m.type}]` })).filter((h) => h.text.trim());
+  const rules = agent?.rules;
+  const system = [
+    `Você é ${agent?.name ?? "o atendimento"} da empresa "${org}" no WhatsApp. Escreva UMA mensagem curta (1 a 3 frases) para o cliente ${vars.name}, em português do Brasil impecável.`,
+    `O que a mensagem deve fazer: ${renderVars(instruction, vars)}`,
+    agent?.prompt ? `\nInstruções da empresa:\n${agent.prompt.slice(0, 6000)}` : "",
+    rules ? `\n${rulesPrompt(rules)}` : "",
+    "\nResponda somente com o texto da mensagem, sem aspas e sem explicações. Não invente preços, condições ou prazos.",
+  ].join("\n");
+  const out = await runWithTools({ provider, model: agent?.model || defaultModel(provider), apiKey: key, system, history: history.length ? history : [{ role: "user", text: "(cliente ainda não escreveu)" }], tools: [], exec: async () => "", maxRounds: 1, deadline: Date.now() + 60_000, think: false });
+  let text = out.text.trim().replace(/^["“]|["”]$/g, "");
+  if (rules && !rules.emojis) text = stripEmojis(text);
+  if (!text) return { ok: false, info: "A IA não escreveu nada" };
+  if (rules) {
+    const issues = checkReply(text, rules, history.filter((h) => h.role === "user").map((h) => h.text).join("\n"));
+    if (issues.length) return { ok: false, info: `Filtro bloqueou: ${issues[0]}` };
+  }
+  return { ok: true, text: text.slice(0, 4000) };
+}
+
+/** Fluxo em canvas: anda de bloco em bloco seguindo as conexões (Sim/Não, A/B, Respondeu…). */
+async function executeGraph(run: Run, auto: Auto & { graph: Graph }, c: NonNullable<Awaited<ReturnType<typeof leadCtx>>>, finish: (p: Record<string, unknown>) => PromiseLike<unknown>) {
+  const g = auto.graph;
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const idx = (id: string) => g.nodes.findIndex((n) => n.id === id);
+  let nodeId = run.node_id;
+  for (let guard = 0; nodeId && guard < 40; guard++) {
+    const node = byId.get(nodeId);
+    if (!node?.step) { nodeId = null; break; }
+    const p = Step.safeParse(node.step);
+    if (!p.success) { run.log.push({ at: now(), step: idx(nodeId), node: nodeId, type: "inválido", ok: false, info: "Bloco mal configurado" }); await finish({ status: "failed", node_id: nodeId, error: "Bloco mal configurado" }); return; }
+    const step = p.data;
+    let r: Awaited<ReturnType<typeof runStep>>;
+    try { r = await runStep(auto, step, c, run); }
+    catch (e) { r = { ok: false, info: (e as Error).message?.slice(0, 200) }; }
+    // Saída do bloco
+    let port = portsOf(step.type)[0]!.id;
+    if (step.type === "condition") port = r.stop ? "no" : "yes";
+    if (step.type === "split") { port = Math.random() * 100 < step.percent_a ? "a" : "b"; r.info = `caminho ${port.toUpperCase()}`; }
+    run.log.push({ at: now(), step: idx(nodeId), node: nodeId, type: step.type, ok: r.ok, info: r.info });
+    if (!r.ok) { await finish({ status: "failed", node_id: nodeId, error: r.info ?? "Falhou" }); return; }
+    if (r.stop && step.type !== "condition") { await finish({ status: "done", node_id: null, error: null, resume_at: null }); return; }
+    if (step.type === "wait_reply") {
+      // Espera a resposta: se chegar, segue por "Respondeu"; se o tempo acabar, por "Não respondeu"
+      await finish({ status: "waiting", waiting_for: "reply", node_id: nextOf(g, nodeId, "timeout"), reply_node: nextOf(g, nodeId, "replied"), resume_at: new Date(Date.now() + (r.wait ?? 0)).toISOString() });
+      return;
+    }
+    const next = nextOf(g, nodeId, port);
+    if (r.wait) { await finish({ status: "waiting", node_id: next, waiting_for: null, resume_at: new Date(Date.now() + r.wait).toISOString() }); return; }
+    // Salva o progresso a cada bloco (se o servidor cair, não repete o que já foi feito)
+    await db().from("automation_runs").update({ node_id: next, log: run.log.slice(-60), updated_at: now() }).eq("id", run.id);
+    nodeId = next;
+  }
+  await finish({ status: "done", node_id: null, waiting_for: null, resume_at: null });
 }
 
 async function execute(run: Run) {
@@ -267,6 +374,14 @@ async function execute(run: Run) {
   const finish = (patch: Record<string, unknown>) => db().from("automation_runs").update({ ...patch, log: run.log.slice(-60), updated_at: now() }).eq("id", run.id);
   if (!a || !a.enabled) { await finish({ status: "stopped", error: "Automação desligada" }); return; }
   const auto = a as Auto;
+  if (auto.graph) {
+    const cg = run.lead_id ? await leadCtx(run.lead_id) : null;
+    if (!cg) { await finish({ status: "stopped", error: "Lead apagado" }); return; }
+    // Saiu da espera de resposta pelo tempo: limpa a marca
+    if (run.waiting_for) { run.waiting_for = null; await db().from("automation_runs").update({ waiting_for: null, reply_node: null }).eq("id", run.id); }
+    await executeGraph(run, auto as Auto & { graph: Graph }, cg, finish);
+    return;
+  }
   const parsed = (auto.steps as unknown[]).map((s) => Step.safeParse(s));
   const c = run.lead_id ? await leadCtx(run.lead_id) : null;
   if (!c) { await finish({ status: "stopped", error: "Lead apagado" }); return; }

@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { HttpError } from "@/lib/http";
-import type { AutomationBody } from "./schema";
+import { graphSteps, type AutomationBody } from "./schema";
 
 /** Confere que etapas, tags e vendedores usados na automação são desta empresa. */
 export async function validateRefs(orgId: string, b: AutomationBody) {
@@ -9,7 +9,7 @@ export async function validateRefs(orgId: string, b: AutomationBody) {
   const t = b.trigger;
   if ((t.type === "stage_changed" || t.type === "idle") && t.stage_id) stages.add(t.stage_id);
   if (t.type === "tag_added") tags.add(t.tag_id);
-  for (const s of b.steps) {
+  for (const s of b.graph ? graphSteps(b.graph) : b.steps) {
     if (s.type === "move_stage") stages.add(s.stage_id);
     if (s.type === "add_tag" || s.type === "remove_tag") tags.add(s.tag_id);
     if (s.type === "assign") s.user_ids.forEach((u) => users.add(u));

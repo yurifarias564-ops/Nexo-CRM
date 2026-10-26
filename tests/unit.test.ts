@@ -853,3 +853,32 @@ test("crédito: resumo da manhã põe os pré-aprovados primeiro", async () => {
   assert.ok(t.includes("✅ 1 pré-aprovado") && t.includes("❌ 1 não aprovado") && t.includes("https://app/inbox?c=c1"));
   assert.ok(t.includes("nome negativado"));
 });
+
+// ---------------------------------------------------------------------------------------------
+// Automações em canvas (estilo n8n)
+// ---------------------------------------------------------------------------------------------
+test("automações: fluxo em canvas — saídas, validação e conversão das antigas", async () => {
+  const { graphIssues, linearToGraph, portsOf, graphSteps, AutomationBody, TEMPLATES } = await import("@/lib/automations/schema");
+  assert.deepEqual(portsOf("condition").map((p) => p.id), ["yes", "no"]);
+  assert.deepEqual(portsOf("wait_reply").map((p) => p.id), ["replied", "timeout"]);
+  assert.deepEqual(portsOf("send_message").map((p) => p.id), ["out"]);
+  const g = linearToGraph([{ type: "send_message", text: "Oi" }, { type: "condition", field: "business_hours", value: null }, { type: "add_note", text: "x" }]);
+  assert.equal(g.nodes.length, 4);
+  assert.deepEqual(g.edges.map((e) => `${e.from}:${e.port}>${e.to}`), ["trigger:out>n1", "n1:out>n2", "n2:yes>n3"]);
+  assert.deepEqual(graphIssues(g), []);
+  assert.equal(graphSteps(g).length, 3);
+  // Erros comuns
+  assert.ok(graphIssues({ nodes: [{ id: "trigger", x: 0, y: 0, step: null }], edges: [] }).includes("Adicione pelo menos uma ação"));
+  assert.ok(graphIssues({ ...g, edges: g.edges.filter((e) => e.from !== "trigger") }).includes("Ligue o gatilho na primeira ação"));
+  assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n1", port: "out", to: "n3" }] }).includes("Cada saída liga em um bloco só"));
+  assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n1", port: "yes", to: "n3" }] }).includes("Conexão numa saída inválida"));
+  assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n3", port: "out", to: "trigger" }] }).includes("Nada pode ligar de volta no gatilho"));
+  // Corpo salvo: fluxo válido passa; sem ações não
+  const base = { name: "x", enabled: true, trigger: { type: "won" as const }, steps: [], once_per_lead: true, stop_on_reply: false };
+  assert.equal(AutomationBody.safeParse({ ...base, graph: g }).success, true);
+  assert.equal(AutomationBody.safeParse({ ...base, graph: null }).success, false);
+  assert.equal(AutomationBody.safeParse({ ...base, steps: [{ type: "add_note", text: "x" }] }).success, true); // automação antiga continua valendo
+  // Modelos novos são fluxos válidos
+  for (const t of TEMPLATES.filter((x) => x.body.graph)) assert.deepEqual(graphIssues(t.body.graph!), [], t.id);
+  assert.equal(AutomationBody.safeParse({ ...base, graph: { ...g, nodes: [...g.nodes, { id: "n9", x: 0, y: 0, step: { type: "split", percent_a: 100 } }] } }).success, false);
+});
