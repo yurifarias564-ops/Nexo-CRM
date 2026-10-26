@@ -42,7 +42,7 @@ export function newStep(type: Step["type"], ws: ReturnType<typeof useWorkspace>)
 export function useNames() {
   const ws = useWorkspace();
   return useMemo(() => ({
-    stage: (id: string | null | undefined) => (id ? ws.stageById.get(id)?.name ?? "etapa removida" : "qualquer etapa"),
+    stage: (id: string | null | undefined) => (id === ZERO ? "escolha a etapa" : id ? ws.stageById.get(id)?.name ?? "etapa removida" : "qualquer etapa"),
     tag: (id: string) => ws.tagById.get(id)?.name ?? "escolha a tag",
     member: (id: string) => ws.memberById.get(id)?.full_name ?? ws.memberById.get(id)?.email ?? "vendedor",
   }), [ws]);

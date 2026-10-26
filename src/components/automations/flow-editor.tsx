@@ -249,7 +249,16 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
         <div ref={wrap} className="relative min-w-0 flex-1" onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }} onDrop={onDrop}>
           <ReactFlow
             nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
-            nodeTypes={nodeTypes} edgeTypes={edgeTypes} colorMode="dark" fitView fitViewOptions={{ padding: 0.3, maxZoom: 1 }} minZoom={0.2} maxZoom={1.6}
+            nodeTypes={nodeTypes} edgeTypes={edgeTypes} colorMode="dark" fitView fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+            onInit={(inst) => {
+              // Fluxo grande: em vez de encolher tudo até ficar ilegível, abre legível a partir do gatilho
+              setTimeout(() => {
+                if (inst.getZoom() >= 0.7) return;
+                const t = inst.getNode(TRIGGER_NODE);
+                const h = wrap.current?.clientHeight ?? 600;
+                if (t) inst.setViewport({ x: 40 - t.position.x * 0.8, y: h / 2 - (t.position.y + 40) * 0.8, zoom: 0.8 });
+              }, 60);
+            }} minZoom={0.2} maxZoom={1.6}
             onNodeClick={(_, n) => setSelected(n.id)} onPaneClick={() => setSelected(null)}
             onNodesDelete={(ns) => { if (ns.some((n) => n.id === selected)) setSelected(null); }}
             deleteKeyCode={["Backspace", "Delete"]} proOptions={{ hideAttribution: true }}
