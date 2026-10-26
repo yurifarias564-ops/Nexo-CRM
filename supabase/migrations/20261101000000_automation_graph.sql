@@ -5,3 +5,9 @@ alter table public.automation_runs add column if not exists node_id text;
 alter table public.automation_runs add column if not exists reply_node text;
 alter table public.automation_runs add column if not exists waiting_for text check (waiting_for is null or waiting_for = 'reply');
 create index if not exists automation_runs_reply_idx on public.automation_runs (lead_id) where status = 'waiting' and waiting_for = 'reply';
+
+-- Revisão: quando a execução voltou pela resposta do cliente, quando começou a esperar a resposta
+-- e quantas mensagens já mandou (trava contra loop)
+alter table public.automation_runs add column if not exists replied_at timestamptz;
+alter table public.automation_runs add column if not exists wait_started_at timestamptz;
+alter table public.automation_runs add column if not exists sent_count integer not null default 0;

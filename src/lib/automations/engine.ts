@@ -15,7 +15,12 @@ import { checkReply, rulesPrompt, stripEmojis } from "@/lib/ai/rules";
 // Chamado a cada minuto pelo cron (e logo depois de mensagens recebidas).
 
 type Auto = AutomationBody & { id: string; organization_id: string; state: { rr?: number }; graph?: Graph | null };
-type Run = { id: number; organization_id: string; automation_id: string; lead_id: string | null; status: string; step_index: number; log: LogItem[]; created_at: string; node_id: string | null; reply_node: string | null; waiting_for: string | null };
+type Run = { id: number; organization_id: string; automation_id: string; lead_id: string | null; status: string; step_index: number; log: LogItem[]; created_at: string; node_id: string | null; reply_node: string | null; waiting_for: string | null; replied_at: string | null; wait_started_at: string | null; sent_count: number };
+
+/** Máximo de mensagens que uma execução manda (trava contra loop no fluxo). */
+const MAX_SENDS_PER_RUN = 20;
+/** Respostas do cliente que contam para "parar se responder": só as depois do início (ou da volta pela resposta). */
+const replySince = (run: Run) => (run.replied_at && run.replied_at > run.created_at ? run.replied_at : run.created_at);
 type LogItem = { at: string; step: number; type: string; ok: boolean; info?: string; node?: string };
 
 /** Bloco ligado na saída `port` do bloco `from` (null = fim do fluxo). */
@@ -87,19 +92,19 @@ async function drainEvents(limit = 300) {
     let autos = cache.get(ev.organization_id);
     if (!autos) { autos = await enabledAutos(ev.organization_id); cache.set(ev.organization_id, autos); }
     if (ev.type === "message_received") {
-      // Bloco "Esperar o cliente responder": segue pela saída "Respondeu"
-      const { data: waiters } = await db().from("automation_runs").select("id, reply_node").eq("lead_id", ev.lead_id).eq("status", "waiting").eq("waiting_for", "reply");
-      for (const w of waiters ?? []) {
-        await db().from("automation_runs").update(w.reply_node
-          ? { status: "running", node_id: w.reply_node, waiting_for: null, reply_node: null, resume_at: now(), updated_at: now() }
-          : { status: "done", waiting_for: null, reply_node: null, resume_at: null, updated_at: now() })
-          .eq("id", w.id).eq("status", "waiting");
-      }
-      // Cliente respondeu: para os follow-ups que esperavam resposta (menos quem já trata a resposta no fluxo)
+      // Cliente respondeu: para os follow-ups que esperavam resposta (menos quem trata a resposta no próprio fluxo)
       const stopIds = autos.filter((a) => a.stop_on_reply).map((a) => a.id);
       if (stopIds.length) {
         await db().from("automation_runs").update({ status: "stopped", error: "Cliente respondeu", updated_at: now() })
           .eq("lead_id", ev.lead_id).in("automation_id", stopIds).in("status", ["waiting", "running"]).is("waiting_for", null);
+      }
+      // Bloco "Esperar o cliente responder": segue pela saída "Respondeu"
+      const { data: waiters } = await db().from("automation_runs").select("id, reply_node").eq("lead_id", ev.lead_id).eq("status", "waiting").eq("waiting_for", "reply");
+      for (const w of waiters ?? []) {
+        await db().from("automation_runs").update(w.reply_node
+          ? { status: "running", node_id: w.reply_node, waiting_for: null, reply_node: null, replied_at: now(), resume_at: now(), updated_at: now() }
+          : { status: "done", waiting_for: null, reply_node: null, resume_at: null, updated_at: now() })
+          .eq("id", w.id).eq("status", "waiting");
       }
     }
     const kind = ev.type === "stage_changed" && ev.data?.to ? await stageKind(String(ev.data.to)) : null;
@@ -193,7 +198,8 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
   switch (step.type) {
     case "send_message": {
       // "Parar se o cliente responder": confere de novo logo antes de enviar
-      if (a.stop_on_reply && (await clientRepliedSince(lead.id, run.created_at))) return { ok: true, stop: true, info: "cliente respondeu — parou aqui" };
+      if (a.stop_on_reply && (await clientRepliedSince(lead.id, replySince(run)))) return { ok: true, stop: true, info: "cliente respondeu — parou aqui" };
+      if (++run.sent_count > MAX_SENDS_PER_RUN) return { ok: false, info: `Limite de ${MAX_SENDS_PER_RUN} mensagens por execução (verifique se o fluxo não está em loop)` };
       const text = renderVars(step.text, vars);
       await sendText(db(), lead.organization_id, null, { leadId: lead.id }, text, { automation: true });
       return { ok: true, info: text.slice(0, 120) };
@@ -201,6 +207,7 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
     case "notify": {
       const { data: ch } = await db().from("whatsapp_channels").select("id").eq("organization_id", lead.organization_id).eq("status", "connected").order("created_at").limit(1).maybeSingle();
       if (!ch) return { ok: false, info: "Nenhum WhatsApp conectado" };
+      if (++run.sent_count > MAX_SENDS_PER_RUN) return { ok: false, info: `Limite de ${MAX_SENDS_PER_RUN} mensagens por execução` };
       await sendTextVia(await loadChannel(ch.id), step.phone, renderVars(step.text, vars));
       return { ok: true, info: `aviso para ${step.phone}` };
     }
@@ -296,6 +303,8 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
       return ms ? { ok: true, wait: ms, info: "fora do horário — espera até abrir" } : { ok: true, info: "já em horário comercial" };
     }
     case "ai_message": {
+      if (a.stop_on_reply && (await clientRepliedSince(lead.id, replySince(run)))) return { ok: true, stop: true, info: "cliente respondeu — parou aqui" };
+      if (++run.sent_count > MAX_SENDS_PER_RUN) return { ok: false, info: `Limite de ${MAX_SENDS_PER_RUN} mensagens por execução` };
       const text = await aiWrite(lead, c.org, step.instruction, vars);
       if (!text.ok) return { ok: false, info: text.info };
       await sendText(db(), lead.organization_id, null, { leadId: lead.id }, text.text, { automation: true });
@@ -308,12 +317,16 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
 async function aiWrite(lead: LeadRow, org: string, instruction: string, vars: Parameters<typeof renderVars>[1]): Promise<{ ok: true; text: string } | { ok: false; info: string }> {
   const agent = await loadAgent(lead.organization_id);
   const provider = agent?.provider ?? "claude";
-  const key = await apiKeyFor(lead.organization_id, provider);
-  if (!key) return { ok: false, info: "Falta a chave da IA (Agente de IA → Configuração)" };
+  const { data: own } = await db().from("ai_agent_secrets").select("api_key").eq("organization_id", lead.organization_id).eq("provider", provider).maybeSingle();
+  // Usa a chave própria da empresa; a da plataforma só para quem está com o Agente de IA ligado
+  const key = own?.api_key || (agent?.enabled ? await apiKeyFor(lead.organization_id, provider) : null);
+  if (!key) return { ok: false, info: "Ligue o Agente de IA ou cadastre a chave da IA (Agente de IA → Configuração)" };
   const { data: convs } = await db().from("conversations").select("id").eq("lead_id", lead.id).limit(1);
   const convId = convs?.[0]?.id;
   const { data: msgs } = convId ? await db().from("messages").select("direction, body, type, transcript").eq("conversation_id", convId).order("sent_at", { ascending: false }).limit(20) : { data: [] };
   const history = (msgs ?? []).reverse().map((m) => ({ role: m.direction === "in" ? "user" as const : "assistant" as const, text: m.type === "text" ? m.body ?? "" : m.transcript ? `[áudio] ${m.transcript}` : `[${m.type}]` })).filter((h) => h.text.trim());
+  // A conversa precisa terminar com o cliente (senão a IA "continua" a nossa última mensagem)
+  if (!history.length || history[history.length - 1]!.role === "assistant") history.push({ role: "user", text: "(o cliente ainda não respondeu — escreva a próxima mensagem para ele)" });
   const rules = agent?.rules;
   const system = [
     `Você é ${agent?.name ?? "o atendimento"} da empresa "${org}" no WhatsApp. Escreva UMA mensagem curta (1 a 3 frases) para o cliente ${vars.name}, em português do Brasil impecável.`,
@@ -322,7 +335,7 @@ async function aiWrite(lead: LeadRow, org: string, instruction: string, vars: Pa
     rules ? `\n${rulesPrompt(rules)}` : "",
     "\nResponda somente com o texto da mensagem, sem aspas e sem explicações. Não invente preços, condições ou prazos.",
   ].join("\n");
-  const out = await runWithTools({ provider, model: agent?.model || defaultModel(provider), apiKey: key, system, history: history.length ? history : [{ role: "user", text: "(cliente ainda não escreveu)" }], tools: [], exec: async () => "", maxRounds: 1, deadline: Date.now() + 60_000, think: false });
+  const out = await runWithTools({ provider, model: agent?.model || defaultModel(provider), apiKey: key, system, history, tools: [], exec: async () => "", maxRounds: 1, deadline: Date.now() + 60_000, think: false });
   let text = out.text.trim().replace(/^["“]|["”]$/g, "");
   if (rules && !rules.emojis) text = stripEmojis(text);
   if (!text) return { ok: false, info: "A IA não escreveu nada" };
@@ -341,7 +354,7 @@ async function executeGraph(run: Run, auto: Auto & { graph: Graph }, c: NonNulla
   let nodeId = run.node_id;
   for (let guard = 0; nodeId && guard < 40; guard++) {
     const node = byId.get(nodeId);
-    if (!node?.step) { nodeId = null; break; }
+    if (!node?.step) { await finish({ status: "stopped", node_id: null, error: "O bloco foi removido do fluxo" }); return; }
     const p = Step.safeParse(node.step);
     if (!p.success) { run.log.push({ at: now(), step: idx(nodeId), node: nodeId, type: "inválido", ok: false, info: "Bloco mal configurado" }); await finish({ status: "failed", node_id: nodeId, error: "Bloco mal configurado" }); return; }
     const step = p.data;
@@ -357,16 +370,18 @@ async function executeGraph(run: Run, auto: Auto & { graph: Graph }, c: NonNulla
     if (r.stop && step.type !== "condition") { await finish({ status: "done", node_id: null, error: null, resume_at: null }); return; }
     if (step.type === "wait_reply") {
       // Espera a resposta: se chegar, segue por "Respondeu"; se o tempo acabar, por "Não respondeu"
-      await finish({ status: "waiting", waiting_for: "reply", node_id: nextOf(g, nodeId, "timeout"), reply_node: nextOf(g, nodeId, "replied"), resume_at: new Date(Date.now() + (r.wait ?? 0)).toISOString() });
+      await finish({ status: "waiting", waiting_for: "reply", node_id: nextOf(g, nodeId, "timeout"), reply_node: nextOf(g, nodeId, "replied"), wait_started_at: now(), sent_count: run.sent_count, resume_at: new Date(Date.now() + (r.wait ?? 0)).toISOString() });
       return;
     }
     const next = nextOf(g, nodeId, port);
-    if (r.wait) { await finish({ status: "waiting", node_id: next, waiting_for: null, resume_at: new Date(Date.now() + r.wait).toISOString() }); return; }
+    if (r.wait) { await finish({ status: "waiting", node_id: next, waiting_for: null, sent_count: run.sent_count, resume_at: new Date(Date.now() + r.wait).toISOString() }); return; }
     // Salva o progresso a cada bloco (se o servidor cair, não repete o que já foi feito)
-    await db().from("automation_runs").update({ node_id: next, log: run.log.slice(-60), updated_at: now() }).eq("id", run.id);
+    await db().from("automation_runs").update({ node_id: next, sent_count: run.sent_count, log: run.log.slice(-60), updated_at: now() }).eq("id", run.id);
     nodeId = next;
   }
-  await finish({ status: "done", node_id: null, waiting_for: null, resume_at: null });
+  // Fluxo longo: continua no próximo minuto, do bloco onde parou
+  if (nodeId) { await finish({ status: "running", node_id: nodeId, sent_count: run.sent_count, resume_at: now() }); return; }
+  await finish({ status: "done", node_id: null, waiting_for: null, sent_count: run.sent_count, resume_at: null });
 }
 
 async function execute(run: Run) {
@@ -377,8 +392,12 @@ async function execute(run: Run) {
   if (auto.graph) {
     const cg = run.lead_id ? await leadCtx(run.lead_id) : null;
     if (!cg) { await finish({ status: "stopped", error: "Lead apagado" }); return; }
-    // Saiu da espera de resposta pelo tempo: limpa a marca
-    if (run.waiting_for) { run.waiting_for = null; await db().from("automation_runs").update({ waiting_for: null, reply_node: null }).eq("id", run.id); }
+    // Saiu da espera de resposta pelo tempo: se o cliente respondeu nesse meio-tempo (e a resposta escapou), vai por "Respondeu"
+    if (run.waiting_for) {
+      if (run.reply_node && run.lead_id && run.wait_started_at && (await clientRepliedSince(run.lead_id, run.wait_started_at))) { run.node_id = run.reply_node; run.replied_at = now(); }
+      run.waiting_for = null;
+      await db().from("automation_runs").update({ waiting_for: null, reply_node: null, node_id: run.node_id, replied_at: run.replied_at }).eq("id", run.id);
+    }
     await executeGraph(run, auto as Auto & { graph: Graph }, cg, finish);
     return;
   }

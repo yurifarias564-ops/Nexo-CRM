@@ -215,7 +215,7 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
         <label className="flex items-center gap-1.5 text-xs text-slate-300" title="Cada lead passa por esta automação uma única vez">
           <input type="checkbox" checked={meta.once_per_lead} onChange={(e) => setMeta({ ...meta, once_per_lead: e.target.checked })} /> Uma vez por lead
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-slate-300" title="Se o cliente responder enquanto a automação espera, ela para (o bloco 'Esperar resposta' trata a resposta pelo caminho dele)">
+        <label className="flex items-center gap-1.5 text-xs text-slate-300" title="Se o cliente responder enquanto a automação espera, ela para. Exceção: o bloco 'Esperar o cliente responder' segue pelo caminho 'Respondeu'.">
           <input type="checkbox" checked={meta.stop_on_reply} onChange={(e) => setMeta({ ...meta, stop_on_reply: e.target.checked })} /> Parar se o cliente responder
         </label>
         <div className="ml-auto flex gap-2">
@@ -224,7 +224,7 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
         {/* Blocos disponíveis */}
         <aside className="hidden w-60 shrink-0 overflow-y-auto border-r border-line bg-ink-900/60 p-3 md:block">
           <p className="mb-2 text-xs text-slate-500">Clique para adicionar depois do bloco selecionado, ou arraste para o canvas.</p>
@@ -261,10 +261,14 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
           </ReactFlow>
           <div className="absolute left-3 top-3 flex gap-2">
             <Button size="sm" variant="secondary" onClick={() => { setNodes((ns) => autoLayout(ns, edges)); setTimeout(() => rf.fitView({ padding: 0.3, maxZoom: 1 }), 50); }}><LayoutGrid className="h-3.5 w-3.5" /> Organizar</Button>
+            <select className="field h-8 w-44 text-xs md:hidden" value="" onChange={(e) => e.target.value && add(e.target.value as Step["type"])} aria-label="Adicionar bloco">
+              <option value="">+ Adicionar bloco</option>
+              {(Object.keys(STEP_LABEL) as Step["type"][]).map((k) => <option key={k} value={k}>{STEP_LABEL[k].label}</option>)}
+            </select>
           </div>
           {nodes.length === 1 && (
             <div className="pointer-events-none absolute inset-x-0 bottom-8 mx-auto w-fit rounded-full border border-line bg-ink-900/90 px-4 py-2 text-xs text-slate-300">
-              <MousePointerClick className="mr-1 inline h-3.5 w-3.5 text-brand-300" />Escolha um bloco à esquerda para começar. Ligue as bolinhas para criar o caminho.
+              <MousePointerClick className="mr-1 inline h-3.5 w-3.5 text-brand-300" />Adicione um bloco (lista à esquerda ou “+ Adicionar bloco”). Ligue as bolinhas para criar o caminho.
             </div>
           )}
         </div>

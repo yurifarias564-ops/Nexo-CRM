@@ -135,7 +135,7 @@ function Gallery({ onClose, onPick }: { onClose: () => void; onPick: (b: Omit<Au
 
 // ------------------------------------------------------------------------------------------------
 
-interface RunRow { id: number; status: string; step_index: number; resume_at: string | null; error: string | null; created_at: string; log: { at: string; step: number; type: string; ok: boolean; info?: string }[]; leads: { id: string; name: string } | null }
+interface RunRow { id: number; status: string; step_index: number; resume_at: string | null; error: string | null; created_at: string; log: { at: string; step: number; type: string; ok: boolean; info?: string; node?: string }[]; waiting_for?: string | null; leads: { id: string; name: string } | null }
 const RUN_STATUS: Record<string, { l: string; c: string }> = {
   running: { l: "Na fila", c: "text-slate-300" }, processing: { l: "Rodando", c: "text-brand-200" }, waiting: { l: "Aguardando", c: "text-amber-300" },
   done: { l: "Concluída", c: "text-emerald-300" }, stopped: { l: "Parou", c: "text-slate-400" }, failed: { l: "Falhou", c: "text-red-300" },
@@ -157,7 +157,7 @@ function Runs({ a, onClose }: { a: Automation; onClose: () => void }) {
                 <button onClick={() => setOpen(open === r.id ? null : r.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-ink-850">
                   <span className={cn("w-24 text-xs font-medium", RUN_STATUS[r.status]?.c)}>{RUN_STATUS[r.status]?.l ?? r.status}</span>
                   <span className="min-w-0 flex-1 truncate text-slate-100">{r.leads?.name ?? "—"}</span>
-                  {r.status === "waiting" && r.resume_at && <span className="text-xs text-amber-300">continua {relativeTime(r.resume_at).replace("há ", "em ")}</span>}
+                  {r.status === "waiting" && r.resume_at && <span className="text-xs text-amber-300">{r.waiting_for === "reply" ? "esperando a resposta" : "continua"} {relativeTime(r.resume_at).replace("há ", r.waiting_for === "reply" ? "até " : "em ")}</span>}
                   {r.error && <span className="max-w-[180px] truncate text-xs text-slate-500">{r.error}</span>}
                   <span className="text-xs text-slate-500">{relativeTime(r.created_at)}</span>
                 </button>
@@ -166,7 +166,7 @@ function Runs({ a, onClose }: { a: Automation; onClose: () => void }) {
                     {r.log.map((l, i) => (
                       <li key={i} className="flex gap-2">
                         {l.ok ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" /> : <XCircle className="h-3.5 w-3.5 shrink-0 text-red-400" />}
-                        <span className="text-slate-300">{l.step + 1}. {STEP_LABEL[l.type as Step["type"]]?.label ?? l.type}</span>
+                        <span className="text-slate-300">{l.node ? "" : `${l.step + 1}. `}{STEP_LABEL[l.type as Step["type"]]?.label ?? l.type}</span>
                         {l.info && <span className="truncate text-slate-500">— {l.info}</span>}
                         <span className="ml-auto text-slate-600">{new Date(l.at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
                       </li>

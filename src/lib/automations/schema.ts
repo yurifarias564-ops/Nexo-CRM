@@ -85,7 +85,7 @@ export function graphIssues(g: Graph): string[] {
     seen.add(k);
   }
   // Caminho que volta (loop) só com um bloco de espera no meio — senão mandaria mensagens sem parar
-  const waits = new Set(g.nodes.filter((n) => n.step && ["wait", "wait_reply", "wait_business"].includes(n.step.type)).map((n) => n.id));
+  const waits = new Set(g.nodes.filter((n) => n.step && ["wait", "wait_reply"].includes(n.step.type)).map((n) => n.id));
   const adj = new Map<string, string[]>();
   for (const e of g.edges) if (!waits.has(e.from) && !waits.has(e.to)) adj.set(e.from, [...(adj.get(e.from) ?? []), e.to]);
   const state = new Map<string, 1 | 2>();

@@ -877,6 +877,9 @@ test("automações: fluxo em canvas — saídas, validação e conversão das an
   assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n3", port: "out", to: "n1" }] }).some((x) => x.includes("bloco de espera")));
   const withWait = { nodes: [...g.nodes, { id: "w", x: 0, y: 0, step: { type: "wait" as const, amount: 1, unit: "days" as const } }], edges: [...g.edges, { from: "n3", port: "out", to: "w" }, { from: "w", port: "out", to: "n1" }] };
   assert.deepEqual(graphIssues(withWait), []);
+  // "Esperar horário comercial" não vale como espera num loop (em horário comercial ele passa direto)
+  const withBiz = { nodes: [...g.nodes, { id: "w", x: 0, y: 0, step: { type: "wait_business" as const } }], edges: [...g.edges, { from: "n3", port: "out", to: "w" }, { from: "w", port: "out", to: "n1" }] };
+  assert.ok(graphIssues(withBiz).some((x) => x.includes("bloco de espera")));
   // Corpo salvo: fluxo válido passa; sem ações não
   const base = { name: "x", enabled: true, trigger: { type: "won" as const }, steps: [], once_per_lead: true, stop_on_reply: false };
   assert.equal(AutomationBody.safeParse({ ...base, graph: g }).success, true);
