@@ -84,6 +84,18 @@ export function graphIssues(g: Graph): string[] {
     if (seen.has(k)) out.push("Cada saída liga em um bloco só");
     seen.add(k);
   }
+  // Caminho que volta (loop) só com um bloco de espera no meio — senão mandaria mensagens sem parar
+  const waits = new Set(g.nodes.filter((n) => n.step && ["wait", "wait_reply", "wait_business"].includes(n.step.type)).map((n) => n.id));
+  const adj = new Map<string, string[]>();
+  for (const e of g.edges) if (!waits.has(e.from) && !waits.has(e.to)) adj.set(e.from, [...(adj.get(e.from) ?? []), e.to]);
+  const state = new Map<string, 1 | 2>();
+  const loop = (id: string): boolean => {
+    state.set(id, 1);
+    for (const t of adj.get(id) ?? []) { if (state.get(t) === 1 || (!state.has(t) && loop(t))) return true; }
+    state.set(id, 2);
+    return false;
+  };
+  if (g.nodes.some((n) => !state.has(n.id) && loop(n.id))) out.push("Um caminho que volta para trás precisa ter um bloco de espera");
   if (!g.nodes.some((n) => n.step)) out.push("Adicione pelo menos uma ação");
   else if (!g.edges.some((e) => e.from === TRIGGER_NODE)) out.push("Ligue o gatilho na primeira ação");
   return [...new Set(out)];

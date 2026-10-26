@@ -873,6 +873,10 @@ test("automações: fluxo em canvas — saídas, validação e conversão das an
   assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n1", port: "out", to: "n3" }] }).includes("Cada saída liga em um bloco só"));
   assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n1", port: "yes", to: "n3" }] }).includes("Conexão numa saída inválida"));
   assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n3", port: "out", to: "trigger" }] }).includes("Nada pode ligar de volta no gatilho"));
+  // Loop sem espera é recusado; com espera, pode
+  assert.ok(graphIssues({ ...g, edges: [...g.edges, { from: "n3", port: "out", to: "n1" }] }).some((x) => x.includes("bloco de espera")));
+  const withWait = { nodes: [...g.nodes, { id: "w", x: 0, y: 0, step: { type: "wait" as const, amount: 1, unit: "days" as const } }], edges: [...g.edges, { from: "n3", port: "out", to: "w" }, { from: "w", port: "out", to: "n1" }] };
+  assert.deepEqual(graphIssues(withWait), []);
   // Corpo salvo: fluxo válido passa; sem ações não
   const base = { name: "x", enabled: true, trigger: { type: "won" as const }, steps: [], once_per_lead: true, stop_on_reply: false };
   assert.equal(AutomationBody.safeParse({ ...base, graph: g }).success, true);
