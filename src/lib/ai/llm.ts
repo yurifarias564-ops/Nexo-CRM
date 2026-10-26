@@ -12,7 +12,11 @@ export interface ToolDef {
   parameters: { type: "object"; properties: Record<string, unknown>; required?: string[] };
 }
 
-export interface ChatTurn { role: "user" | "assistant"; text: string }
+export interface ChatImage { mime: string; data: string /* base64 */ }
+export interface ChatTurn { role: "user" | "assistant"; text: string; images?: ChatImage[] }
+
+/** Só Claude e Gemini enxergam imagens (os modelos da Groq são só texto). */
+export const supportsImages = (p: AiProvider) => p === "claude" || p === "gemini";
 export interface ToolCall { name: string; args: Record<string, unknown>; result: string }
 
 export interface RunInput {
@@ -86,15 +90,20 @@ function alternate(h: ChatTurn[]): ChatTurn[] {
     const text = t.text.trim();
     if (!text) continue;
     const last = out[out.length - 1];
-    if (last && last.role === t.role) last.text += `\n${text}`;
-    else out.push({ role: t.role, text });
+    if (last && last.role === t.role) { last.text += `\n${text}`; if (t.images?.length) last.images = [...(last.images ?? []), ...t.images]; }
+    else out.push({ role: t.role, text, ...(t.images?.length ? { images: [...t.images] } : {}) });
   }
   while (out[0]?.role === "assistant") out.shift();
   return out;
 }
 
 async function runClaude(i: RunInput, calls: ToolCall[]): Promise<string> {
-  const messages: { role: string; content: unknown }[] = alternate(i.history).map((t) => ({ role: t.role, content: t.text }));
+  const messages: { role: string; content: unknown }[] = alternate(i.history).map((t) => ({
+    role: t.role,
+    content: t.images?.length && t.role === "user"
+      ? [...t.images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mime, data: im.data } })), { type: "text", text: t.text }]
+      : t.text,
+  }));
   const tools = i.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
   let thinking = i.think !== false;
   let last = "";
@@ -145,7 +154,10 @@ function geminiSchema(s: unknown): unknown {
 }
 
 async function runGemini(i: RunInput, calls: ToolCall[]): Promise<string> {
-  const contents: { role: string; parts: unknown[] }[] = alternate(i.history).map((t) => ({ role: t.role === "assistant" ? "model" : "user", parts: [{ text: t.text }] }));
+  const contents: { role: string; parts: unknown[] }[] = alternate(i.history).map((t) => ({
+    role: t.role === "assistant" ? "model" : "user",
+    parts: [...(t.role === "user" ? (t.images ?? []).map((im) => ({ inlineData: { mimeType: im.mime, data: im.data } })) : []), { text: t.text }],
+  }));
   const tools = [{ functionDeclarations: i.tools.map((t) => ({ name: t.name, description: t.description, parameters: geminiSchema(t.parameters) })) }];
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(i.model)}:generateContent`;
   let last = "";

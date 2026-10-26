@@ -1,8 +1,8 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { applyCreditToLead, loadCreditSettings, notifyCreditResult, runCreditCheck } from "@/lib/credit";
-import { cpfDigits, customerGuidance, decide, isCpf, maskCpf, scrubCpf, type CreditSettings } from "@/lib/credit/shared";
+import { applyCreditToLead, loadCreditSettings, notifyCreditResult, registerBankResult, runCreditCheck, runPreAnalysis } from "@/lib/credit";
+import { cpfDigits, customerGuidance, decide, isCpf, maskCpf, preAnalysis, scrubCpf, type CreditSettings, type Negative } from "@/lib/credit/shared";
 import { envOptional } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 import { norm } from "@/lib/utils";
@@ -14,7 +14,7 @@ import { loadChannel } from "@/lib/whatsapp";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
 import { checkReply, rulesPrompt, stripEmojis, withDefaults, withinHours, type Rules } from "./rules";
-import { defaultModel, KEY_ENV, runWithTools, type AiProvider, type ChatTurn, type ToolCall, type ToolDef } from "./llm";
+import { defaultModel, KEY_ENV, runWithTools, supportsImages, type AiProvider, type ChatImage, type ChatTurn, type ToolCall, type ToolDef } from "./llm";
 
 // Agente de IA que atende no WhatsApp em nome da empresa.
 
@@ -71,7 +71,7 @@ const TONE_RULES: Record<Tone, string> = {
   ].join("\n"),
 };
 
-export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zone" | "auto_tags"> & { tone?: Tone; rules?: Rules }, orgName: string, lead: LeadCtx, sellers: string[], extra = "", opts: { credit?: boolean } = {}): string {
+export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zone" | "auto_tags"> & { tone?: Tone; rules?: Rules }, orgName: string, lead: LeadCtx, sellers: string[], extra = "", opts: { credit?: CreditSettings | null } = {}): string {
   const company = agent.prompt.trim() || "(A empresa ainda não escreveu instruções. Atenda com excelência, entenda a necessidade do cliente e transfira para um vendedor.)";
   const tone = TONE_RULES[agent.tone ?? "executivo"];
   return [
@@ -104,7 +104,7 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
     "## Limites (inegociáveis)",
     "- Nunca invente preço, estoque, cor disponível, condição, prazo, taxa ou promoção. Se não estiver nas instruções, diga com elegância que vai confirmar com o especialista e transfira.",
     "- Não prometa aprovação de crédito, desconto ou entrega.",
-    opts.credit ? "- Nunca peça senha nem dados de cartão. CPF só para a análise de crédito, do jeito descrito abaixo." : "- Não peça CPF, senha nem dados de cartão.",
+    opts.credit && opts.credit.provider !== "ia" ? "- Nunca peça senha nem dados de cartão. CPF só para a análise de crédito, do jeito descrito abaixo." : "- Não peça CPF, senha nem dados de cartão.",
     "- Se perguntarem se você é uma IA ou um robô, seja honesto e continue ajudando.",
     "- Assuntos fora do negócio da empresa: responda com educação em uma frase e retome o atendimento.",
     "",
@@ -116,7 +116,7 @@ export function systemPrompt(agent: Pick<AgentRow, "name" | "prompt" | "time_zon
     "- atualizar_resumo: quando a negociação avançar — resumo executivo com interesse, condições, objeções e próximo passo.",
     "- mover_etapa: quando o cliente avançar no funil de forma clara (ex.: qualificado, agendado).",
     "- agendar: só depois de o cliente confirmar dia e hora.",
-    opts.credit ? CREDIT_PROMPT : "",
+    opts.credit ? (opts.credit.provider === "ia" ? freeCreditPrompt(opts.credit) : CREDIT_PROMPT) : "",
     "- transferir_para_vendedor: quando o cliente pedir uma pessoa, quiser fechar ou pagar, pedir condição que você não tem, reclamar, ou a conversa sair do seu alcance. Depois avise com elegância que o especialista dará continuidade em instantes.",
     "",
     "## Situação atual",
@@ -145,22 +145,64 @@ const CREDIT_PROMPT = [
   "  5) Se não aprovou, negocie: proponha entrada maior, mais parcelas ou um veículo de valor menor e, se o cliente topar, rode analisar_credito de novo com os novos valores. O vendedor só entra para fechar a venda depois do crédito pré-aprovado.",
 ].join("\n");
 
+/** Modo grátis: a IA analisa com as regras da loja e o cliente faz a pré-aprovação oficial no banco. */
+function freeCreditPrompt(c: CreditSettings) {
+  const links = c.bank_links.map((l) => `${l.banco}: ${l.url}`).join(" | ");
+  return [
+    "- analisar_credito (financiamento): VOCÊ faz a análise de crédito, na hora e sem custo — não transfira para o vendedor fazer.",
+    "  1) Quando o cliente quiser financiar ou perguntar se aprova, ofereça a pré-análise na hora, sem compromisso.",
+    "  2) Pergunte, uma coisa por mensagem e só o que ainda não sabe: renda mensal (e se é registrado, autônomo, aposentado ou empresário), valor de entrada, em quantas parcelas, se tem CNH e — com delicadeza — se hoje o nome está sem restrição (\"seu nome está limpo hoje?\"). O valor do veículo vem das informações da empresa.",
+    "  3) Chame analisar_credito (não precisa de CPF). Dê o resultado exatamente como a ferramenta orientar. Nunca diga \"reprovado\".",
+    "  4) Se não passou, negocie com a entrada sugerida pela ferramenta (ou mais parcelas / outro veículo) e rode de novo se o cliente topar.",
+    links
+      ? `  5) Pré-análise aprovada → peça a pré-aprovação OFICIAL e gratuita do banco, que o cliente faz no celular em 2 minutos: ${links}. Peça que mande aqui o print do resultado.`
+      : "  5) Pré-análise aprovada → o especialista confirma com o banco.",
+    "  6) Quando o cliente mandar o print (imagem) ou contar o resultado do banco, leia com atenção e chame registrar_resultado_banco com exatamente o que está escrito (banco, aprovado ou não, valor aprovado, parcela, prazo, validade). Nunca invente valores: se não der para ler, peça outro print.",
+    "  7) Com o banco aprovando, o especialista entra só para fechar a venda.",
+  ].join("\n");
+}
+
+export const BANK_RESULT_TOOL: ToolDef = {
+  name: "registrar_resultado_banco",
+  description: "Registra o resultado da pré-aprovação que o cliente fez no site/app do banco (lido do print que ele mandou ou do que ele contou).",
+  parameters: {
+    type: "object",
+    properties: {
+      banco: { type: "string", description: "Nome do banco, ex.: Santander" },
+      resultado: { type: "string", enum: ["aprovado", "reprovado", "analise"], description: "O que o banco respondeu" },
+      valor_aprovado: { type: "number", description: "Valor de crédito aprovado em reais, se aparecer" },
+      parcela: { type: "number", description: "Valor da parcela em reais, se aparecer" },
+      prazo: { type: "number", description: "Número de parcelas, se aparecer" },
+      validade: { type: "string", description: "Validade da proposta/cupom, se aparecer" },
+    },
+    required: ["banco", "resultado"],
+  },
+};
+
 export const CREDIT_TOOL: ToolDef = {
   name: "analisar_credito",
   description: "Pré-análise de crédito para financiamento. Use só depois que o cliente AUTORIZOU a consulta e informou CPF, renda mensal, valor do veículo, entrada e número de parcelas.",
   parameters: {
     type: "object",
     properties: {
-      cpf: { type: "string", description: "CPF do cliente (11 dígitos)" },
+      cpf: { type: "string", description: "CPF do cliente (11 dígitos). Obrigatório só na consulta paga; na pré-análise grátis é opcional" },
+      nome_negativado: { type: "string", enum: ["sim", "nao", "nao_sabe"], description: "Se o cliente disse que tem restrição no nome" },
+      tipo_renda: { type: "string", description: "Registrado (CLT), autônomo, aposentado, empresário…" },
+      tem_cnh: { type: "boolean", description: "Se o cliente tem CNH" },
       renda_mensal: { type: "number", description: "Renda mensal em reais" },
       valor_veiculo: { type: "number", description: "Valor do veículo em reais" },
       entrada: { type: "number", description: "Valor de entrada em reais (0 se não tiver)" },
       parcelas: { type: "number", description: "Número de parcelas desejado (ex.: 48)" },
-      cliente_autorizou: { type: "boolean", description: "true somente se o cliente autorizou a consulta de crédito com o CPF dele" },
+      cliente_autorizou: { type: "boolean", description: "true somente se o cliente aceitou fazer a análise" },
     },
-    required: ["cpf", "renda_mensal", "valor_veiculo", "entrada", "parcelas", "cliente_autorizou"],
+    required: ["renda_mensal", "valor_veiculo", "entrada", "parcelas", "cliente_autorizou"],
   },
 };
+
+function creditTools(c: CreditSettings): ToolDef[] {
+  if (!c.enabled) return TOOLS;
+  return c.provider === "ia" ? [...TOOLS, CREDIT_TOOL, BANK_RESULT_TOOL] : [...TOOLS, CREDIT_TOOL];
+}
 
 export const TOOLS: ToolDef[] = [
   { name: "adicionar_tag", description: "Coloca uma tag no cliente (cria a tag se ainda não existir). Ex.: modelo de interesse.",
@@ -218,6 +260,58 @@ function makeExec(opts: {
   // Análise de crédito já feita nesta resposta: não repete (nem cobra de novo)
   const creditDone = new Map<string, string>();
   let creditCalls = 0;
+
+  const handoffForSale = async (reason: string) => {
+    if (!live || !leadId) return;
+    if (opts.conversationId) await db.from("conversations").update({ ai_state: "paused", ai_paused_until: null }).eq("id", opts.conversationId);
+    await db.from("activities").insert({ organization_id: orgId, lead_id: leadId, actor_id: null, type: "ai_handoff", payload: { reason, seller: null } });
+    effects.push({ kind: "handoff", reason, seller: null });
+  };
+
+  /** Modo grátis: pré-análise própria com as regras da loja (nenhuma consulta paga). */
+  const freeAnalysis = async (input: { cpf: string; income: number; vehicle_value: number; down_payment: number; months: number }, args: Record<string, unknown>) => {
+    const credit = opts.credit!;
+    const negative = (["sim", "nao", "nao_sabe"].includes(String(args.nome_negativado)) ? String(args.nome_negativado) : "nao_sabe") as Negative;
+    const declared = { negative, income_type: args.tipo_renda ? String(args.tipo_renda).slice(0, 40) : null, cnh: typeof args.tem_cnh === "boolean" ? args.tem_cnh : null };
+    const key = ["ia", input.income, input.vehicle_value, input.down_payment, input.months, negative].join("|");
+    const done = creditDone.get(key);
+    if (done) return `A análise com estes dados JÁ FOI FEITA. Não chame analisar_credito de novo: responda ao cliente agora. ${done}`;
+    if (++creditCalls > 3) return "Limite de análises nesta resposta: responda ao cliente agora.";
+    let r: ReturnType<typeof preAnalysis> & { id?: number };
+    try {
+      r = live ? await runPreAnalysis(orgId, input, declared, { source: "ia", leadId, conversationId: opts.conversationId, settings: credit }) : preAnalysis(credit, input, negative);
+    } catch (e) {
+      return `não deu para registrar a análise agora (${(e as Error).message.slice(0, 100)}). Continue o atendimento normalmente.`;
+    }
+    if (live && leadId) {
+      await applyCreditToLead(orgId, leadId, r.status, {
+        provider: "ia", installment: r.installment, income_pct: r.incomePct, vehicle_value: input.vehicle_value, down_payment: input.down_payment,
+        months: input.months, reasons: r.reasons, declared,
+      });
+      const { data: lv } = await db.from("leads").select("value").eq("id", leadId).maybeSingle();
+      if (!Number(lv?.value)) await db.from("leads").update({ value: input.vehicle_value }).eq("id", leadId);
+      if (r.id) await notifyCreditResult(orgId, r.id, credit, { cpf: isCpf(input.cpf) ? input.cpf : null });
+      // Sem link de banco: o especialista confirma a aprovação no portal do banco e fecha
+      if (r.status === "aprovado" && credit.handoff && !credit.bank_links.length) await handoffForSale("pré-análise aprovada: vendedor confirma no banco e fecha a venda");
+    }
+    effects.push({ kind: "credit", status: r.status, score: null, installment: r.installment, simulated: !live });
+    const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const links = credit.bank_links.map((l) => `${l.banco}: ${l.url}`).join(" | ");
+    let msg: string;
+    if (r.status === "aprovado") {
+      msg = `Resultado: PRÉ-ANÁLISE APROVADA (o perfil está dentro das regras da loja; parcela estimada ${input.months}x de ${brl(r.installment)}). Dê a boa notícia: o perfil foi pré-aprovado na análise da loja. ${links
+        ? `Para garantir, convide o cliente a fazer agora a pré-aprovação OFICIAL e gratuita do banco pelo celular, em 2 minutos (${links}), e a mandar aqui o print do resultado. Explique que é rápido e não tem custo.`
+        : credit.handoff ? "Diga que o especialista já recebeu a ficha e vai confirmar com o banco e fechar as condições." : "Conduza para a visita ou para a documentação."} Não prometa aprovação definitiva.`;
+    } else if (r.issue === "entrada" || r.issue === "parcela") {
+      msg = `Resultado: AINDA NÃO PASSOU NESTA CONDIÇÃO (${r.issue === "entrada" ? `entrada abaixo do mínimo da loja` : `parcela alta para a renda`}). Nunca diga "reprovado". Proponha com naturalidade${r.suggestedDown != null ? ` uma entrada de ${brl(r.suggestedDown)} (parcela de cerca de ${brl(r.suggestedParcel ?? 0)} em ${input.months}x)` : ""}, ou mais parcelas, ou um veículo de valor menor. Se o cliente topar, rode analisar_credito de novo com os novos valores.`;
+    } else if (r.issue === "negativado") {
+      msg = "Resultado: NÃO PASSA COM RESTRIÇÃO NO NOME (regra da loja). Com empatia e sem julgamento, explique que para o financiamento o banco pede o nome sem restrição. Ofereça as alternativas que a empresa tiver nas instruções (compra à vista, consórcio, outra condição) ou retomar quando regularizar. Nunca diga \"reprovado\".";
+    } else {
+      msg = "Resultado: RENDA ABAIXO DO MÍNIMO DA LOJA PARA ESTE FINANCIAMENTO. Nunca diga \"reprovado\". Com empatia, ofereça um veículo de valor menor, uma entrada maior ou somar a renda de outra pessoa (composição de renda), e rode de novo se o cliente topar.";
+    }
+    creditDone.set(key, msg);
+    return live ? msg : `${msg} (Modo teste: nada foi gravado.)`;
+  };
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
     try {
       switch (name) {
@@ -318,6 +412,23 @@ function makeExec(opts: {
           effects.push({ kind: "handoff", reason, seller: seller?.name ?? null });
           return "ok: transferido. Avise o cliente que um vendedor vai continuar o atendimento.";
         }
+        case "registrar_resultado_banco": {
+          const credit = opts.credit;
+          if (!credit?.enabled) return "a análise de crédito não está ligada nesta empresa";
+          const status = (["aprovado", "reprovado", "analise"].includes(String(args.resultado)) ? String(args.resultado) : "analise") as "aprovado" | "reprovado" | "analise";
+          const num = (v: unknown) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+          const bank = { banco: String(args.banco ?? "Banco").slice(0, 60), status, valor_aprovado: num(args.valor_aprovado), parcela: num(args.parcela), prazo: num(args.prazo), validade: args.validade ? String(args.validade).slice(0, 20) : null };
+          if (live && leadId) {
+            const r = await registerBankResult(orgId, bank, { leadId, conversationId: opts.conversationId });
+            await applyCreditToLead(orgId, leadId, status, { provider: "banco_cliente", banks: r.banks }, "credit_banks");
+            await notifyCreditResult(orgId, r.id, credit);
+            if (status === "aprovado" && credit.handoff) await handoffForSale(`${bank.banco} pré-aprovou o crédito: vendedor fecha a venda`);
+          }
+          effects.push({ kind: "credit", status, score: null, installment: bank.parcela ?? 0, simulated: !live });
+          if (status === "aprovado") return `Registrado: ${bank.banco} PRÉ-APROVOU. Parabenize o cliente com entusiasmo.${credit.handoff ? " Diga que o especialista já recebeu a aprovação e vai chamar em instantes para fechar as condições e a documentação (a conversa já foi passada para ele; não chame transferir_para_vendedor)." : " Conduza para a visita ou a documentação."}`;
+          if (status === "reprovado") return `Registrado: ${bank.banco} não aprovou. Nunca diga "reprovado". Com empatia, ofereça tentar outro banco${credit.bank_links.length > 1 ? " da lista" : ""}, uma entrada maior ou outro veículo.`;
+          return "Registrado: o banco ainda está analisando. Peça que o cliente mande o print quando sair a resposta.";
+        }
         case "analisar_credito": {
           const credit = opts.credit;
           if (!credit?.enabled) return "a análise de crédito não está ligada nesta empresa; transfira para o vendedor";
@@ -327,8 +438,9 @@ function makeExec(opts: {
             cpf: rawCpf, income: Math.max(0, Number(args.renda_mensal) || 0), vehicle_value: Math.max(0, Number(args.valor_veiculo) || 0),
             down_payment: Math.max(0, Number(args.entrada) || 0), months: Math.min(120, Math.max(1, Math.round(Number(args.parcelas) || 48))),
           };
-          if (!isCpf(input.cpf)) return "CPF inválido: peça ao cliente para conferir o número";
           if (!input.vehicle_value) return "falta o valor do veículo: pergunte ao cliente";
+          if (credit.provider === "ia") return await freeAnalysis(input, args);
+          if (!isCpf(input.cpf)) return "CPF inválido: peça ao cliente para conferir o número";
           const key = [cpfDigits(input.cpf), input.income, input.vehicle_value, input.down_payment, input.months].join("|");
           const done = creditDone.get(key);
           if (done) return `A análise com estes dados JÁ FOI FEITA. Não chame analisar_credito de novo: responda ao cliente agora. ${done}`;
@@ -453,8 +565,28 @@ async function transcribeRecent(db: SupabaseClient, msgs: MsgRow[]) {
   }
 }
 
-function toHistory(msgs: MsgRow[]): ChatTurn[] {
-  return msgs.map((m) => ({ role: m.direction === "in" ? "user" as const : "assistant" as const, text: msgText(m) })).filter((t) => t.text.trim());
+function toHistory(msgs: MsgRow[], images: Map<string, ChatImage> = new Map()): ChatTurn[] {
+  return msgs.map((m) => {
+    const img = images.get(m.id);
+    const text = img ? `[foto — a imagem está anexada]${m.body ? ` ${m.body}` : ""}` : msgText(m);
+    return { role: m.direction === "in" ? "user" as const : "assistant" as const, text, ...(img ? { images: [img] } : {}) };
+  }).filter((t) => t.text.trim());
+}
+
+/** Últimas fotos do cliente (ex.: print da pré-aprovação do banco) para a IA enxergar. */
+async function recentImages(msgs: MsgRow[]): Promise<Map<string, ChatImage>> {
+  const out = new Map<string, ChatImage>();
+  const todo = msgs.slice(-8).filter((m) => m.direction === "in" && m.type === "image" && m.media_ref && !m.deleted_at).slice(-2);
+  for (const m of todo) {
+    try {
+      const blob = await downloadMedia(m.channel_id, m.media_ref!, m.media_mime);
+      if (!blob || blob.size > 4.5 * 1024 * 1024) continue;
+      const mime = (m.media_mime || blob.type || "image/jpeg").split(";")[0]!.toLowerCase();
+      if (!/^image\/(jpeg|png|webp)$/.test(mime)) continue;
+      out.set(m.id, { mime, data: Buffer.from(await blob.arrayBuffer()).toString("base64") });
+    } catch (e) { console.error("[ia] imagem", (e as Error).message); }
+  }
+  return out;
 }
 
 /** Quebra a resposta em até 3 mensagens e tira formatação que o WhatsApp não mostra bem. */
@@ -607,6 +739,7 @@ export async function respondToConversation(conversationId: string, triggerMessa
     ]);
     const msgs = ((msgsRes.data ?? []) as MsgRow[]).reverse();
     if (agent.transcribe_audio) await transcribeRecent(db, msgs);
+    const images = supportsImages(agent.provider) ? await recentImages(msgs) : new Map<string, ChatImage>();
 
     type L = { id: string; name: string; phone: string | null; value: number; pipeline_id: string; assigned_to: string | null; ai_summary: string | null; stages: { name: string } | { name: string }[] | null; lead_tags: { tags: { name: string } | { name: string }[] | null }[] };
     const l = lead as L | null;
@@ -625,8 +758,8 @@ export async function respondToConversation(conversationId: string, triggerMessa
     const exec = makeExec({ live: true, db, orgId: conv.organization_id, leadId: l?.id ?? null, conversationId: conv.id, agent, stages, sellers: team, leadSeller: l?.assigned_to ?? null, existingTags: [...tags], effects, credit, leadName: l?.name ?? null, leadPhone: l?.phone ?? null });
     const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento. Não prometa retorno imediato do vendedor." : "";
     const out = await generateGuarded({
-      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled }), history: toHistory(msgs), exec, effects, deadline,
-      tools: credit.enabled ? [...TOOLS, CREDIT_TOOL] : TOOLS,
+      agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled ? credit : null }), history: toHistory(msgs, images), exec, effects, deadline,
+      tools: creditTools(credit),
     });
     calls = out.calls;
     if (out.blocked) {
@@ -687,6 +820,6 @@ export async function testAgent(orgId: string, i: TestInput) {
     return { messages: msg ? [msg] : [], effects, calls: [], model, ms: 0, offHours: agent.rules.hours.mode };
   }
   const offNote = !inHours ? "## AGORA ESTÁ FORA DO HORÁRIO DE ATENDIMENTO\nAtenda normalmente, mas avise com elegância que a equipe dará continuidade no próximo horário de atendimento." : "";
-  const out = await generateGuarded({ agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled }), history: i.history, exec, effects, tools: credit.enabled ? [...TOOLS, CREDIT_TOOL] : TOOLS });
+  const out = await generateGuarded({ agent, model, key, system: systemPrompt(agent, org?.name ?? "", ctx, team.map((t) => t.name), offNote, { credit: credit.enabled ? credit : null }), history: i.history, exec, effects, tools: creditTools(credit) });
   return { messages: splitReply(out.text), effects, calls: safeCalls(out.calls), model, ms: Date.now() - started, offHours: null };
 }

@@ -823,3 +823,33 @@ test("crédito: 'Não aprovado' é recusado, CPF some dos textos, valor do clien
   assert.deepEqual(checkReply("Perfeito, com entrada de R$ 5.000 fica ótimo.", r, "tenho R$ 5.000 de entrada"), []);
   assert.ok(checkReply("A moto sai por R$ 33.990.", r, "tenho R$ 5.000 de entrada").length > 0);
 });
+
+test("crédito grátis: pré-análise da loja (entrada, renda, nome) e entrada sugerida", async () => {
+  const { preAnalysis, financeable } = await import("@/lib/credit/shared");
+  const s = { ...CREDIT_DEFAULTS, max_income_pct: 30, monthly_rate: 2, min_income: 1500, min_down_pct: 10, accept_negative: false };
+  const base = { income: 4000, vehicle_value: 18900, down_payment: 3000, months: 48 };
+  assert.equal(CREDIT_DEFAULTS.provider, "ia"); // padrão: sem custo
+  assert.equal(preAnalysis(s, base, "nao").status, "aprovado");
+  const neg = preAnalysis(s, base, "sim");
+  assert.equal(neg.status, "reprovado"); assert.equal(neg.issue, "negativado");
+  assert.equal(preAnalysis({ ...s, accept_negative: true }, base, "sim").status, "aprovado");
+  assert.equal(preAnalysis(s, { ...base, income: 1000 }, "nao").issue, "renda");
+  const lowDown = preAnalysis(s, { ...base, down_payment: 500 }, "nao");
+  assert.equal(lowDown.status, "analise"); assert.equal(lowDown.issue, "entrada");
+  assert.equal(lowDown.suggestedDown, 2000); // 10% de 18.900 = 1.890 → arredonda para 2.000
+  // Parcela alta: entrada sugerida faz a parcela caber em 30% da renda
+  const tight = preAnalysis(s, { income: 2000, vehicle_value: 30000, down_payment: 3000, months: 48 }, "nao");
+  assert.equal(tight.issue, "parcela");
+  assert.ok(tight.suggestedParcel! <= 600 + 0.01 && tight.suggestedDown! % 500 === 0, JSON.stringify(tight));
+  assert.ok(Math.abs(financeable(978.06, 2, 48) - 30000) < 1);
+  assert.ok(preAnalysis(s, base, "nao_sabe").reasons.some((r) => r.includes("não sabe")));
+});
+
+test("crédito: resumo da manhã põe os pré-aprovados primeiro", async () => {
+  const { buildDigest } = await import("@/lib/credit/digest");
+  const row = (lead: string, status: string, reasons: string[] = []) => ({ lead, phone: "5585999990000", status, provider: "ia", reasons, banks: [], vehicle_value: 18900, down_payment: 3000, months: 48, installment: 520, conversation_id: "c1" });
+  const t = buildDigest([row("Ana", "reprovado", ["nome negativado (a loja não aceita)"]), row("Bruno", "aprovado"), row("Caio", "analise", ["entrada de 3% (mínimo 10%)"])], "https://app");
+  assert.ok(t.indexOf("Bruno") < t.indexOf("Caio") && t.indexOf("Caio") < t.indexOf("Ana"));
+  assert.ok(t.includes("✅ 1 pré-aprovado") && t.includes("❌ 1 não aprovado") && t.includes("https://app/inbox?c=c1"));
+  assert.ok(t.includes("nome negativado"));
+});

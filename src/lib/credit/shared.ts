@@ -3,6 +3,11 @@ import { z } from "zod";
 // Análise de crédito: regras puras (usadas no servidor, na tela e nos testes).
 
 export const PROVIDERS = {
+  ia: {
+    label: "Pré-análise da IA + pré-aprovação do banco — GRÁTIS",
+    text: "Sem custo por análise. A IA analisa o perfil com as regras da sua loja (renda, entrada, nome negativado), manda o link gratuito de pré-aprovação do banco e lê o print do resultado que o cliente envia.",
+    needsCredential: false, needsUrl: false,
+  },
   directd: {
     label: "Direct Data — Score de crédito (Boa Vista / Quod)",
     text: "Consulta o score e a capacidade de pagamento do CPF. Cadastro na Direct Data, paga por consulta (cerca de R$ 2). Cole o token de acesso.",
@@ -83,7 +88,7 @@ export function overallFromBanks(list: BankResult[]): BankStatus | null {
 export const CreditSettings = z.object({
   enabled: z.boolean(),
   // "manual" ficou só por compatibilidade: a análise é sempre da IA
-  provider: z.enum(["directd", "bancos", "webhook", "manual"]),
+  provider: z.enum(["ia", "directd", "bancos", "webhook", "manual"]),
   banks: z.array(z.string().trim().min(1).max(60)).max(40),
   webhook_url: z.string().trim().max(500).nullable().transform((v) => v || null)
     .refine((v) => !v || v.startsWith("https://"), "Use um endereço https://"),
@@ -97,6 +102,19 @@ export const CreditSettings = z.object({
   notify_phone: z.string().trim().max(20).nullable().transform((v) => (v ? v.replace(/\D/g, "") : null))
     .refine((v) => !v || /^\d{10,15}$/.test(v), "WhatsApp inválido (DDI + DDD + número)"),
   max_per_day: z.number().int().min(1).max(5000),
+  /** Resumo diário no WhatsApp do vendedor (hora local; null = sem resumo). */
+  digest_hour: z.number().int().min(0).max(23).nullable(),
+  /** Também avisar o vendedor a cada análise, na hora. */
+  notify_each: z.boolean(),
+  /** Pré-análise própria (grátis): regras da loja. */
+  min_income: z.number().min(0).max(1e6),
+  min_down_pct: z.number().min(0).max(90),
+  accept_negative: z.boolean(),
+  /** Links gratuitos de pré-aprovação dos bancos (o cliente faz no celular). */
+  bank_links: z.array(z.object({
+    banco: z.string().trim().min(1).max(60),
+    url: z.string().trim().max(500).refine((u) => u.startsWith("https://"), "Use um link https://"),
+  })).max(10),
 }).refine((s) => !s.enabled || s.provider !== "manual", { message: "Escolha a ferramenta de crédito que a IA vai consultar", path: ["provider"] })
   .refine((s) => s.review_score <= s.min_score, { message: "O score de \"em análise\" precisa ser menor ou igual ao de aprovação", path: ["review_score"] })
   // Endereço e bancos só são exigidos para LIGAR (dá para salvar a configuração pela metade)
@@ -105,13 +123,15 @@ export const CreditSettings = z.object({
 export type CreditSettings = z.infer<typeof CreditSettings>;
 
 export const CREDIT_DEFAULTS: CreditSettings = {
-  enabled: false, provider: "directd", banks: [], webhook_url: null, notify_phone: null, min_score: 600, review_score: 400,
+  enabled: false, provider: "ia", banks: [], webhook_url: null, notify_phone: null, min_score: 600, review_score: 400,
   max_income_pct: 30, monthly_rate: 2, handoff: true, max_per_day: 50,
+  min_income: 0, min_down_pct: 10, accept_negative: false, digest_hour: 8, notify_each: false,
+  bank_links: [{ banco: "Santander (Webmotors)", url: "https://www.webmotors.com.br/financiamento/" }],
 };
 
 /** Dados que a IA (ou o teste) coletou do cliente. */
 export const CreditInput = z.object({
-  cpf: z.string().trim().max(20),
+  cpf: z.string().trim().max(20).default(""),
   income: z.number().min(0).max(1e7),
   vehicle_value: z.number().min(0).max(1e8),
   down_payment: z.number().min(0).max(1e8),
@@ -183,6 +203,41 @@ export function decide(s: Pick<CreditSettings, "min_score" | "review_score" | "m
     if (status === "aprovado") status = "analise";
   }
   return { status, installment: parcel, financed, incomePct: Number.isFinite(pct) ? Math.round(pct) : null, reasons };
+}
+
+export type Negative = "sim" | "nao" | "nao_sabe";
+
+/** Valor que dá para financiar com uma parcela X (tabela Price ao contrário). */
+export function financeable(parcel: number, ratePct: number, months: number): number {
+  const i = ratePct / 100;
+  return i === 0 ? parcel * months : (parcel * (1 - (1 + i) ** -months)) / i;
+}
+
+/**
+ * Pré-análise própria da loja (grátis, sem consulta): renda, entrada e nome negativado.
+ * Devolve também a entrada que faria a parcela caber na renda (para a IA negociar).
+ */
+export function preAnalysis(s: Pick<CreditSettings, "max_income_pct" | "monthly_rate" | "min_income" | "min_down_pct" | "accept_negative">, input: Omit<CreditInput, "cpf">, negative: Negative) {
+  const financed = Math.max(0, input.vehicle_value - input.down_payment);
+  const parcel = installment(financed, s.monthly_rate, input.months);
+  const pct = input.income > 0 ? (parcel / input.income) * 100 : Infinity;
+  const downPct = input.vehicle_value > 0 ? (input.down_payment / input.vehicle_value) * 100 : 0;
+  const reasons: string[] = [];
+  let status: Exclude<CreditStatus, "erro"> = "aprovado";
+  let issue: "negativado" | "renda" | "entrada" | "parcela" | null = null;
+  if (negative === "sim" && !s.accept_negative) { status = "reprovado"; issue = "negativado"; reasons.push("nome negativado (a loja não aceita)"); }
+  else if (s.min_income > 0 && input.income < s.min_income) { status = "reprovado"; issue = "renda"; reasons.push(`renda abaixo do mínimo da loja (${s.min_income})`); }
+  else if (downPct + 0.001 < s.min_down_pct) { status = "analise"; issue = "entrada"; reasons.push(`entrada de ${Math.round(downPct)}% (mínimo ${s.min_down_pct}%)`); }
+  else if (financed > 0 && pct > s.max_income_pct) { status = "analise"; issue = "parcela"; reasons.push(`parcela compromete ${Math.round(pct)}% da renda (limite ${s.max_income_pct}%)`); }
+  if (negative === "nao_sabe" && status === "aprovado") reasons.push("cliente não sabe se tem restrição no nome");
+  // Entrada sugerida: o maior entre o mínimo da loja e o que faz a parcela caber na renda (arredondada para cima de 500 em 500)
+  const maxParcel = (input.income * s.max_income_pct) / 100;
+  const byIncome = input.vehicle_value - financeable(maxParcel, s.monthly_rate, input.months);
+  const byPct = (input.vehicle_value * s.min_down_pct) / 100;
+  const need = Math.max(0, byIncome, byPct);
+  const suggestedDown = need > input.down_payment ? Math.min(input.vehicle_value, Math.ceil(need / 500) * 500) : null;
+  const suggestedParcel = suggestedDown != null ? installment(input.vehicle_value - suggestedDown, s.monthly_rate, input.months) : null;
+  return { status, issue, installment: parcel, incomePct: Number.isFinite(pct) ? Math.round(pct) : null, downPct: Math.round(downPct), reasons, suggestedDown, suggestedParcel };
 }
 
 /**

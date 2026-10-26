@@ -7,8 +7,9 @@ import { postPinnedFull, publicTarget } from "@/lib/net/safe-post";
 import { appUrl } from "@/lib/env";
 import { sendAiText } from "@/lib/send";
 import { loadChannel, sendTextVia } from "@/lib/whatsapp";
+import { buildDigest } from "./digest";
 import {
-  CREDIT_DEFAULTS, CreditInput, cpfDigits, decide, isCpf, maskCpf, overallFromBanks, parseBanks, scrubCpf, STATUS_LABEL, STATUS_TAG, wordStatus,
+  CREDIT_DEFAULTS, CreditInput, cpfDigits, preAnalysis, type Negative, decide, isCpf, maskCpf, overallFromBanks, parseBanks, scrubCpf, STATUS_LABEL, STATUS_TAG, wordStatus,
   type BankResult, type CreditProvider, type CreditSettings, type CreditStatus, type ProviderResult,
 } from "./shared";
 
@@ -18,9 +19,12 @@ export async function loadCreditSettings(orgId: string): Promise<CreditSettings>
   const { data } = await db().from("credit_settings").select("*").eq("organization_id", orgId).maybeSingle();
   if (!data) return { ...CREDIT_DEFAULTS };
   return {
-    enabled: data.enabled, provider: data.provider === "manual" ? "directd" : data.provider, banks: data.banks ?? [], webhook_url: data.webhook_url, min_score: data.min_score, review_score: data.review_score,
+    enabled: data.enabled, provider: data.provider === "manual" ? "ia" : data.provider, banks: data.banks ?? [], webhook_url: data.webhook_url, min_score: data.min_score, review_score: data.review_score,
     max_income_pct: Number(data.max_income_pct), monthly_rate: Number(data.monthly_rate), handoff: data.handoff, max_per_day: data.max_per_day,
     notify_phone: data.notify_phone ?? null,
+    digest_hour: data.digest_hour ?? null, notify_each: Boolean(data.notify_each),
+    min_income: Number(data.min_income ?? 0), min_down_pct: Number(data.min_down_pct ?? 10), accept_negative: Boolean(data.accept_negative),
+    bank_links: Array.isArray(data.bank_links) ? data.bank_links : CREDIT_DEFAULTS.bank_links,
   };
 }
 
@@ -174,20 +178,26 @@ async function tellCustomer(orgId: string, c: CheckRow & { conversation_id: stri
 }
 
 /** Manda o resultado da análise para o WhatsApp do vendedor/equipe. */
-export async function notifyCreditResult(orgId: string, checkId: number, s?: CreditSettings) {
+export async function notifyCreditResult(orgId: string, checkId: number, s?: CreditSettings, extra: { cpf?: string | null } = {}) {
   const cfg = s ?? (await loadCreditSettings(orgId));
-  if (!cfg.notify_phone) return;
+  if (!cfg.notify_phone || !cfg.notify_each) return;
   const { data: c } = await db().from("credit_checks").select("*, leads(name, phone)").eq("id", checkId).eq("organization_id", orgId).maybeSingle();
   if (!c) return;
   const lead = (Array.isArray(c.leads) ? c.leads[0] : c.leads) as { name: string; phone: string | null } | null;
   const banks = (c.banks ?? []) as BankResult[];
   const mark = (b: BankResult) => (b.status === "aprovado" ? "✅" : b.status === "reprovado" ? "❌" : "⏳");
+  const dec = (c.declared ?? {}) as { negative?: string; income_type?: string | null; cnh?: boolean | null };
+  const origin = c.provider === "ia" ? "Pré-análise da IA (regras da loja, sem consulta)" : c.provider === "banco_cliente" ? "Pré-aprovação feita pelo cliente no banco" : "Consulta de crédito";
   const lines = [
     `💳 *Análise de crédito feita pela IA*`,
+    origin,
     `Cliente: ${lead?.name ?? "—"}${lead?.phone ? ` (${lead.phone})` : ""}`,
     `Resultado: *${STATUS_LABEL[c.status as CreditStatus] ?? c.status}*${c.score != null ? ` · score ${c.score}` : ""}`,
     banks.length ? `Bancos: ${banks.map((b) => `${mark(b)} ${b.banco}${b.parcela ? ` ${b.prazo ? `${b.prazo}x ` : ""}${brl(b.parcela)}` : ""}${b.taxa ? ` ${b.taxa}% a.m.` : ""}`).join(" · ")}` : "",
-    `Veículo ${brl(c.vehicle_value)} · entrada ${brl(c.down_payment)} · ${c.months}x de ~${brl(c.installment)}${c.income ? ` · renda ${brl(c.income)}` : ""}`,
+    c.vehicle_value ? `Veículo ${brl(c.vehicle_value)} · entrada ${brl(c.down_payment)} · ${c.months}x de ~${brl(c.installment)}${c.income ? ` · renda ${brl(c.income)}` : ""}` : "",
+    dec.negative ? `Nome negativado: ${dec.negative === "sim" ? "sim" : dec.negative === "nao" ? "não" : "não sabe"}${dec.income_type ? ` · renda: ${dec.income_type}` : ""}${dec.cnh != null ? ` · CNH: ${dec.cnh ? "sim" : "não"}` : ""}` : "",
+    extra.cpf ? `CPF (para a ficha no portal do banco): ${extra.cpf}` : "",
+    (c.reasons ?? []).length ? `Observações: ${(c.reasons as string[]).join("; ")}` : "",
     c.conversation_id ? `Conversa: ${appUrl()}/inbox?c=${c.conversation_id}` : "",
   ].filter(Boolean);
   try {
@@ -370,4 +380,94 @@ export async function runCreditCheck(orgId: string, raw: CreditInput, ctx: {
     id = data.id as number;
   }
   return { id, status: d.status, score: provider.score, band: provider.band, installment: d.installment, incomePct: d.incomePct, reasons: d.reasons, reused, provider: s.provider, banks, pending };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Modo grátis: pré-análise própria + resultado do banco que o cliente trouxe (print)
+// ---------------------------------------------------------------------------------------------
+
+export interface Declared { negative: Negative; income_type?: string | null; cnh?: boolean | null }
+
+export async function runPreAnalysis(orgId: string, raw: Omit<CreditInput, "cpf"> & { cpf?: string }, declared: Declared, ctx: {
+  source: "ia" | "teste"; leadId?: string | null; conversationId?: string | null; userId?: string | null; consentMessageId?: string | null; settings?: CreditSettings;
+}) {
+  const input = CreditInput.parse({ ...raw, cpf: raw.cpf ?? "" });
+  const s = ctx.settings ?? (await loadCreditSettings(orgId));
+  if (ctx.leadId) {
+    const { count } = await db().from("credit_checks").select("id", { count: "exact", head: true }).eq("lead_id", ctx.leadId).gte("created_at", new Date(Date.now() - 86_400_000).toISOString());
+    if ((count ?? 0) >= 10) throw new HttpError(429, "Limite de 10 análises por cliente no dia");
+  }
+  const r = preAnalysis(s, input, declared.negative);
+  const hasCpf = isCpf(input.cpf);
+  const { data, error } = await db().from("credit_checks").insert({
+    organization_id: orgId, lead_id: ctx.leadId ?? null, conversation_id: ctx.conversationId ?? null, source: ctx.source,
+    cpf_masked: hasCpf ? maskCpf(input.cpf) : null, cpf_hash: hasCpf ? cpfHash(orgId, input.cpf) : null,
+    income: input.income, vehicle_value: input.vehicle_value, down_payment: input.down_payment, months: input.months, installment: r.installment,
+    provider: "ia", status: r.status, reasons: r.reasons, declared, created_by: ctx.userId ?? null, consent_message_id: ctx.consentMessageId ?? null,
+  }).select("id").single();
+  if (error) throw error;
+  return { id: data.id as number, ...r };
+}
+
+export interface BankFromCustomer { banco: string; status: "aprovado" | "reprovado" | "analise"; valor_aprovado?: number | null; parcela?: number | null; prazo?: number | null; validade?: string | null }
+
+/** O cliente fez a pré-aprovação no site/app do banco e mandou o resultado (print ou texto). */
+export async function registerBankResult(orgId: string, b: BankFromCustomer, ctx: { leadId: string | null; conversationId: string | null }) {
+  const banks: BankResult[] = [{ banco: b.banco.slice(0, 60), status: b.status, parcela: b.parcela ?? null, taxa: null, prazo: b.prazo ?? null, valor_liberado: b.valor_aprovado ?? null, mensagem: b.validade ? `válido até ${String(b.validade).slice(0, 20)}` : null }];
+  // Junta com a última pré-análise do cliente (mesmo veículo/entrada), se houver
+  const { data: prev } = ctx.leadId ? await db().from("credit_checks").select("*").eq("lead_id", ctx.leadId).eq("organization_id", orgId).order("created_at", { ascending: false }).limit(1).maybeSingle() : { data: null };
+  const { data, error } = await db().from("credit_checks").insert({
+    organization_id: orgId, lead_id: ctx.leadId, conversation_id: ctx.conversationId, source: "ia", provider: "banco_cliente", status: b.status, banks,
+    cpf_masked: prev?.cpf_masked ?? null, cpf_hash: prev?.cpf_hash ?? null, income: prev?.income ?? null, vehicle_value: prev?.vehicle_value ?? null,
+    down_payment: prev?.down_payment ?? null, months: b.prazo ?? prev?.months ?? null, installment: b.parcela ?? prev?.installment ?? null,
+    reasons: [`resultado do banco enviado pelo cliente (${b.banco})`], declared: prev?.declared ?? {},
+  }).select("id").single();
+  if (error) throw error;
+  return { id: data.id as number, banks };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Resumo da manhã: o vendedor chega e já sabe em quem focar
+// ---------------------------------------------------------------------------------------------
+
+function localParts(tz: string, d = new Date()) {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(d);
+  const g = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  return { day: `${g("year")}-${g("month")}-${g("day")}`, hour: Number(g("hour")) };
+}
+
+/** Chamado pelo cron: manda o resumo na hora escolhida pela loja (uma vez por dia). */
+export async function sendCreditDigests() {
+  const { data: cfgs } = await db().from("credit_settings").select("organization_id, notify_phone, digest_hour, last_digest_at").eq("enabled", true).not("notify_phone", "is", null).not("digest_hour", "is", null);
+  let sent = 0;
+  for (const c of cfgs ?? []) {
+    const { data: ag } = await db().from("ai_agents").select("time_zone").eq("organization_id", c.organization_id).maybeSingle();
+    const tz = ag?.time_zone || "America/Sao_Paulo";
+    const now = localParts(tz);
+    if (now.hour !== c.digest_hour) continue;
+    if (c.last_digest_at && localParts(tz, new Date(c.last_digest_at)).day === now.day) continue;
+    // Marca antes de mandar (o cron roda de minuto em minuto: nunca manda duas vezes)
+    const upd = db().from("credit_settings").update({ last_digest_at: new Date().toISOString() }).eq("organization_id", c.organization_id);
+    const { data: claimed } = await (c.last_digest_at ? upd.eq("last_digest_at", c.last_digest_at) : upd.is("last_digest_at", null)).select("organization_id");
+    if (!claimed?.length) continue;
+    const since = c.last_digest_at ?? new Date(Date.now() - 86_400_000).toISOString();
+    const { data: checks } = await db().from("credit_checks").select("lead_id, conversation_id, status, provider, reasons, banks, vehicle_value, down_payment, months, installment, created_at, leads(name, phone)")
+      .eq("organization_id", c.organization_id).eq("source", "ia").neq("status", "erro").gte("created_at", since).order("created_at", { ascending: false }).limit(500);
+    // Um por cliente: o resultado mais recente
+    const seen = new Set<string>();
+    const rows = (checks ?? []).filter((k) => k.lead_id && !seen.has(k.lead_id) && seen.add(k.lead_id)).map((k) => {
+      const l = (Array.isArray(k.leads) ? k.leads[0] : k.leads) as { name: string; phone: string | null } | null;
+      return { lead: l?.name ?? "Cliente", phone: l?.phone ?? null, status: k.status, provider: k.provider, reasons: k.reasons ?? [], banks: (k.banks ?? []) as BankResult[], vehicle_value: k.vehicle_value, down_payment: k.down_payment, months: k.months, installment: k.installment, conversation_id: k.conversation_id };
+    });
+    if (!rows.length) continue;
+    try {
+      const { data: ch } = await db().from("whatsapp_channels").select("id").eq("organization_id", c.organization_id).eq("status", "connected").order("created_at").limit(1).maybeSingle();
+      if (!ch) continue;
+      await sendTextVia(await loadChannel(ch.id), c.notify_phone!, buildDigest(rows, appUrl()).slice(0, 4000));
+      sent++;
+    } catch (e) {
+      console.error("[crédito] resumo", (e as Error).message);
+    }
+  }
+  return sent;
 }

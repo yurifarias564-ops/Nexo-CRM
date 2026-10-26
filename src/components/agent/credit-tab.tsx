@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CreditCard, FlaskConical, History, KeyRound, Scale, ShieldCheck, Workflow } from "lucide-react";
+import { CreditCard, FlaskConical, History, KeyRound, Link2, Plus, Scale, ShieldCheck, Sun, Trash2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Spinner } from "@/components/ui/misc";
@@ -8,11 +8,11 @@ import { cn, relativeTime } from "@/lib/utils";
 import { BANKS, installment, isCpf, PROVIDERS, STATUS_LABEL, type BankResult, type CreditProvider, type CreditSettings } from "@/lib/credit/shared";
 
 interface Check {
-  id: number; source: "ia" | "teste"; cpf_masked: string; income: number | null; vehicle_value: number | null; down_payment: number | null; months: number | null;
+  id: number; source: "ia" | "teste"; cpf_masked: string | null; income: number | null; vehicle_value: number | null; down_payment: number | null; months: number | null;
   installment: number | null; provider: string; status: "aprovado" | "analise" | "reprovado" | "erro"; score: number | null; score_band: string | null;
   payment_capacity: string | null; reasons: string[]; banks: BankResult[]; error: string | null; created_at: string; leads: { id: string; name: string } | null;
 }
-interface TestResult { status: "aprovado" | "analise" | "reprovado"; score: number | null; band: string | null; installment: number; incomePct: number | null; reasons: string[]; reused: boolean; banks: BankResult[]; pending: boolean }
+interface TestResult { status: "aprovado" | "analise" | "reprovado"; score: number | null; band: string | null; installment: number; incomePct: number | null; reasons: string[]; reused: boolean; banks: BankResult[]; pending: boolean; suggestedDown?: number | null; suggestedParcel?: number | null }
 
 function BankList({ banks }: { banks: BankResult[] }) {
   if (!banks.length) return null;
@@ -87,9 +87,9 @@ export function CreditTab() {
     <div className="space-y-5">
       <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-4 text-sm text-slate-300">
         <p className="font-semibold text-white">Como funciona</p>
-        <p className="mt-1">A <b>IA faz a análise de crédito</b> do começo ao fim: oferece, pede a <b>autorização</b> do cliente, coleta CPF, renda, valor do veículo, entrada e parcelas,
-          consulta a ferramenta escolhida abaixo, aplica a <b>regra da sua loja</b> e dá o resultado ao cliente (nunca o score). Se não aprovar, ela mesma negocia outra entrada ou prazo e refaz.
-          O <b>vendedor recebe o resultado pronto</b> no WhatsApp e no histórico do lead — e, com o crédito pré-aprovado, entra só para fechar a venda.</p>
+        <p className="mt-1">A <b>IA faz a análise de crédito</b> a qualquer hora — inclusive à noite e no fim de semana, quando não tem vendedor. Ela pergunta renda, entrada, parcelas e se o nome está limpo,
+          aplica a <b>regra da sua loja</b>, dá o resultado ao cliente e, se não passar, negocia outra entrada ou prazo. No modo grátis, o cliente ainda faz a <b>pré-aprovação oficial do banco</b> pelo link e manda o print, que a IA lê sozinha.</p>
+        <p className="mt-2">De manhã o vendedor recebe no WhatsApp o <b>resumo</b>: quem foi pré-aprovado (foco nestes), quem está negociando e quem não passou. No funil, filtre pelas tags <i>Crédito pré-aprovado</i> / <i>em análise</i> / <i>não aprovado</i>.</p>
       </div>
 
       <Section icon={CreditCard} title="Análise de crédito pela IA">
@@ -99,12 +99,12 @@ export function CreditTab() {
         </label>
       </Section>
 
-      <Section icon={Workflow} title="Ferramenta de crédito" hint="De onde vem a resposta da análise.">
+      <Section icon={Workflow} title="Como a IA analisa" hint="O modo grátis atende a maioria das lojas. A consulta paga é opcional.">
         <div className="grid gap-2">
           {(Object.keys(PROVIDERS) as CreditProvider[]).map((id) => (
             <button key={id} type="button" onClick={() => set({ provider: id })}
               className={cn("rounded-lg border p-3 text-left transition", s.provider === id ? "border-brand-500 bg-brand-500/10" : "border-line hover:border-slate-500")}>
-              <p className="text-sm font-medium text-white">{PROVIDERS[id].label}</p>
+              <p className="text-sm font-medium text-white">{PROVIDERS[id].label}{id === "ia" ? <span className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] text-emerald-300">recomendado</span> : <span className="ml-2 rounded-full bg-ink-700 px-2 py-0.5 text-[11px] text-slate-400">pago por consulta</span>}</p>
               <p className="mt-0.5 text-xs text-slate-400">{PROVIDERS[id].text}</p>
             </button>
           ))}
@@ -138,7 +138,8 @@ export function CreditTab() {
             <input className="field font-mono text-xs" value={s.webhook_url ?? ""} placeholder="https://seu-sistema.com/credito" onChange={(e) => set({ webhook_url: e.target.value.trim() || null })} />
           </Field>
         )}
-        {s.provider !== "manual" && (
+        {s.provider === "ia" && <BankLinks links={s.bank_links} onChange={(bank_links) => set({ bank_links })} />}
+        {s.provider !== "manual" && s.provider !== "ia" && (
           <Field label={s.provider === "directd" ? "Token de acesso da Direct Data" : s.provider === "bancos" ? "Chave de acesso da plataforma de bancos (vai no cabeçalho Authorization: Bearer)" : "Chave de acesso (opcional, vai no cabeçalho Authorization: Bearer)"}
             hint={cred.has ? `Chave salva (${cred.hint}). Cole outra só se quiser trocar.` : "Fica guardada só no servidor e só é usada nesta opção; ninguém da equipe consegue ver depois."}>
             <div className="flex gap-2">
@@ -153,27 +154,54 @@ export function CreditTab() {
         )}
       </Section>
 
-      <Section icon={Scale} title="Regra de aprovação da loja" hint="O CRM decide o resultado com base nisto (quando a ferramenta não decide sozinha).">
+      <Section icon={Scale} title="Regra de aprovação da loja" hint="A IA decide o resultado com base nisto.">
         <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Entrada mínima (% do valor do veículo)">
+            <input type="number" min={0} max={90} className="field" value={s.min_down_pct} onChange={(e) => set({ min_down_pct: Math.max(0, Number(e.target.value) || 0) })} />
+          </Field>
+          <Field label="Renda mínima (R$)" hint="0 = sem mínimo">
+            <input type="number" min={0} className="field" value={s.min_income} onChange={(e) => set({ min_income: Math.max(0, Number(e.target.value) || 0) })} />
+          </Field>
+          <label className="flex items-center gap-3 self-end pb-2 text-sm text-slate-200 sm:col-span-2">
+            <input type="checkbox" checked={s.accept_negative} onChange={(e) => set({ accept_negative: e.target.checked })} />
+            A loja aceita cliente com nome negativado (tem banco/financeira que aprova)
+          </label>
+        </div>
+        <div className={cn("grid gap-3 sm:grid-cols-2", s.provider === "ia" && "hidden")}>
           <Field label="Pré-aprovado com score a partir de">
             <input type="number" min={0} max={1000} className="field" value={s.min_score} onChange={(e) => set({ min_score: Math.round(Number(e.target.value) || 0) })} />
           </Field>
           <Field label="Em análise com score a partir de" hint="Abaixo disso: não aprovado (o cliente nunca ouve isso).">
             <input type="number" min={0} max={1000} className="field" value={s.review_score} onChange={(e) => set({ review_score: Math.round(Number(e.target.value) || 0) })} />
           </Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Parcela pode comprometer até (% da renda)">
             <input type="number" min={5} max={100} className="field" value={s.max_income_pct} onChange={(e) => set({ max_income_pct: Number(e.target.value) || 30 })} />
           </Field>
           <Field label="Taxa estimada (% ao mês) para calcular a parcela">
             <input type="number" min={0} max={15} step={0.1} className="field" value={s.monthly_rate} onChange={(e) => set({ monthly_rate: Number(e.target.value) || 0 })} />
           </Field>
-          <Field label="Máximo de consultas por dia">
+          <Field label="Máximo de consultas pagas por dia">
             <input type="number" min={1} max={5000} className="field" value={s.max_per_day} onChange={(e) => set({ max_per_day: Math.round(Number(e.target.value) || 1) })} />
           </Field>
         </div>
-        <Field label="WhatsApp do vendedor / equipe que recebe o resultado" hint="A cada análise concluída, a IA manda o resultado (bancos, parcela, score, link da conversa) para este número. DDI + DDD + número, ex.: 5585999990000.">
+      </Section>
+
+      <Section icon={Sun} title="Vendedor recebe o resultado" hint="O vendedor chega e já sabe em quem focar.">
+        <Field label="WhatsApp do vendedor / equipe" hint="DDI + DDD + número, ex.: 5585999990000.">
           <input className="field" inputMode="numeric" value={s.notify_phone ?? ""} placeholder="5585999990000" onChange={(e) => set({ notify_phone: e.target.value.replace(/\D/g, "") || null })} />
         </Field>
+        <Field label="Resumo diário das análises" hint="Pré-aprovados primeiro, depois os que estão negociando e os que não passaram — com link de cada conversa.">
+          <select className="field" value={s.digest_hour ?? ""} onChange={(e) => set({ digest_hour: e.target.value === "" ? null : Number(e.target.value) })}>
+            <option value="">Sem resumo</option>
+            {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>Todo dia às {String(h).padStart(2, "0")}:00</option>)}
+          </select>
+        </Field>
+        <label className="flex items-center gap-3 text-sm text-slate-200">
+          <input type="checkbox" checked={s.notify_each} onChange={(e) => set({ notify_each: e.target.checked })} />
+          Avisar também na hora, a cada análise (além do resumo)
+        </label>
         <label className="flex items-center gap-3 text-sm text-slate-200">
           <input type="checkbox" checked={s.handoff} onChange={(e) => set({ handoff: e.target.checked })} />
           Crédito pré-aprovado: passar a conversa para o vendedor fechar a venda
@@ -200,7 +228,7 @@ export function CreditTab() {
                   <tr key={c.id} className="border-t border-line align-top">
                     <td className="px-4 py-2 text-xs text-slate-400">{relativeTime(c.created_at)}{c.source === "teste" ? <span className="ml-1 rounded bg-ink-700 px-1 text-[10px]">teste</span> : null}</td>
                     <td className="px-2 py-2 text-slate-200">{c.leads?.name ?? "—"}</td>
-                    <td className="px-2 py-2 font-mono text-xs text-slate-400">{c.cpf_masked}</td>
+                    <td className="px-2 py-2 font-mono text-xs text-slate-400">{c.cpf_masked ?? "—"}<span className="block font-sans text-[10px] text-slate-500">{c.provider === "ia" ? "pré-análise da IA" : c.provider === "banco_cliente" ? "print do banco" : c.provider === "directd" ? "Direct Data" : c.provider === "bancos" ? "bancos" : "sistema próprio"}</span></td>
                     <td className="px-2 py-2">
                       <span className={cn("rounded-full px-2 py-0.5 text-xs", STATUS_COLOR[c.status])}>{STATUS_LABEL[c.status]}</span>
                       {(c.error || c.reasons.length > 0) && <p className="mt-1 max-w-[260px] text-[11px] text-slate-500">{c.error ?? c.reasons.join(" · ")}</p>}
@@ -221,19 +249,20 @@ export function CreditTab() {
 }
 
 function TestBox({ settings, onDone, dirty }: { settings: CreditSettings; onDone: () => void; dirty: boolean }) {
-  const [f, setF] = useState({ cpf: "", income: "", vehicle: "", down: "", months: "48" });
+  const [f, setF] = useState({ cpf: "", income: "", vehicle: "", down: "", months: "48", negative: "nao" });
+  const free = settings.provider === "ia";
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<TestResult | null>(null);
   const preview = installment(Math.max(0, money(f.vehicle) - money(f.down)), settings.monthly_rate, Number(f.months) || 48);
-  const cpfOk = isCpf(f.cpf);
+  const cpfOk = free ? !f.cpf || isCpf(f.cpf) : isCpf(f.cpf);
 
   async function run() {
     setBusy(true); setRes(null);
     const r = await fetch("/api/credit/test", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        consent,
+        consent: true, negative: f.negative,
         input: { cpf: f.cpf, income: money(f.income), vehicle_value: money(f.vehicle), down_payment: money(f.down), months: Number(f.months) || 48 },
       }),
     });
@@ -244,22 +273,30 @@ function TestBox({ settings, onDone, dirty }: { settings: CreditSettings; onDone
   }
 
   return (
-    <Section icon={FlaskConical} title="Testar com um CPF" hint={settings.provider === "directd" ? "Consulta de verdade na Direct Data (conta no saldo). Use o seu CPF ou de alguém que autorizou." : "Roda a mesma análise que a IA faz, com a configuração acima."}>
+    <Section icon={FlaskConical} title={free ? "Simular uma análise" : "Testar com um CPF"} hint={free ? "Mesma regra que a IA usa no WhatsApp. Sem custo." : settings.provider === "directd" ? "Consulta de verdade na Direct Data (conta no saldo). Use o seu CPF ou de alguém que autorizou." : "Roda a mesma análise que a IA faz, com a configuração acima."}>
       <div className="grid gap-3 sm:grid-cols-5">
-        <Field label="CPF"><input className={cn("field", f.cpf && !cpfOk && "border-red-500/60")} inputMode="numeric" name="credito-cpf" autoComplete="off" value={f.cpf} onChange={(e) => setF({ ...f, cpf: e.target.value })} placeholder="000.000.000-00" /></Field>
+        {free ? (
+          <Field label="Nome limpo?">
+            <select className="field" value={f.negative} onChange={(e) => setF({ ...f, negative: e.target.value })}>
+              <option value="nao">Sim, sem restrição</option><option value="sim">Tem restrição</option><option value="nao_sabe">Não sabe</option>
+            </select>
+          </Field>
+        ) : <Field label="CPF"><input className={cn("field", f.cpf && !cpfOk && "border-red-500/60")} inputMode="numeric" name="credito-cpf" autoComplete="off" value={f.cpf} onChange={(e) => setF({ ...f, cpf: e.target.value })} placeholder="000.000.000-00" /></Field>}
         <Field label="Renda mensal (R$)"><input className="field" inputMode="decimal" value={f.income} onChange={(e) => setF({ ...f, income: e.target.value })} placeholder="5.000" /></Field>
         <Field label="Valor do veículo (R$)"><input className="field" inputMode="decimal" value={f.vehicle} onChange={(e) => setF({ ...f, vehicle: e.target.value })} placeholder="33.990" /></Field>
         <Field label="Entrada (R$)"><input className="field" inputMode="decimal" value={f.down} onChange={(e) => setF({ ...f, down: e.target.value })} placeholder="5.000" /></Field>
         <Field label="Parcelas"><input type="number" min={1} max={120} className="field" value={f.months} onChange={(e) => setF({ ...f, months: e.target.value })} /></Field>
       </div>
       {preview > 0 && <p className="text-xs text-slate-500">Parcela estimada: {Number(f.months) || 48}x de {brl(preview)} ({settings.monthly_rate}% a.m.)</p>}
-      <label className="flex items-start gap-2 text-xs text-slate-300">
-        <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-        <span><ShieldCheck className="mr-1 inline h-3.5 w-3.5 text-brand-300" />O dono deste CPF autorizou a consulta de crédito (LGPD).</span>
-      </label>
+      {!free && (
+        <label className="flex items-start gap-2 text-xs text-slate-300">
+          <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+          <span><ShieldCheck className="mr-1 inline h-3.5 w-3.5 text-brand-300" />O dono deste CPF autorizou a consulta de crédito (LGPD).</span>
+        </label>
+      )}
       <div className="flex justify-end">
         {dirty && <span className="mr-2 self-center text-xs text-amber-300">Salve a configuração antes de testar</span>}
-        <Button onClick={() => void run()} disabled={busy || dirty || !consent || !cpfOk || !money(f.vehicle)}>{busy ? <Spinner /> : null} Consultar</Button>
+        <Button onClick={() => void run()} disabled={busy || dirty || (!free && !consent) || !cpfOk || !money(f.vehicle)}>{busy ? <Spinner /> : null} {free ? "Simular" : "Consultar"}</Button>
       </div>
       {res && (
         <div className="rounded-lg border border-line bg-ink-800 p-3 text-sm">
@@ -269,9 +306,27 @@ function TestBox({ settings, onDone, dirty }: { settings: CreditSettings; onDone
           <p className="mt-1 text-xs text-slate-400">Parcela estimada {brl(res.installment)}{res.incomePct != null ? ` · ${res.incomePct}% da renda` : ""}</p>
           {res.reasons.length > 0 && <p className="mt-1 text-xs text-slate-500">{res.reasons.join(" · ")}</p>}
           <BankList banks={res.banks} />
+          {res.suggestedDown != null && <p className="mt-1 text-xs text-brand-200">A IA proporia: entrada de {brl(res.suggestedDown)} → parcela de {brl(res.suggestedParcel)}</p>}
           {res.pending && <p className="mt-1 text-xs text-amber-300">Aguardando a resposta dos outros bancos — aparece no histórico abaixo quando chegar.</p>}
         </div>
       )}
     </Section>
+  );
+}
+
+function BankLinks({ links, onChange }: { links: { banco: string; url: string }[]; onChange: (l: { banco: string; url: string }[]) => void }) {
+  return (
+    <div className="space-y-2 rounded-lg border border-line bg-ink-800 p-3">
+      <p className="flex items-center gap-1.5 text-sm font-medium text-slate-200"><Link2 className="h-4 w-4 text-brand-300" /> Links gratuitos de pré-aprovação do banco</p>
+      <p className="text-xs text-slate-400">Depois da pré-análise positiva, a IA manda estes links. O cliente faz a pré-aprovação oficial no celular (sem custo para a loja) e envia o print; a IA lê e registra o resultado.</p>
+      {links.map((l, i) => (
+        <div key={i} className="flex gap-2">
+          <input className="field w-40" value={l.banco} placeholder="Banco" onChange={(e) => onChange(links.map((x, j) => (j === i ? { ...x, banco: e.target.value } : x)))} />
+          <input className="field flex-1 font-mono text-xs" value={l.url} placeholder="https://" onChange={(e) => onChange(links.map((x, j) => (j === i ? { ...x, url: e.target.value.trim() } : x)))} />
+          <Button variant="ghost" onClick={() => onChange(links.filter((_, j) => j !== i))} aria-label="Remover link"><Trash2 className="h-4 w-4" /></Button>
+        </div>
+      ))}
+      {links.length < 10 && <Button variant="secondary" size="sm" onClick={() => onChange([...links, { banco: "", url: "https://" }])}><Plus className="h-3.5 w-3.5" /> Adicionar banco</Button>}
+    </div>
   );
 }
