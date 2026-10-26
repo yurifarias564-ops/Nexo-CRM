@@ -99,8 +99,9 @@ export const CreditSettings = z.object({
   max_per_day: z.number().int().min(1).max(5000),
 }).refine((s) => !s.enabled || s.provider !== "manual", { message: "Escolha a ferramenta de crédito que a IA vai consultar", path: ["provider"] })
   .refine((s) => s.review_score <= s.min_score, { message: "O score de \"em análise\" precisa ser menor ou igual ao de aprovação", path: ["review_score"] })
-  .refine((s) => !["webhook", "bancos"].includes(s.provider) || Boolean(s.webhook_url), { message: "Informe o endereço do sistema de crédito / plataforma de bancos", path: ["webhook_url"] })
-  .refine((s) => s.provider !== "bancos" || s.banks.length > 0, { message: "Marque os bancos em que a loja é credenciada", path: ["banks"] });
+  // Endereço e bancos só são exigidos para LIGAR (dá para salvar a configuração pela metade)
+  .refine((s) => !s.enabled || !["webhook", "bancos"].includes(s.provider) || Boolean(s.webhook_url), { message: "Informe o endereço do sistema de crédito / plataforma de bancos", path: ["webhook_url"] })
+  .refine((s) => !s.enabled || s.provider !== "bancos" || s.banks.length > 0, { message: "Marque os bancos em que a loja é credenciada", path: ["banks"] });
 export type CreditSettings = z.infer<typeof CreditSettings>;
 
 export const CREDIT_DEFAULTS: CreditSettings = {

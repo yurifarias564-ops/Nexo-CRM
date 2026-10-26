@@ -799,8 +799,9 @@ test("crédito: resposta dos bancos em formatos diferentes", () => {
 });
 
 test("crédito: configuração exige bancos e endereço na opção Bancos", () => {
-  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: "https://x.com/api", banks: [] }).success, false);
-  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: null, banks: ["Santander"] }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, enabled: true, provider: "bancos", webhook_url: "https://x.com/api", banks: [] }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, enabled: true, provider: "bancos", webhook_url: null, banks: ["Santander"] }).success, false);
+  assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, enabled: false, provider: "bancos", webhook_url: null, banks: [] }).success, true); // salvar pela metade
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "bancos", webhook_url: "https://x.com/api", banks: ["Santander", "BV"] }).success, true);
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, provider: "webhook", webhook_url: "http://x.com" }).success, false);
   assert.equal(CreditSettingsSchema.safeParse({ ...CREDIT_DEFAULTS, review_score: 700, min_score: 600 }).success, false);
