@@ -52,9 +52,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ orgId: 
       if (ch.status === "paid") return new Response("ok");
       await db.from("pix_charges").update({ status: "paid", paid_at: now, fee_status: ch.fee_cents ? "confirmed" : "none" }).eq("id", ch.id);
       if (ch.lead_id) await db.from("activities").insert({ organization_id: orgId, lead_id: ch.lead_id, actor_id: null, type: "note", payload: { text: `✅ Pix de ${formatBRL(Number(ch.value))} pago${ch.description ? ` — ${ch.description}` : ""}`, via: "pix" } });
+      const { data: acc } = await db.from("org_payment_accounts").select("post_sale_enabled, post_sale_message, move_to_won").eq("organization_id", orgId).maybeSingle();
+      // Lead vai para "Ganho" com o valor da venda (acompanha no funil e nos relatórios)
+      let leadName = (ch.payer_name as string | null) ?? "";
+      if (ch.lead_id) {
+        const { data: lead } = await db.from("leads").select("name, pipeline_id, value, stage_id").eq("id", ch.lead_id).maybeSingle();
+        if (lead) {
+          leadName = lead.name || leadName;
+          if (acc?.move_to_won !== false) {
+            const { data: won } = await db.from("stages").select("id").eq("pipeline_id", lead.pipeline_id).eq("kind", "won").order("position").limit(1).maybeSingle();
+            if (won && won.id !== lead.stage_id) {
+              await db.from("leads").update({ stage_id: won.id, ...(Number(lead.value) ? {} : { value: Number(ch.value) }) }).eq("id", ch.lead_id)
+                .then(({ error }) => { if (error) console.error("[pix loja] ganho", error.message); });
+            }
+          }
+        }
+      }
       if (ch.conversation_id || ch.lead_id) {
-        await sendText(db, orgId, null, ch.conversation_id ? { conversationId: ch.conversation_id } : { leadId: ch.lead_id }, `✅ Pagamento de ${formatBRL(Number(ch.value))} confirmado! Obrigado.`, { automation: true })
+        const target = ch.conversation_id ? { conversationId: ch.conversation_id } : { leadId: ch.lead_id };
+        await sendText(db, orgId, null, target, `✅ Pagamento de ${formatBRL(Number(ch.value))} confirmado na hora! Obrigado.`, { automation: true })
           .catch((e) => console.error("[pix loja] aviso", (e as Error).message));
+        if (acc?.post_sale_enabled !== false && acc?.post_sale_message) {
+          const first = leadName.trim().split(/\s+/)[0] || "";
+          const text = acc.post_sale_message.replace(/\{nome\}/g, first).replace(/\s+([!,.])/g, "$1").replace(/,\s*!/g, "!");
+          await new Promise((r) => setTimeout(r, 1500));
+          await sendText(db, orgId, null, target, text, { automation: true }).catch((e) => console.error("[pix loja] pós-venda", (e as Error).message));
+        }
       }
     } else if (evt.event === "PAYMENT_OVERDUE") {
       if (ch.status === "pending") await db.from("pix_charges").update({ status: "overdue" }).eq("id", ch.id);

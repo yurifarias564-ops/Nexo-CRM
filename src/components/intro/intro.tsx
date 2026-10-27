@@ -81,7 +81,7 @@ export function Intro() {
 
   return (
     <div className={`nx-intro ${leaving ? "nx-leave" : ""}`} role="dialog" aria-label={`Apresentação do ${name}`} onClick={finish}>
-      <style>{CSS}</style>
+      <style>{INTRO_CSS}</style>
       <div className="nx-bg"><div className="nx-orb nx-orb1" /><div className="nx-orb nx-orb2" /><div className="nx-grid" /></div>
 
       {/* Abertura: logo */}
@@ -162,7 +162,7 @@ function SceneArt({ i }: { i: number }) {
   );
 }
 
-const CSS = `
+export const INTRO_CSS = `
 .nx-intro{position:fixed;inset:0;z-index:100;overflow:hidden;background:#03050a;color:#fff;cursor:pointer;animation:nxIn .45s ease-out both}
 .nx-leave{animation:nxOut .6s ease-in forwards}
 @keyframes nxIn{from{opacity:0}to{opacity:1}}

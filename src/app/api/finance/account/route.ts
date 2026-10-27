@@ -52,18 +52,23 @@ const Patch = z.union([
   z.object({ payoutKeyType: z.enum(["cpf", "cnpj", "phone", "email", "random"]), payoutKey: z.string().trim().min(3).max(80) }),
   z.object({ autoPayout: z.boolean() }),
   z.object({ enabled: z.boolean() }),
+  z.object({ postSaleEnabled: z.boolean(), postSaleMessage: z.string().trim().min(1, "Escreva a mensagem").max(1000), moveToWon: z.boolean() }),
 ]);
 
 export async function PATCH(req: Request) {
   try {
-    const ctx = await owner();
-    const b = Patch.parse(await readJson(req, 1_000));
+    const ctx = await requireApiContext({ manage: true });
+    const b = Patch.parse(await readJson(req, 4_000));
+    // Mensagem de pós-venda: qualquer administrador; dinheiro e ativação: só o dono
+    if (!("postSaleMessage" in b) && ctx.role !== "owner") throw new HttpError(403, "Só o dono da conta pode mexer no dinheiro da empresa");
     const { supabaseAdmin } = await import("@/lib/supabase/admin");
     if ("payoutKey" in b) {
       await setPayoutKey(ctx.org.id, b.payoutKeyType, b.payoutKey);
       await audit(ctx.userId, ctx.org.id, "chave de saque alterada", { type: b.payoutKeyType });
     } else if ("autoPayout" in b) {
       await supabaseAdmin().from("org_payment_accounts").update({ auto_payout: b.autoPayout, updated_at: new Date().toISOString() }).eq("organization_id", ctx.org.id);
+    } else if ("postSaleMessage" in b) {
+      await supabaseAdmin().from("org_payment_accounts").update({ post_sale_enabled: b.postSaleEnabled, post_sale_message: b.postSaleMessage, move_to_won: b.moveToWon, updated_at: new Date().toISOString() }).eq("organization_id", ctx.org.id);
     } else if (b.enabled) {
       await reactivateStore(ctx.org.id);
       await audit(ctx.userId, ctx.org.id, "Pix Nexo reativado");

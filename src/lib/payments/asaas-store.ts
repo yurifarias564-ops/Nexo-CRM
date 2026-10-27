@@ -34,7 +34,7 @@ export async function pixFeeSettings(): Promise<PixFeeSettings & { wallet: strin
   const { data } = await db().from("platform_settings").select("pix_fee_first_cents, pix_fee_after_cents, pix_first_days, pix_addon_cents, platform_wallet_id").eq("id", true).maybeSingle();
   return {
     firstCents: data?.pix_fee_first_cents ?? 10, afterCents: data?.pix_fee_after_cents ?? 100, firstDays: data?.pix_first_days ?? 30,
-    addonCents: data?.pix_addon_cents ?? 4990, wallet: data?.platform_wallet_id ?? null,
+    addonCents: data?.pix_addon_cents ?? 999, wallet: data?.platform_wallet_id ?? null,
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowDownToLine, BadgeCheck, Banknote, CheckCircle2, Clock, ExternalLink, KeyRound, Landmark, Lock, QrCode, RefreshCw, ShieldCheck, Wallet, XCircle } from "lucide-react";
+import { ArrowDownToLine, BadgeCheck, Banknote, Clock, ExternalLink, HeartHandshake, KeyRound, Landmark, Lock, MessageSquareHeart, Play, QrCode, RefreshCw, Unlock, Wallet, XCircle, Zap } from "lucide-react";
+import { PixDemo } from "./pix-demo";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, Modal, Spinner } from "@/components/ui/misc";
@@ -11,6 +12,7 @@ interface Offer { addonCents: number; firstCents: number; afterCents: number; fi
 interface Account {
   status: Status; enabled: boolean; name: string; doc: string; personType: "PF" | "PJ"; onboardingUrl: string | null; addonCents: number;
   payoutKeyType: string | null; payoutKey: string | null; keyUnlocksAt: string | null; autoPayout: boolean;
+  postSaleEnabled: boolean; postSaleMessage: string; moveToWon: boolean;
 }
 interface Data { isOwner: boolean; offer: Offer; account: Account | null; balance?: number | null; month?: { sales: number; value: number }; pendingCharges?: number }
 interface Sale { id: string; value: number; description: string | null; payer_name: string | null; status: string; created_at: string; paid_at: string | null }
@@ -55,37 +57,35 @@ export function FinancePage() {
 
 function Locked({ d, onDone }: { d: Data; onDone: () => void }) {
   const [open, setOpen] = useState(false);
+  const [demo, setDemo] = useState(false);
   const o = d.offer;
+  const unlock = () => { setDemo(false); if (d.isOwner) setOpen(true); else toast.message("Peça ao dono da conta para desbloquear o Pix."); };
   return (
     <section className="overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/[0.08] to-transparent">
       <div className="grid gap-6 p-6 md:grid-cols-[1.4fr_1fr] md:p-8">
         <div className="space-y-4">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-slate-300"><Lock className="h-3.5 w-3.5" /> Recurso adicional</span>
-          <h3 className="text-2xl font-semibold tracking-tight text-white">Pix Nexo</h3>
-          <p className="text-slate-300">Cobre pelo WhatsApp e saiba na hora quem pagou. O dinheiro fica no seu saldo aqui em Finanças e vai para o seu banco quando você quiser — ou todo dia automaticamente.</p>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-slate-300"><Lock className="h-3.5 w-3.5" /> Bloqueado</span>
+          <h3 className="text-2xl font-semibold tracking-tight text-white">Receba no Pix em segundos — e o pós-venda vai sozinho</h3>
+          <p className="text-slate-300">O cliente paga pelo WhatsApp, o CRM confirma na hora, agradece por você e coloca a venda no funil. Sem conferir extrato, sem esperar.</p>
           <ul className="space-y-2 text-sm text-slate-300">
             {[
+              [Zap, "Pagamento confirmado em segundos, 24h por dia"],
               [QrCode, "Pix Copia e Cola enviado direto na conversa"],
-              [CheckCircle2, "“✅ Pagamento confirmado” automático para o cliente e no lead"],
-              [Landmark, "Continue com o seu banco: o saque vai para a sua chave Pix"],
-              [ShieldCheck, "Conta de recebimento regulada, aberta em poucos minutos"],
+              [HeartHandshake, "Pós-venda automático assim que o cliente paga"],
+              [Landmark, "Saque para o seu banco quando quiser — ou todo dia, automático"],
             ].map(([I, t]) => { const Icon = I as typeof QrCode; return <li key={t as string} className="flex items-start gap-2"><Icon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />{t as string}</li>; })}
           </ul>
         </div>
-        <div className="flex flex-col justify-between gap-4 rounded-xl border border-line bg-ink-900 p-5">
-          <div>
-            <p className="text-sm text-slate-400">Adicional na mensalidade</p>
-            <p className="mt-1 text-3xl font-semibold text-white">{c2(o.addonCents)}<span className="text-base font-normal text-slate-400">/mês</span></p>
-            <div className="mt-4 space-y-1.5 border-t border-line pt-3 text-xs text-slate-400">
-              <p>Por venda paga: {c2(o.firstCents)} nos primeiros {o.firstDays} dias, depois {c2(o.afterCents)} (taxa Nexo)</p>
-              <p>+ tarifa da conta de recebimento por Pix recebido (a partir de R$ 0,99)</p>
-            </div>
-          </div>
-          {d.isOwner
-            ? <Button onClick={() => setOpen(true)}>Ativar Pix Nexo</Button>
-            : <p className="rounded-lg bg-ink-800 p-3 text-center text-xs text-slate-400">Só o dono da conta pode ativar.</p>}
+        <div className="flex flex-col justify-center gap-3 rounded-xl border border-line bg-ink-900 p-5">
+          <button onClick={() => setDemo(true)} className="group relative flex aspect-video items-center justify-center overflow-hidden rounded-lg border border-emerald-500/30 bg-gradient-to-br from-emerald-500/20 via-ink-800 to-brand-500/20">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/90 text-ink-950 shadow-lg transition group-hover:scale-110"><Play className="ml-1 h-6 w-6" /></span>
+            <span className="absolute bottom-2 left-3 text-xs text-slate-200">Ver como funciona · 20s</span>
+          </button>
+          <Button onClick={unlock}><Unlock className="h-4 w-4" /> Desbloquear o Pix · {c2(o.addonCents)}/mês</Button>
+          {!d.isOwner && <p className="text-center text-xs text-slate-500">Só o dono da conta pode desbloquear.</p>}
         </div>
       </div>
+      <PixDemo open={demo} onClose={() => setDemo(false)} onUnlock={unlock} />
       {open && <ActivateModal offer={o} onClose={() => setOpen(false)} onDone={() => { setOpen(false); onDone(); }} />}
     </section>
   );
@@ -97,6 +97,7 @@ function ActivateModal({ offer, onClose, onDone }: { offer: Offer; onClose: () =
     postalCode: "", address: "", addressNumber: "", complement: "", province: "", incomeValue: "", accept: false,
   });
   const [busy, setBusy] = useState(false);
+  const [fees, setFees] = useState(false);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value });
 
   async function cep() {
@@ -128,7 +129,7 @@ function ActivateModal({ offer, onClose, onDone }: { offer: Offer; onClose: () =
   }
 
   return (
-    <Modal open onClose={onClose} title="Ativar Pix Nexo" wide footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={() => void submit()} loading={busy} disabled={!f.accept}>Ativar</Button></>}>
+    <Modal open onClose={onClose} title="Desbloquear o Pix" wide footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button onClick={() => void submit()} loading={busy} disabled={!f.accept}>Desbloquear</Button></>}>
       <div className="space-y-4">
         <p className="text-sm text-slate-400">Os dados do titular da conta que vai receber os pagamentos. Depois, é só enviar os documentos para a aprovação.</p>
         <div className="flex gap-2">
@@ -155,8 +156,9 @@ function ActivateModal({ offer, onClose, onDone }: { offer: Offer; onClose: () =
         </div>
         <label className="flex items-start gap-2 rounded-lg border border-line bg-ink-900 p-3 text-sm text-slate-300">
           <input type="checkbox" className="mt-1" checked={f.accept} onChange={set("accept")} />
-          <span>Concordo com o adicional de <b>{c2(offer.addonCents)}/mês</b> na mensalidade, com a taxa Nexo por venda paga ({c2(offer.firstCents)} nos primeiros {offer.firstDays} dias, depois {c2(offer.afterCents)}) e com a tarifa da conta de recebimento por Pix recebido.</span>
+          <span>Quero desbloquear o Pix por <b>{c2(offer.addonCents)}/mês</b> na mensalidade e concordo com as tarifas por venda recebida. <button type="button" className="underline text-slate-400 hover:text-slate-200" onClick={(e) => { e.preventDefault(); setFees(!fees); }}>Ver tarifas</button></span>
         </label>
+        {fees && <p className="rounded-lg bg-ink-800 p-3 text-xs text-slate-400">Por venda paga: {c2(offer.firstCents)} nos primeiros {offer.firstDays} dias de uso, depois {c2(offer.afterCents)}, mais a tarifa da conta de recebimento por Pix recebido (a partir de R$ 0,99). Já sai descontado de cada venda — nada a mais no boleto.</p>}
       </div>
     </Modal>
   );
@@ -249,6 +251,8 @@ function Active({ d, lists, reload }: { d: Data & { account: Account }; lists: {
         )}
       </section>
 
+      <PostSale a={a} onSaved={reload} />
+
       {d.isOwner && (
         <p className="text-xs text-slate-500">
           {a.enabled
@@ -324,5 +328,33 @@ function KeyModal({ hasKey, onClose, onDone }: { hasKey: boolean; onClose: () =>
         <p className="text-xs text-slate-500">Use uma chave da conta do seu banco no nome do titular.{hasKey && " Por segurança, depois de trocar a chave os saques ficam bloqueados por 24h."}</p>
       </div>
     </Modal>
+  );
+}
+
+function PostSale({ a, onSaved }: { a: Account; onSaved: () => void }) {
+  const [f, setF] = useState({ on: a.postSaleEnabled, msg: a.postSaleMessage, won: a.moveToWon });
+  const [busy, setBusy] = useState(false);
+  const dirty = f.on !== a.postSaleEnabled || f.msg !== a.postSaleMessage || f.won !== a.moveToWon;
+  async function save() {
+    setBusy(true);
+    try {
+      await json(await fetch("/api/finance/account", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ postSaleEnabled: f.on, postSaleMessage: f.msg, moveToWon: f.won }) }));
+      toast.success("Pós-venda salvo"); onSaved();
+    } catch (e) { toast.error((e as Error).message); }
+    setBusy(false);
+  }
+  return (
+    <section className="space-y-3 rounded-xl border border-line bg-ink-900 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <MessageSquareHeart className="h-5 w-5 text-pink-300" />
+        <h3 className="font-medium text-white">Depois que o cliente paga</h3>
+        <span className="text-xs text-slate-500">O CRM confirma o pagamento na conversa na hora e, em seguida:</span>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={f.on} onChange={(e) => setF({ ...f, on: e.target.checked })} /> Enviar a mensagem de pós-venda</label>
+      <textarea className="field min-h-[80px]" value={f.msg} disabled={!f.on} maxLength={1000} onChange={(e) => setF({ ...f, msg: e.target.value })} />
+      <p className="text-xs text-slate-500">Use {"{nome}"} para o primeiro nome do cliente.</p>
+      <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={f.won} onChange={(e) => setF({ ...f, won: e.target.checked })} /> Mover o lead para “Ganho” com o valor da venda</label>
+      {dirty && <div className="flex justify-end"><Button size="sm" onClick={() => void save()} loading={busy}>Salvar</Button></div>}
+    </section>
   );
 }

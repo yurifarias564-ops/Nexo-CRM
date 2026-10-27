@@ -29,6 +29,7 @@ export async function GET() {
         payoutKeyType: acc.payout_key_type, payoutKey: acc.payout_key ? displayPixKey(acc.payout_key_type as PixKeyType, acc.payout_key) : null,
         keyUnlocksAt: keyUnlocksAt && new Date(keyUnlocksAt) > new Date() ? keyUnlocksAt : null,
         autoPayout: acc.auto_payout,
+        postSaleEnabled: acc.post_sale_enabled, postSaleMessage: acc.post_sale_message, moveToWon: acc.move_to_won,
       },
       balance: available,
       month: { sales: paid?.length ?? 0, value: (paid ?? []).reduce((a, r) => a + Number(r.value), 0) },
