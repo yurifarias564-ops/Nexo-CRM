@@ -949,3 +949,13 @@ test("Automações: palavra-chave entende erro de digitação e escrita pelo som
   assert.equal(matchOption("sem interese obrigado", opts)?.id, "o2");
   assert.equal(matchOption("qual o endereço?", opts), null);
 });
+
+test("Portais: lê o lead da OLX (chat), da Webmotors e de formulários", async () => {
+  const { parseInbound, normPhone } = await import("@/lib/portals");
+  const olx = parseInbound({ chatId: "c1", message: "Ainda está disponível?", senderType: "account", email: "a@b.com", name: "Ana", phone: "(85) 99999-0000", messageTimestamp: "2026-10-31T10:00:00.000", messageId: "m1", origin: "buyer", listId: "123" });
+  assert.equal(olx.name, "Ana"); assert.equal(olx.phone, "5585999990000"); assert.equal(olx.chatId, "c1"); assert.equal(olx.messageId, "m1"); assert.equal(olx.fromSeller, false);
+  const wm = parseInbound({ lead: { nome: "Bruno", telefone: "11 98888-7777", email: "b@c.com", mensagem: "Aceita troca?", veiculo: { marca: "Honda", modelo: "Civic", ano: "2020", preco: "R$ 98.900,00" } } });
+  assert.equal(wm.name, "Bruno"); assert.equal(wm.phone, "5511988887777"); assert.equal(wm.vehicle, "Honda Civic 2020"); assert.equal(wm.price, 98900);
+  assert.equal(normPhone("12345"), null);
+  assert.equal(parseInbound({}).name, "Lead do portal");
+});

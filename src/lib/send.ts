@@ -48,8 +48,7 @@ export async function resolveTarget(sb: SupabaseClient, orgId: string, t: SendTa
   } else if (t.leadId) {
     const { data: lead } = await sb.from("leads").select("id, name, phone").eq("id", t.leadId).eq("organization_id", orgId).maybeSingle();
     if (!lead) throw new HttpError(404, "Lead não encontrado");
-    if (!lead.phone) throw new HttpError(422, `O lead "${lead.name}" não tem telefone`);
-    // Prefere o canal da conversa que já existe com esse lead
+    // Prefere o canal da conversa que já existe com esse lead (WhatsApp ou Instagram)
     const { data: conv } = await sb.from("conversations").select("id, channel_id, wa_id, wa_lid")
       .eq("lead_id", lead.id).eq("organization_id", orgId).order("last_message_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
     if (conv && (!t.channelId || conv.channel_id === t.channelId)) {
@@ -58,11 +57,13 @@ export async function resolveTarget(sb: SupabaseClient, orgId: string, t: SendTa
       conversationId = conv.id;
       if (conv.wa_lid && conv.wa_lid === conv.wa_id) lid = conv.wa_lid;
     } else {
-      let q = sb.from("whatsapp_channels").select("id").eq("organization_id", orgId).eq("status", "connected").order("created_at").limit(1);
+      // Lead sem conversa: começa pelo WhatsApp (Instagram só responde quem chamou)
+      let q = sb.from("whatsapp_channels").select("id").eq("organization_id", orgId).eq("status", "connected").neq("provider", "instagram").order("created_at").limit(1);
       if (t.channelId) q = q.eq("id", t.channelId);
       const { data: chs } = await q;
       if (!chs?.length) throw new HttpError(409, "Nenhum WhatsApp conectado. Conecte um número em Configurações.");
       channelId = chs[0]!.id;
+      if (!lead.phone) throw new HttpError(422, `O lead "${lead.name}" não tem telefone`);
       waId = lead.phone;
     }
     contactName = lead.name;
@@ -78,9 +79,9 @@ export async function resolveTarget(sb: SupabaseClient, orgId: string, t: SendTa
   return { channel, waId, sendTo, contactName, conversationId };
 }
 
-/** API oficial: só aceita mensagem livre até 24h após a última mensagem do cliente. */
+/** API oficial (e Instagram): só aceita mensagem livre até 24h após a última mensagem do cliente. */
 export async function isWindowOpen(r: Resolved): Promise<boolean> {
-  if (r.channel.provider !== "meta") return true;
+  if (r.channel.provider !== "meta" && r.channel.provider !== "instagram") return true;
   if (!r.conversationId) return false;
   const { data } = await supabaseAdmin().from("messages").select("sent_at")
     .eq("conversation_id", r.conversationId).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
@@ -113,7 +114,7 @@ export async function pauseAiForHuman(conversationId: string) {
 /** Mensagem escrita pela IA (sem usuário): envia e marca como da IA. */
 export async function sendAiText(orgId: string, conversationId: string, text: string) {
   const r = await resolveTarget(supabaseAdmin(), orgId, { conversationId });
-  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  if (!(await isWindowOpen(r))) throw new WindowClosedError(r.channel.provider);
   const externalId = await sendTextVia(r.channel, r.sendTo, text);
   const id = await record(r, externalId, "text", text, null, null, null);
   await supabaseAdmin().from("messages").update({ by_ai: true }).eq("id", id);
@@ -122,8 +123,10 @@ export async function sendAiText(orgId: string, conversationId: string, text: st
 
 export class WindowClosedError extends HttpError {
   code = WINDOW_CLOSED;
-  constructor() {
-    super(409, "Passaram 24h desde a última mensagem do cliente. Pela regra da API oficial, envie um modelo aprovado para reabrir a conversa.");
+  constructor(provider?: string) {
+    super(409, provider === "instagram"
+      ? "Passaram 24h desde a última mensagem do cliente no Instagram. Pela regra do Instagram, só dá para responder depois que ele mandar mensagem de novo."
+      : "Passaram 24h desde a última mensagem do cliente. Pela regra da API oficial, envie um modelo aprovado para reabrir a conversa.");
   }
 }
 
@@ -136,7 +139,7 @@ function metaAuth(r: Resolved) {
 
 export async function sendText(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, text: string, opts: { automation?: boolean } = {}) {
   const r = await resolveTarget(sb, orgId, t);
-  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  if (!(await isWindowOpen(r))) throw new WindowClosedError(r.channel.provider);
   const externalId = await sendTextVia(r.channel, r.sendTo, text);
   const id = await record(r, externalId, "text", text, null, null, userId);
   // Mensagem de automação: não é "pessoa respondendo", então não pausa a IA
@@ -162,11 +165,23 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
   if (opts.ptv && !ptv) throw new HttpError(422, "O vídeo bolinha precisa ser MP4. Atualize o navegador (Chrome ou Safari recentes) e grave de novo.");
   const filename = file.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120) || "arquivo";
   const r = await resolveTarget(sb, orgId, t);
-  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  if (!(await isWindowOpen(r))) throw new WindowClosedError(r.channel.provider);
 
   let externalId: string;
   let mediaRef: string;
-  if (r.channel.provider === "meta") {
+  if (r.channel.provider === "instagram") {
+    // O Instagram baixa o arquivo por um link: guardamos e geramos um link temporário
+    if (kind === "document" && mime !== "application/pdf") throw new HttpError(422, "O Instagram só aceita foto, vídeo, áudio e PDF");
+    const path = `${orgId}/ig-out/${Date.now()}-${filename.replace(/\s+/g, "_")}`;
+    const db = supabaseAdmin();
+    const up = await db.storage.from("automation-media").upload(path, Buffer.from(await file.arrayBuffer()), { contentType: mime, upsert: true });
+    if (up.error) throw new HttpError(502, "Não consegui preparar o arquivo para o Instagram");
+    const { data: signed } = await db.storage.from("automation-media").createSignedUrl(path, 3600);
+    if (!signed?.signedUrl) throw new HttpError(502, "Não consegui preparar o arquivo para o Instagram");
+    const { sendMedia: igSendMedia } = await import("@/lib/instagram");
+    externalId = await igSendMedia(r.channel.secrets.meta_access_token ?? "", r.sendTo, kind === "document" ? "file" : kind, signed.signedUrl);
+    mediaRef = `storage:${path}`;
+  } else if (r.channel.provider === "meta") {
     const { auth, pid } = metaAuth(r);
     mediaRef = await meta.uploadMedia(pid, auth, file, mime, filename);
     // A API oficial não tem vídeo "bolinha": vai como vídeo comum.
@@ -212,7 +227,7 @@ export const PIX_MIME = "application/x-pix";
  */
 export async function sendPix(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, p: PixInput) {
   const r = await resolveTarget(sb, orgId, t);
-  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  if (!(await isWindowOpen(r))) throw new WindowClosedError(r.channel.provider);
   const brl = p.amount ? p.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : null;
   const label = `${{ cpf: "CPF", cnpj: "CNPJ", phone: "Celular", email: "E-mail", random: "Chave aleatória" }[p.keyType]}: ${p.keyDisplay}`;
   const cardBody = ["💠 Pix", label, brl ? `Valor: ${brl}` : null, p.description ? `Ref.: ${p.description}` : null].filter(Boolean).join("\n");
@@ -247,10 +262,12 @@ export interface LocationInput { latitude: number; longitude: number; name?: str
 /** Envia um pino de localização (como no WhatsApp). */
 export async function sendLocation(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, loc: LocationInput) {
   const r = await resolveTarget(sb, orgId, t);
-  if (!(await isWindowOpen(r))) throw new WindowClosedError();
+  if (!(await isWindowOpen(r))) throw new WindowClosedError(r.channel.provider);
   const clean = { latitude: loc.latitude, longitude: loc.longitude, ...(loc.name ? { name: loc.name } : {}), ...(loc.address ? { address: loc.address } : {}) };
   let externalId: string;
-  if (r.channel.provider === "meta") {
+  if (r.channel.provider === "instagram") {
+    externalId = await sendTextVia(r.channel, r.sendTo, `📍 ${[loc.name, loc.address].filter(Boolean).join(" — ")}\nhttps://maps.google.com/?q=${loc.latitude},${loc.longitude}`.trim());
+  } else if (r.channel.provider === "meta") {
     const { auth, pid } = metaAuth(r);
     externalId = await meta.sendLocation(pid, auth, r.sendTo, clean);
   } else if (r.channel.provider === "zapi") {
@@ -264,11 +281,11 @@ export async function sendLocation(sb: SupabaseClient, orgId: string, userId: st
 }
 
 /** Qual canal/provedor seria usado para este alvo (para avisos ao agendar). */
-export async function previewTarget(sb: SupabaseClient, orgId: string, t: SendTarget): Promise<{ provider: "meta" | "evolution" | "zapi"; channelId: string; windowOpenUntil: string | null } | null> {
+export async function previewTarget(sb: SupabaseClient, orgId: string, t: SendTarget): Promise<{ provider: "meta" | "evolution" | "zapi" | "instagram"; channelId: string; windowOpenUntil: string | null } | null> {
   try {
     const r = await resolveTarget(sb, orgId, t);
     let until: string | null = null;
-    if (r.channel.provider === "meta" && r.conversationId) {
+    if ((r.channel.provider === "meta" || r.channel.provider === "instagram") && r.conversationId) {
       const { data } = await supabaseAdmin().from("messages").select("sent_at")
         .eq("conversation_id", r.conversationId).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
       if (data) until = new Date(new Date(data.sent_at).getTime() + 24 * 3600 * 1000).toISOString();

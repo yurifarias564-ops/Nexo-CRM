@@ -23,13 +23,13 @@ export function WhatsAppTab() {
   const [importing, setImporting] = useState<{ id: string; done: number; total: number; msgs: number } | null>(null);
 
   const load = useCallback(async () => {
-    const { data } = await supabaseBrowser().from("whatsapp_channels").select("*").order("created_at");
+    const { data } = await supabaseBrowser().from("whatsapp_channels").select("*").neq("provider", "instagram").order("created_at");
     setChannels((data ?? []) as Channel[]);
   }, []);
 
   useEffect(() => {
     const sb = supabaseBrowser();
-    sb.from("whatsapp_channels").select("*").order("created_at").then(({ data }) => setChannels((data ?? []) as Channel[]));
+    sb.from("whatsapp_channels").select("*").neq("provider", "instagram").order("created_at").then(({ data }) => setChannels((data ?? []) as Channel[]));
     const ch = sb.channel(`channels:${ws.orgId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "whatsapp_channels", filter: `organization_id=eq.${ws.orgId}` }, () => void load())
       .subscribe();

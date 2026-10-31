@@ -12,6 +12,7 @@ import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
 import { useLatest } from "@/lib/hooks";
 import { TemplateModal } from "@/components/inbox/template-modal";
 import { ScheduleModal } from "./schedule-modal";
+import { OlxReply } from "./olx-reply";
 import { CloseAttendanceButton } from "@/components/dashboard/unanswered";
 import { CallModal } from "./call-modal";
 import { VoipCallButton } from "@/components/calls/voip-provider";
@@ -322,6 +323,8 @@ export function LeadDrawer({
                   )}
                 </div>
               </div>
+
+              <OlxReply leadId={lead.id} onSent={() => void reloadSide()} />
 
               <div>
                 <div className="mb-2 flex items-center justify-between">

@@ -22,6 +22,10 @@ async function handle(req: Request) {
     // Cobrança dos parceiros nos grupos (no dia do vencimento e 2 dias depois, se não pagou)
     const partnerBills = new Date().getMinutes() % 15 === 5 ? await runPartnerBilling().catch((e) => { console.error("[parceiros]", e); return 0; }) : 0;
     if (new Date().getMinutes() % 15 === 6) await expireSupportAccess().catch((e) => console.error("[suporte]", e));
+    if (new Date().getMinutes() === 9) {
+      const { refreshInstagramTokens } = await import("@/lib/instagram-ingest");
+      await refreshInstagramTokens().catch((e) => console.error("[instagram]", e));
+    }
     if (new Date().getMinutes() % 15 === 7) {
       const { runPaymentAccountsTick } = await import("@/lib/payments/asaas-store");
       await runPaymentAccountsTick().catch((e) => console.error("[pix nexo]", e));

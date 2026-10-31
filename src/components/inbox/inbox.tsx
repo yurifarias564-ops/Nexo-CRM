@@ -138,7 +138,7 @@ export function Inbox({ initialConversationId }: { initialConversationId: string
             return (
               <button key={c.id} onClick={() => open(c.id)}
                 className={cn("flex w-full items-center gap-3 border-b border-line/50 px-3 py-3 text-left transition hover:bg-ink-800/70", selected === c.id && "bg-brand-500/10 shadow-[inset_2px_0_0_0_#3b82f6]")}>
-                <LeadPhoto size="md" lead={{ name, avatar_url: c.leads?.avatar_url, source: "whatsapp", last_message_at: c.last_message_at }} />
+                <LeadPhoto size="md" lead={{ name, avatar_url: c.leads?.avatar_url, source: c.wa_id.startsWith("ig:") ? "instagram" : "whatsapp", last_message_at: c.last_message_at }} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <p className={cn("flex-1 truncate text-sm", c.unread_count ? "font-semibold text-white" : "font-medium text-slate-200")}>{name}</p>
@@ -273,6 +273,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
   }, [conv.id, conv.lead_id, conv.channel_id, unreadRef]);
 
   const windowClosed = provider === "meta" && (lastInAt === null || now - lastInAt > DAY_MS);
+  const igClosed = provider === "instagram" && lastInAt !== null && now - lastInAt > DAY_MS;
   const hoursLeft = provider === "meta" && lastInAt !== null && !windowClosed ? Math.max(0, Math.floor((DAY_MS - (now - lastInAt)) / 3600000)) : null;
 
   function pickFile(f: File | undefined) {
@@ -455,17 +456,17 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-white">{name}</p>
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-            <span>{formatPhone(conv.wa_id)}</span>
+            <span>{conv.wa_id.startsWith("ig:") ? "Instagram Direct" : formatPhone(conv.wa_id)}</span>
             {stage && <span className="flex items-center gap-1">· <span className="h-1.5 w-1.5 rounded-full" style={{ background: stage.color }} />{stage.name}</span>}
             {tagIds.map((id) => { const t = ws.tagById.get(id); return t ? <TagPill key={id} name={t.name} color={t.color} className="text-[10px]" /> : null; })}
           </div>
         </div>
         <AiChip conv={conv as ConvRow & { ai_state?: string; ai_paused_until?: string | null }} />
-        <VoipCallButton conversationId={conv.id} leadId={conv.lead_id} name={name} phone={conv.wa_id} compact />
+        {provider !== "instagram" && <VoipCallButton conversationId={conv.id} leadId={conv.lead_id} name={name} phone={conv.wa_id} compact />}
         <Button variant="outline" size="sm" onClick={startVideoCall} loading={videoBusy} title="Chamada de vídeo: manda o link para o cliente entrar pelo celular">
           {!videoBusy && <Video className="h-3.5 w-3.5" />} <span className="hidden sm:inline">Vídeo</span>
         </Button>
-        {(!voip.ready || (provider === "meta" && !coexist)) && <CallButton conversationId={conv.id} name={name} phone={conv.wa_id} provider={provider} />}
+        {provider !== "instagram" && (!voip.ready || (provider === "meta" && !coexist)) && <CallButton conversationId={conv.id} name={name} phone={conv.wa_id} provider={provider} />}
         {conv.lead_id && (
           <Button variant="outline" size="sm" onClick={() => onOpenLead(conv.lead_id!)}><UserRound className="h-3.5 w-3.5" /> Lead</Button>
         )}
@@ -495,7 +496,12 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
       <footer className="border-t border-line bg-ink-900/80 p-3"
         onDragOver={(e) => { if (!windowClosed) e.preventDefault(); }}
         onDrop={(e) => { if (windowClosed) return; e.preventDefault(); pickFile(e.dataTransfer.files[0]); }}>
-        {windowClosed ? (
+        {igClosed ? (
+          <div className="mx-auto flex max-w-4xl items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+            <Lock className="h-4 w-4 shrink-0 text-amber-300" />
+            <p className="text-sm text-amber-100">Passaram 24h desde a última mensagem do cliente no Instagram. Pela regra do Instagram, só dá para responder quando ele mandar mensagem de novo.</p>
+          </div>
+        ) : windowClosed ? (
           <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
             <Lock className="h-4 w-4 shrink-0 text-amber-300" />
             <p className="min-w-0 flex-1 text-sm text-amber-100">

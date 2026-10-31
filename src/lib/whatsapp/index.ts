@@ -5,6 +5,7 @@ import type { Channel } from "@/lib/types";
 import * as meta from "./meta";
 import * as evo from "./evolution";
 import * as zapi from "./zapi";
+import * as ig from "@/lib/instagram";
 import type { MessageChange, NormalizedMessage } from "./types";
 
 export interface ChannelWithSecrets extends Channel {
@@ -33,6 +34,10 @@ export async function sendTextVia(channel: ChannelWithSecrets, waId: string, tex
     return meta.sendText(channel.meta_phone_number_id, channel.secrets.meta_access_token, waId, text);
   }
   if (channel.provider === "zapi") return zapi.sendText(zapiCreds(channel), waId, text);
+  if (channel.provider === "instagram") {
+    if (!channel.secrets.meta_access_token) throw new HttpError(409, "Instagram sem acesso — conecte de novo em Integrações");
+    return ig.sendText(channel.secrets.meta_access_token, waId, text);
+  }
   if (!channel.evolution_instance) throw new HttpError(409, "Canal QR sem instância");
   return evo.sendText(channel.evolution_instance, waId, text);
 }

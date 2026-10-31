@@ -5,6 +5,7 @@ import { loadChannel } from "@/lib/whatsapp";
 import * as meta from "@/lib/whatsapp/meta";
 import * as evo from "@/lib/whatsapp/evolution";
 import { trustedRecordingUrl } from "@/lib/voip/api4com";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -22,7 +23,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     let data: ArrayBuffer;
     let mime = msg.media_mime ?? "application/octet-stream";
-    if (ch.provider === "meta") {
+    if (msg.media_ref.startsWith("storage:")) {
+      // Mídia guardada pelo CRM (ex.: Instagram, que expira o link)
+      const path = msg.media_ref.slice("storage:".length);
+      if (!path.startsWith(`${ctx.org.id}/`)) throw new HttpError(404, "Mídia não encontrada");
+      const { data: blob, error } = await supabaseAdmin().storage.from("automation-media").download(path);
+      if (error || !blob) throw new HttpError(404, "Mídia indisponível");
+      data = await blob.arrayBuffer();
+    } else if (ch.provider === "meta") {
       const r = await meta.downloadMedia(msg.media_ref, ch.secrets.meta_access_token!);
       data = r.data;
       mime = r.mime || mime;

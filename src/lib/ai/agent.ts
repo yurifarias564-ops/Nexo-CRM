@@ -537,6 +537,12 @@ function msgText(m: MsgRow): string {
 
 async function downloadMedia(channelId: string, ref: string, mime: string | null): Promise<Blob | null> {
   const ch = await loadChannel(channelId);
+  if (ref.startsWith("storage:")) {
+    const path = ref.slice("storage:".length);
+    if (!path.startsWith(`${ch.organization_id}/`)) return null;
+    const { data } = await supabaseAdmin().storage.from("automation-media").download(path);
+    return data ?? null;
+  }
   if (ch.provider === "zapi") {
     const u = new URL(ref);
     if (u.protocol !== "https:") return null;
