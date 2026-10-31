@@ -64,7 +64,7 @@ export function UnansweredTile({ seller }: { seller: string }) {
         <p className={cn("flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide", n > 0 ? "text-red-300" : "text-slate-400")}>
           <MessageSquareWarning className="h-3.5 w-3.5" /> Sem resposta
         </p>
-        <p className={cn("mt-2 text-2xl font-semibold tabular-nums tracking-tight", n > 0 ? "animate-pulse text-red-400" : "text-white")}>{rows ? n.toLocaleString("pt-BR") : "…"}</p>
+        <p className={cn("mt-2 text-2xl font-semibold tabular-nums tracking-tight", n > 0 ? "nx-blink text-red-500" : "text-white")}>{rows ? n.toLocaleString("pt-BR") : "…"}</p>
         <p className="mt-1 truncate text-xs text-slate-500">{n > 0 ? `o mais antigo espera há ${waited(oldest!)} · clique para ver` : "todos respondidos ✓"}</p>
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title={`Clientes esperando resposta (${n})`} wide>

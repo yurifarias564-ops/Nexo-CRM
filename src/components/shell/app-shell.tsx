@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Target, Handshake, PlayCircle, Workflow, Wallet } from "lucide-react";
+import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -26,7 +26,6 @@ const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boole
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/agendadas", label: "Agendadas", icon: CalendarClock },
   { seller: true, href: "/time", label: "Time comercial", icon: UsersRound },
-  { href: "/campanhas", label: "Campanhas", icon: Target },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart },
   { href: "/financas", label: "Finanças", icon: Wallet },
   { href: "/settings", label: "Configurações", icon: Settings },
@@ -53,6 +52,23 @@ function useUnread(orgId: string) {
   return count;
 }
 
+/** Clientes esperando resposta (aparece piscando em vermelho no "Painel"). */
+function useWaiting(orgId: string, enabled: boolean) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    const sb = supabaseBrowser();
+    const load = async () => {
+      const { data } = await sb.rpc("unanswered_leads", { org: orgId, p_seller: null });
+      setN((data ?? []).length);
+    };
+    const t = setTimeout(() => void load(), 0);
+    const i = setInterval(() => void load(), 60_000);
+    return () => { clearTimeout(t); clearInterval(i); };
+  }, [orgId, enabled]);
+  return n;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const ws = useWorkspace();
   const base = ws.role === "agent" ? NAV.filter((n) => n.seller) : NAV;
@@ -60,6 +76,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const unread = useUnread(ws.orgId);
+  const waiting = useWaiting(ws.orgId, ws.role !== "agent");
   const [orgMenu, setOrgMenu] = useState(false);
 
   async function switchOrg(id: string) {
@@ -105,6 +122,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   active ? "bg-gradient-to-r from-brand-500/20 to-transparent text-white shadow-[inset_2px_0_0_0_#3b82f6]" : "text-slate-400 hover:bg-ink-800 hover:text-slate-100")}>
                 <I className={cn("h-4 w-4", active ? "text-brand-300" : "text-slate-500 group-hover:text-slate-300")} />
                 <span className="flex-1">{label}</span>
+                {href === "/dashboard" && waiting > 0 && (
+                  <span className="nx-blink rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white" title={`${waiting} cliente(s) esperando resposta`}>{waiting > 99 ? "99+" : waiting}</span>
+                )}
                 {href === "/inbox" && unread > 0 && (
                   <span className="rounded-full bg-brand-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{unread > 99 ? "99+" : unread}</span>
                 )}
@@ -135,13 +155,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="md:hidden"><Logo compact brand={ws.brand} /></div>
           <nav className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] md:hidden">
             {nav.map(({ href, icon: I, label }) => (
-              <Link key={href} href={href} aria-label={label} className={cn("shrink-0 rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>
+              <Link key={href} href={href} aria-label={label} className={cn("relative shrink-0 rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>
                 <I className="h-4 w-4" />
+                {href === "/dashboard" && waiting > 0 && <span className="nx-blink absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500" />}
               </Link>
             ))}
           </nav>
           <h1 className="hidden text-sm font-medium text-slate-300 md:block">
-            {NAV.find((n) => path.startsWith(n.href))?.label}
+            {NAV.find((n) => path.startsWith(n.href))?.label ?? (path.startsWith("/campanhas") ? "Campanhas" : null)}
           </h1>
           <div className="ml-auto flex shrink-0 items-center gap-2"><AssistantButton /><VoiceCommand /></div>
         </header>

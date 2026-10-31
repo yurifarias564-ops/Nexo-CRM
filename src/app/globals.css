@@ -42,3 +42,8 @@
     background-size: 22px 22px;
   }
 }
+
+/* Alerta piscando (clientes sem resposta) */
+@keyframes nx-blink { 0%, 100% { opacity: 1 } 50% { opacity: .15 } }
+.nx-blink { animation: nx-blink 1s steps(2, jump-none) infinite; }
+@media (prefers-reduced-motion: reduce) { .nx-blink { animation: none } }
