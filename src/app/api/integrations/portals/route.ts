@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { requireApiContext } from "@/lib/auth";
-import { fail, ok, readJson } from "@/lib/http";
+import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { igConfig, igRedirectUri, igVerifyToken } from "@/lib/instagram";
 import { inboundToken, inboundUrl, olxConfig, olxRedirect, olxUnregister, rotateInbound } from "@/lib/portals";
@@ -19,10 +19,16 @@ export async function GET() {
       db.from("olx_accounts").select("webhook_ok, last_error, connected_at").eq("organization_id", ctx.org.id).maybeSingle(),
       db.from("whatsapp_channels").select("id, name, ig_username, status, last_error, ig_token_expires_at").eq("organization_id", ctx.org.id).eq("provider", "instagram"),
     ]);
+    const { data: igReq } = await db.from("instagram_access_requests").select("username, status, requested_at, invited_at").eq("organization_id", ctx.org.id).maybeSingle();
+    // Dono da plataforma: lista de lojas esperando liberação do Instagram
+    const igQueue = ctx.isHouse
+      ? ((await db.from("instagram_access_requests").select("organization_id, username, status, requested_at, organizations(name)").neq("status", "connected").order("requested_at")).data ?? [])
+          .map((r) => ({ orgId: r.organization_id, username: r.username, status: r.status, requestedAt: r.requested_at, org: (r.organizations as unknown as { name: string } | null)?.name ?? "" }))
+      : [];
     return ok({
       inbound: { olx: inboundUrl(token!, "OLX"), webmotors: inboundUrl(token!, "Webmotors"), site: inboundUrl(token!, "Site"), lastUsedAt: link?.last_used_at ?? null, received: link?.received ?? 0 },
       olx: { available: Boolean(olxConfig()), connected: Boolean(olx), webhookOk: olx?.webhook_ok ?? false, error: olx?.last_error ?? null, connectedAt: olx?.connected_at ?? null },
-      instagram: { available: Boolean(igConfig()), accounts: igs ?? [] },
+      instagram: { available: Boolean(igConfig()), accounts: igs ?? [], request: igReq ?? null, queue: igQueue },
       // Para o dono da plataforma configurar os apps (só endereços públicos, nenhum segredo)
       setup: ctx.isHouse ? {
         igWebhook: `${appUrl()}/api/webhooks/instagram`, igVerifyToken: igVerifyToken(), igRedirect: igRedirectUri(), olxRedirect: olxRedirect(),
@@ -33,7 +39,17 @@ export async function GET() {
   }
 }
 
-const Body = z.object({ action: z.enum(["rotate", "olx_disconnect", "ig_disconnect", "ig_check"]), channelId: z.string().uuid().optional() });
+const Body = z.object({
+  action: z.enum(["rotate", "olx_disconnect", "ig_disconnect", "ig_check", "ig_request", "ig_invited"]),
+  channelId: z.string().uuid().optional(),
+  orgId: z.string().uuid().optional(),
+  username: z.string().max(60).optional(),
+});
+/** "@Loja.Oficial " → "loja.oficial"; aceita também o link do perfil. */
+function igHandle(v: string) {
+  const h = v.trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/[/?#].*$/, "").replace(/^@/, "").toLowerCase();
+  return /^[a-z0-9._]{1,30}$/.test(h) ? h : null;
+}
 
 export async function POST(req: Request) {
   try {
@@ -52,6 +68,17 @@ export async function POST(req: Request) {
       });
       const j = await r.json().catch(() => ({}));
       return ok({ configured: true, appId: c.appId, secretLen: c.secret.length, secretHex: /^[0-9a-f]+$/.test(c.secret), secretTrimmed: c.secret === c.secret.trim(), redirect: igRedirectUri(), status: r.status, api: j });
+    }
+    if (b.action === "ig_request") {
+      const username = igHandle(b.username ?? "");
+      if (!username) throw new HttpError(400, "Digite o @ da conta do Instagram (só letras, números, ponto e _).");
+      await db.from("instagram_access_requests").upsert({ organization_id: ctx.org.id, username, status: "pending", requested_at: new Date().toISOString(), invited_at: null });
+      return ok({ ok: true });
+    }
+    if (b.action === "ig_invited") {
+      if (!ctx.isHouse || !b.orgId) throw new HttpError(403, "Só a plataforma marca o convite");
+      await db.from("instagram_access_requests").update({ status: "invited", invited_at: new Date().toISOString() }).eq("organization_id", b.orgId);
+      return ok({ ok: true });
     }
     if (b.action === "rotate") await rotateInbound(ctx.org.id);
     if (b.action === "olx_disconnect") {

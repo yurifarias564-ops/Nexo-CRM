@@ -38,6 +38,7 @@ export async function GET(req: Request) {
       await db.from("whatsapp_channels").update({ last_error: `Recebimento de mensagens: ${(e as Error).message}`.slice(0, 300) }).eq("id", id!);
       return back("sem-webhook");
     }
+    await db.from("instagram_access_requests").upsert({ organization_id: ctx.org.id, username: acc.username.toLowerCase(), status: "connected" });
     return back("ok");
   } catch (e) {
     console.error("[instagram callback]", e);
