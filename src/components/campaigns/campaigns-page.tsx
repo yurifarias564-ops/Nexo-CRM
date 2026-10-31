@@ -43,10 +43,10 @@ function range(p: string): { from: Date; to: Date } {
 const pct = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(1).replace(".", ",")}%` : "—");
 const chLabel = (k: string | null) => (k && k in CHANNELS ? CHANNELS[k as Channel] : NOT_TRACKED);
 
-export function CampaignsPage() {
+export function CampaignsPage({ embedded }: { embedded?: boolean } = {}) {
   const [tab, setTab] = useState<TabId>("meta");
   return (
-    <div className="h-full overflow-y-auto">
+    <div className={embedded ? "" : "h-full overflow-y-auto"}>
       <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-8">
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/15 text-brand-200"><Target className="h-5 w-5" /></span>

@@ -501,5 +501,15 @@ ok("lembretes padrão: 6h, 12h e 30 min antes", (await su("select jsonb_array_le
 await expectError("vendedor não muda os lembretes", async () => { const r = await as(C, "update public.meeting_settings set send_link=false where organization_id=$1 returning 1", [orgA]); if (!r.length) throw Object.assign(new Error("rls"), { code: "42501" }); }, "42501");
 ok("espera de resposta aceita 'options'", String((await su("select pg_get_constraintdef(oid) d from pg_constraint where conname='automation_runs_waiting_for_check'"))[0]?.d).includes("options"));
 
+console.log("\n# Sem resposta");
+const wl = (await as(A, "insert into public.leads (organization_id,pipeline_id,stage_id,name) values ($1,$2,$3,'Cliente esperando') returning id", [orgA, pipeA, stageA]))[0].id;
+await su("update public.leads set last_message_dir='in', last_message_at=now() - interval '1 hour' where id=$1", [wl]);
+ok("cliente que mandou a última mensagem aparece como sem resposta", (await as(A, "select id from public.unanswered_leads($1)", [orgA])).some((r) => r.id === wl));
+ok("outra empresa não vê", (await as(B, "select id from public.unanswered_leads($1)", [orgA])).length === 0);
+await as(A, "update public.leads set attendance_closed_at=now() where id=$1", [wl]);
+ok("finalizar atendimento tira da lista", !(await as(A, "select id from public.unanswered_leads($1)", [orgA])).some((r) => r.id === wl));
+await su("update public.leads set last_message_at=now() + interval '1 minute' where id=$1", [wl]);
+ok("cliente mandou de novo: volta para a lista", (await as(A, "select id from public.unanswered_leads($1)", [orgA])).some((r) => r.id === wl));
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

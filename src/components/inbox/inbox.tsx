@@ -5,6 +5,7 @@ import { ArrowLeft, Ban, CalendarClock, Check, CheckCheck, ChevronDown, CircleUs
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
+import { CloseAttendanceButton } from "@/components/dashboard/unanswered";
 import { LeadDrawer } from "@/components/lead/lead-drawer";
 import { Button } from "@/components/ui/button";
 import { Empty, Spinner, TagPill } from "@/components/ui/misc";
@@ -468,6 +469,7 @@ function Chat({ conv, onBack, onOpenLead }: { conv: ConvRow; onBack: () => void;
         {conv.lead_id && (
           <Button variant="outline" size="sm" onClick={() => onOpenLead(conv.lead_id!)}><UserRound className="h-3.5 w-3.5" /> Lead</Button>
         )}
+        {conv.lead_id && <CloseAttendanceButton leadId={conv.lead_id} compact />}
       </header>
 
       <div ref={scroller} className="chat-bg flex-1 overflow-y-auto px-4 py-4 md:px-10"

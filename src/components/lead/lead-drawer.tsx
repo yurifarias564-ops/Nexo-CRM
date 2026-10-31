@@ -12,6 +12,7 @@ import { formatPhone, normalizePhone, relativeTime } from "@/lib/utils";
 import { useLatest } from "@/lib/hooks";
 import { TemplateModal } from "@/components/inbox/template-modal";
 import { ScheduleModal } from "./schedule-modal";
+import { CloseAttendanceButton } from "@/components/dashboard/unanswered";
 import { CallModal } from "./call-modal";
 import { VoipCallButton } from "@/components/calls/voip-provider";
 import { callOutcomeLabel } from "@/lib/constants";
@@ -325,7 +326,10 @@ export function LeadDrawer({
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="label mb-0">Agendamentos</span>
-                  <Button size="sm" variant="outline" onClick={() => setScheduling(true)}><CalendarPlus className="h-3.5 w-3.5" /> Agendar</Button>
+                  <div className="flex gap-1.5">
+                    <CloseAttendanceButton leadId={lead.id} compact />
+                    <Button size="sm" variant="outline" onClick={() => setScheduling(true)}><CalendarPlus className="h-3.5 w-3.5" /> Agendar</Button>
+                  </div>
                 </div>
                 {appts.length ? (
                   <ul className="space-y-1.5">

@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowDownRight, ArrowUpRight, BarChart3, Minus, RefreshCw } from "lucide-react";
+import { ArrowDownLeft, ArrowDownRight, ArrowUpRight, BarChart3, Minus, RefreshCw, Target } from "lucide-react";
+import { CampaignsPage } from "@/components/campaigns/campaigns-page";
+import { UnansweredTile } from "./unanswered";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
@@ -67,6 +69,29 @@ const compactBRL = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: v >= 100000 ? "compact" : "standard", maximumFractionDigits: v >= 100000 ? 1 : 0 }).format(v);
 
 export function Dashboard() {
+  const [view, setView] = useState<"vendas" | "campanhas">("vendas");
+  useEffect(() => {
+    let v: string | null = null;
+    try { v = localStorage.getItem("nexo:painel-view"); } catch { /* ok */ }
+    const t = setTimeout(() => { if (v === "campanhas") setView("campanhas"); }, 0);
+    return () => clearTimeout(t);
+  }, []);
+  const pick = (v: "vendas" | "campanhas") => { setView(v); try { localStorage.setItem("nexo:painel-view", v); } catch { /* ok */ } };
+  const switcher = (
+    <div className="flex rounded-lg border border-line bg-ink-900 p-1" role="tablist" aria-label="O que ver no painel">
+      {([["vendas", "Métricas de vendas", BarChart3], ["campanhas", "Campanhas", Target]] as const).map(([id, label, I]) => (
+        <button key={id} role="tab" aria-selected={view === id} onClick={() => pick(id)}
+          className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition", view === id ? "bg-brand-500/20 text-white" : "text-slate-400 hover:text-slate-200")}>
+          <I className="h-4 w-4" /> {label}
+        </button>
+      ))}
+    </div>
+  );
+  if (view === "campanhas") return <div className="h-full overflow-y-auto"><div className="mx-auto max-w-7xl px-4 pt-4 md:px-6">{switcher}</div><CampaignsPage embedded /></div>;
+  return <SalesDashboard switcher={switcher} />;
+}
+
+function SalesDashboard({ switcher }: { switcher: React.ReactNode }) {
   const ws = useWorkspace();
   const [period, setPeriod] = useState<PeriodId>("30");
   const [seller, setSeller] = useState<string>("");
@@ -105,6 +130,7 @@ export function Dashboard() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
         <div className="flex flex-wrap items-center gap-2">
+          {switcher}
           <div className="flex rounded-lg border border-line bg-ink-900 p-1" role="tablist" aria-label="Período">
             {PERIODS.map((p) => (
               <button key={p.id} role="tab" aria-selected={period === p.id} onClick={() => setPeriod(p.id)}
@@ -127,7 +153,8 @@ export function Dashboard() {
           <div className="flex justify-center py-20"><Spinner /></div>
         ) : (
           <>
-            <section className="grid grid-cols-2 gap-3 lg:grid-cols-5" aria-label="Indicadores">
+            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" aria-label="Indicadores">
+              <UnansweredTile seller={seller} />
               <Tile label="Leads novos" value={stats.new_leads.toLocaleString("pt-BR")} sub="no período" />
               <Tile label="Em andamento" value={compactBRL(Number(stats.open_value))} sub={`${stats.open_count.toLocaleString("pt-BR")} leads abertos`} />
               <Tile label="Vendas ganhas" value={compactBRL(Number(stats.won_value))} sub={`${stats.won_count} fechamentos no período`} accent />
