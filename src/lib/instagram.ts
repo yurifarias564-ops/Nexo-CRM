@@ -41,7 +41,7 @@ export function authorizeUrl(state: string) {
   if (!c) throw new HttpError(409, "A integração com o Instagram ainda não foi ativada na plataforma");
   const q = new URLSearchParams({
     client_id: c.appId, redirect_uri: igRedirectUri(), response_type: "code", state,
-    scope: "instagram_business_basic,instagram_business_manage_messages", enable_fb_login: "0", force_reauth: "true",
+    scope: "instagram_business_basic,instagram_business_manage_messages", enable_fb_login: "0",
   });
   return `https://www.instagram.com/oauth/authorize?${q}`;
 }
