@@ -1,4 +1,5 @@
 "use client";
+import { companyLine } from "@/lib/company";
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -103,7 +104,7 @@ export function LoginForm({ brand }: { brand?: Brand }) {
         </p>
       </aside>
 
-      <main className="flex items-center justify-center p-6">
+      <main className="flex flex-col items-center justify-center p-6">
         <div className="w-full max-w-sm animate-fadeIn">
           <div className="mb-8 lg:hidden"><Logo brand={brand} /></div>
           <h2 className="text-2xl font-semibold tracking-tight text-white">
@@ -147,6 +148,12 @@ export function LoginForm({ brand }: { brand?: Brand }) {
             <a href={`https://wa.me/${brand!.supportWhatsapp}`} target="_blank" rel="noopener noreferrer" className="mt-2 block text-sm text-slate-400 hover:text-brand-300">Precisa de ajuda? Fale com o suporte</a>
           )}
         </div>
+        {!custom && (
+          <footer className="mt-8 max-w-sm space-y-2 text-center text-[11px] leading-relaxed text-slate-500">
+            <p>{companyLine}</p>
+            <p className="flex justify-center gap-3"><a href="/privacidade" className="hover:text-brand-300">Privacidade</a><a href="/termos" className="hover:text-brand-300">Termos</a><a href="/exclusao-de-dados" className="hover:text-brand-300">Exclusão de dados</a></p>
+          </footer>
+        )}
       </main>
     </div>
   );

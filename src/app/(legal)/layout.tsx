@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { companyLine } from "@/lib/company";
 
 export default function LegalLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -11,6 +12,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           <Link href="/exclusao-de-dados">Exclusão de dados</Link>
           <Link href="/login">Entrar</Link>
         </nav>
+        <p className="text-xs text-slate-500">{companyLine}</p>
       </article>
     </div>
   );
