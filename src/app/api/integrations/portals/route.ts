@@ -33,13 +33,26 @@ export async function GET() {
   }
 }
 
-const Body = z.object({ action: z.enum(["rotate", "olx_disconnect", "ig_disconnect"]), channelId: z.string().uuid().optional() });
+const Body = z.object({ action: z.enum(["rotate", "olx_disconnect", "ig_disconnect", "ig_check"]), channelId: z.string().uuid().optional() });
 
 export async function POST(req: Request) {
   try {
     const ctx = await requireApiContext({ manage: true });
     const b = Body.parse(await readJson(req, 500));
     const db = supabaseAdmin();
+    if (b.action === "ig_check") {
+      // Diagnóstico (só a conta da plataforma): testa o par app ID / chave secreta do Instagram sem expor a chave.
+      if (!ctx.isHouse) return ok({ ok: false });
+      const c = igConfig();
+      if (!c) return ok({ configured: false });
+      const r = await fetch("https://api.instagram.com/oauth/access_token", {
+        method: "POST",
+        body: new URLSearchParams({ client_id: c.appId, client_secret: c.secret, grant_type: "authorization_code", redirect_uri: igRedirectUri(), code: "teste-invalido" }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const j = await r.json().catch(() => ({}));
+      return ok({ configured: true, appId: c.appId, secretLen: c.secret.length, secretHex: /^[0-9a-f]+$/.test(c.secret), secretTrimmed: c.secret === c.secret.trim(), redirect: igRedirectUri(), status: r.status, api: j });
+    }
     if (b.action === "rotate") await rotateInbound(ctx.org.id);
     if (b.action === "olx_disconnect") {
       const { data } = await db.from("olx_accounts").select("access_token").eq("organization_id", ctx.org.id).maybeSingle();
