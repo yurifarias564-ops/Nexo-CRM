@@ -1,20 +1,23 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ClipboardCheck, LineChart, Settings2, UsersRound } from "lucide-react";
 import { useWorkspace } from "@/components/workspace";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useTeamBase } from "./data";
+import { loadBaseSb, loginTeamApi, TeamApiContext, useTeamBase } from "./data";
 import { Checklist } from "./checklist";
 import { TeamBoard } from "./board";
 import { TeamSetup } from "./setup";
+import { ShareLink } from "./share-link";
 
 type Tab = "checklist" | "board" | "setup";
 
 export function TeamPage() {
   const ws = useWorkspace();
-  const { base, error, reload } = useTeamBase(ws.orgId);
+  const load = useCallback(() => loadBaseSb(ws.orgId), [ws.orgId]);
+  const { base, error, reload } = useTeamBase(load);
+  const api = useMemo(() => loginTeamApi(ws.orgId, ws.userId, ws.canManage), [ws.orgId, ws.userId, ws.canManage]);
   const [tab, setTab] = useState<Tab>("checklist");
   const empty = !!base && (!base.sellers.some((s) => s.active) || !base.metrics.some((m) => m.active));
   const tabs: { id: Tab; label: string; icon: typeof ClipboardCheck }[] = [
@@ -42,6 +45,16 @@ export function TeamPage() {
           )}
         </div>
 
+        {ws.canManage && tab !== "checklist" && (
+          <div className="card flex flex-wrap items-center gap-3 p-4">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-white">Link do checklist para a equipe</p>
+              <p className="text-xs text-slate-400">Mande para o time: abre só o checklist (sem login e sem o resto do CRM). Dá para preencher nos botões ou por áudio.</p>
+            </div>
+            <ShareLink />
+          </div>
+        )}
+
         {error ? <div className="card px-6 py-10 text-center text-sm text-red-300">Não foi possível carregar o time: {error}</div>
           : !base ? <div className="card flex h-48 items-center justify-center"><Spinner /></div>
             : empty && tab === "checklist" ? (
@@ -61,7 +74,7 @@ export function TeamPage() {
                 )}
               </div>
             )
-              : tab === "checklist" ? <Checklist base={base} reloadBase={reload} />
+              : tab === "checklist" ? <TeamApiContext.Provider value={api}><Checklist base={base} reloadBase={reload} /></TeamApiContext.Provider>
                 : tab === "board" ? <TeamBoard base={base} />
                   : <TeamSetup base={base} reload={reload} />}
       </div>

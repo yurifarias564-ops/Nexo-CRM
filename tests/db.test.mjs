@@ -485,5 +485,11 @@ await expectError("usuário não muda a conta de recebimento direto pelo banco",
 await expectError("usuário não descobre se uma empresa é da casa", () => as(A, "select public.org_is_house($1)", [orgA]), "42501");
 await expectError("saque de valor zero é recusado", () => su("insert into public.payouts (organization_id, value, key_display) values ($1, 0, 'x')", [orgA]), "23514");
 
+console.log("\n# Link do checklist");
+await su("insert into public.team_share_links (organization_id, token) values ($1, repeat('a', 40))", [orgA]);
+ok("dono vê o link da empresa dele", (await as(A, "select * from public.team_share_links")).length === 1);
+ok("vendedor e outra empresa não veem o link", (await as(C, "select * from public.team_share_links")).length === 0 && (await as(B, "select * from public.team_share_links")).length === 0);
+await expectError("token curto é recusado", () => su("insert into public.team_share_links (organization_id, token) values ($1, 'abc')", [orgB]), "23514");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

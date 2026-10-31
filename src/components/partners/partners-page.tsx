@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BrandingEditor } from "@/components/branding/branding-editor";
+import { ShareLink } from "@/components/team/share-link";
 import { PixRevenue } from "./pix-revenue";
 import { AlertTriangle, Palette, CalendarDays, CheckCircle2, CreditCard, ExternalLink, Handshake, LogIn, MessageCircle, Receipt, Search, Send, Settings2, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
@@ -275,6 +276,12 @@ function PartnerModal({ p, canBill, onClose, onChanged, onEnter }: { p: Partner;
           <Button size="sm" variant="outline" className="ml-auto" onClick={() => setBranding(true)}><Palette className="h-3.5 w-3.5" /> Marca e domínio</Button>
           <Button size="sm" onClick={onEnter}><LogIn className="h-3.5 w-3.5" /> Acessar conta</Button>
         </div>
+
+        <section className="space-y-2 rounded-xl border border-line p-3">
+          <p className="font-medium text-slate-200">Link do checklist do cliente</p>
+          <p className="text-xs text-slate-500">Só o checklist do time desta empresa, sem login. O que preencherem aparece no CRM dela (Time comercial).</p>
+          <ShareLink org={p.id} />
+        </section>
 
         <section className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
           <Field label="Vencimento" hint={p.asaas_subscription_id ? "Muda no Asaas também (e a cobrança em aberto)." : "Cliente sem assinatura no Asaas: muda só o acesso."}>

@@ -2,8 +2,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Lock, Minus, Plus, Sparkles, Trash2, Trophy, X } from "lucide-react";
 import { toast } from "sonner";
-import { supabaseBrowser } from "@/lib/supabase/client";
-import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
@@ -11,7 +9,8 @@ import {
   addDays, conv, dayGoalItems, dayProgress, fmtBRL, fmtDayFull, fmtValue, goalFor, parseBRL, periodAt, resultsOf, ROLE_LABEL,
   stepperMetrics, todayIn, totals, weekdaysBetween, weekStart, type TeamMetric, type TeamNote, type TeamRole, type TeamSale, type TeamSeller, type TeamValue,
 } from "@/lib/team";
-import { browserTz, fetchNotes, fetchSales, fetchValues, type TeamBase } from "./data";
+import { browserTz, useTeamApi, type TeamBase } from "./data";
+import { VoiceFillButton } from "./voice-fill";
 
 type Group = TeamRole | "todos";
 const GROUP_TITLE: Record<Group, string> = { sdr: "SDR", closer: "Closer", todos: "Equipe" };
@@ -34,7 +33,7 @@ function Ring({ value, size = 48 }: { value: number; size?: number }) {
 }
 
 export function Checklist({ base, reloadBase }: { base: TeamBase; reloadBase: () => Promise<void> }) {
-  const ws = useWorkspace();
+  const api = useTeamApi();
   const [tz] = useState(browserTz);
   const [today] = useState(() => todayIn(browserTz()));
   const [view, setView] = useState<{ group: Group | null; sellerId: string | null }>({ group: null, sellerId: null });
@@ -56,13 +55,13 @@ export function Checklist({ base, reloadBase }: { base: TeamBase; reloadBase: ()
     try {
       const to = period.to > day ? period.to : day;
       const [v, sl, nt] = await Promise.all([
-        fetchValues(ws.orgId, from, to, tz), fetchSales(ws.orgId, from, to), fetchNotes(ws.orgId, addDays(day, -1), day),
+        api.values(from, to, tz), api.sales(from, to), api.notes(addDays(day, -1), day),
       ]);
       setValues(v); setSales(sl); setNotes(nt);
     } catch {
       toast.error("Não foi possível carregar o checklist");
     }
-  }, [ws.orgId, from, period.to, day, tz]);
+  }, [api, from, period.to, day, tz]);
 
   useEffect(() => {
     const t = setTimeout(() => void load(), 0);
@@ -70,15 +69,9 @@ export function Checklist({ base, reloadBase }: { base: TeamBase; reloadBase: ()
   }, [load]);
 
   useEffect(() => {
-    const sb = supabaseBrowser();
     const refresh = () => { if (pendingRef.current === 0) void load(); };
-    const ch = sb.channel(`team-live-${ws.orgId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "team_entries", filter: `organization_id=eq.${ws.orgId}` }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "team_sales", filter: `organization_id=eq.${ws.orgId}` }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "team_notes", filter: `organization_id=eq.${ws.orgId}` }, refresh)
-      .subscribe();
-    return () => { void sb.removeChannel(ch); };
-  }, [ws.orgId, load]);
+    return api.subscribe(refresh);
+  }, [api, load]);
 
   const dayTotals = useMemo(() => totals(values ?? [], day, day), [values, day]);
   const get = (sid: string, mid: string, map = dayTotals) => map.get(`${sid}:${mid}`) ?? 0;
@@ -159,11 +152,12 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
   notes: TeamNote[]; setNotes: React.Dispatch<React.SetStateAction<TeamNote[]>>;
   pendingRef: React.MutableRefObject<number>; onBack: () => void; reloadBase: () => Promise<void>;
 }) {
-  const ws = useWorkspace();
-  const canFill = !seller.user_id || seller.user_id === ws.userId || ws.canManage;
+  const api = useTeamApi();
+  const canFill = api.isPublic || !seller.user_id || seller.user_id === api.userId || api.canManage;
   const store = base.stores.find((s) => s.id === seller.store_id) ?? null;
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, "saving" | "ok">>({});
+  const [voiceNote, setVoiceNote] = useState<{ t: string; n: number } | null>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const wk = weekStart(day);
@@ -185,12 +179,10 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
     pendingRef.current++;
     timers.current.set(k, setTimeout(async () => {
       timers.current.delete(k);
-      const { error } = await supabaseBrowser().from("team_entries").upsert(
-        { organization_id: ws.orgId, seller_id: seller.id, metric_id: m.id, day, value: Math.round(n * 100) / 100, updated_by: ws.userId },
-        { onConflict: "seller_id,metric_id,day" },
-      );
+      let error: string | null = null;
+      try { await api.upsertEntry({ seller_id: seller.id, metric_id: m.id, day, value: Math.round(n * 100) / 100 }); } catch (e) { error = (e as Error).message; }
       pendingRef.current--;
-      if (error) { setSaved((s) => { const c = { ...s }; delete c[k]; return c; }); return toast.error(error.message); }
+      if (error) { setSaved((s) => { const c = { ...s }; delete c[k]; return c; }); return toast.error(error); }
       setValues((vals) => [...(vals ?? []).filter((x) => !(x.seller_id === seller.id && x.metric_id === m.id && x.day === day)), { seller_id: seller.id, metric_id: m.id, day, value: n }]);
       setDraft((d) => { const c = { ...d }; delete c[k]; return c; });
       setSaved((s) => ({ ...s, [k]: "ok" }));
@@ -212,6 +204,21 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
       const parent = base.metrics.find((x) => x.id === m.result_of);
       if (parent) setValue(parent, String(cur(parent.id) + 1));
     }
+  }
+
+  /** Áudio do vendedor: soma o que ele contou em cada atividade (e guarda o resto nas notas). */
+  function applyVoice(updates: { metric_id: string; add: number }[]) {
+    const byId = new Map(base.metrics.map((m) => [m.id, m]));
+    // Resultado também soma na atividade principal (igual ao +)
+    const add = new Map<string, number>();
+    for (const u of updates) {
+      const m = byId.get(u.metric_id);
+      if (!m || u.add <= 0) continue;
+      add.set(m.id, (add.get(m.id) ?? 0) + u.add);
+      if (m.result_of && !updates.some((x) => x.metric_id === m.result_of)) add.set(m.result_of, (add.get(m.result_of) ?? 0) + u.add);
+    }
+    for (const [id, n] of add) { const m = byId.get(id)!; setValue(m, String(cur(id) + n)); }
+    return [...add.keys()].map((id) => byId.get(id)!.name);
   }
 
   // Painel da loja / OS
@@ -298,7 +305,8 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
       {/* Metas do dia */}
       <div className="card p-4 sm:p-5">
         {allDone && <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300"><Check className="h-3.5 w-3.5" /> Meta de hoje batida</span>}
-        {steppers.length ? <p className="mb-3 text-xs text-slate-500">Fez muitas de uma vez? Toque no número e digite direto, sem precisar clicar no + várias vezes.</p>
+        {canFill && steppers.length > 0 && <VoiceFillButton seller={seller} onFill={applyVoice} onNote={(t) => setVoiceNote((p) => ({ t, n: (p?.n ?? 0) + 1 }))} />}
+        {steppers.length ? <p className="mb-3 text-xs text-slate-500">Fez muitas de uma vez? Toque no número e digite direto, ou mande um áudio contando o seu dia.</p>
           : <p className="text-sm text-slate-400">Nenhuma atividade manual para sua função.{isCloser ? " Suas OS entram pelo card abaixo." : ""}</p>}
         <ul className="divide-y divide-line">
           {steppers.map((m) => {
@@ -347,7 +355,7 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
         </ul>
       </div>
 
-      <NotesCard seller={seller} day={day} today={today} canFill={canFill} notes={notes} setNotes={setNotes} />
+      <NotesCard seller={seller} day={day} today={today} canFill={canFill} notes={notes} setNotes={setNotes} append={voiceNote} />
 
       {isCloser && (osM || fatM) && (
         <RegisterSale base={base} seller={seller} day={day} canFill={canFill} todays={mySalesToday} setSales={setSales} setValues={setValues} osM={osM} fatM={fatM} />
@@ -421,26 +429,40 @@ function Stepper({ label, value, disabled, onStep, onType, state }: {
   );
 }
 
-function NotesCard({ seller, day, today, canFill, notes, setNotes }: {
+function NotesCard({ seller, day, today, canFill, notes, setNotes, append }: {
   seller: TeamSeller; day: string; today: string; canFill: boolean; notes: TeamNote[]; setNotes: React.Dispatch<React.SetStateAction<TeamNote[]>>;
+  append: { t: string; n: number } | null;
 }) {
-  const ws = useWorkspace();
+  const api = useTeamApi();
   const current = notes.find((n) => n.seller_id === seller.id && n.day === day) ?? null;
   const [text, setText] = useState(current?.body ?? "");
   const [busy, setBusy] = useState(false);
   const dirty = text !== (current?.body ?? "");
+  const lastAppend = useRef(0);
 
-  async function save() {
+  const save = useCallback(async (body: string, quiet = false) => {
     setBusy(true);
-    const { data, error } = await supabaseBrowser().from("team_notes").upsert(
-      { organization_id: ws.orgId, seller_id: seller.id, day, body: text.slice(0, 8000), updated_by: ws.userId },
-      { onConflict: "seller_id,day" },
-    ).select("seller_id, day, body, updated_at").single();
+    try {
+      const data = await api.upsertNote({ seller_id: seller.id, day, body: body.slice(0, 8000) });
+      setNotes((ns) => [...ns.filter((n) => !(n.seller_id === seller.id && n.day === day)), data]);
+      if (!quiet) toast.success("Notas salvas");
+    } catch (e) { toast.error((e as Error).message); }
     setBusy(false);
-    if (error) return toast.error(error.message);
-    setNotes((ns) => [...ns.filter((n) => !(n.seller_id === seller.id && n.day === day)), data as TeamNote]);
-    toast.success("Notas salvas");
-  }
+  }, [api, seller.id, day, setNotes]);
+
+  // O áudio trouxe detalhes (nomes, telefones, combinados): entra nas notas e já salva
+  useEffect(() => {
+    if (!append || append.n === lastAppend.current) return;
+    lastAppend.current = append.n;
+    const t = setTimeout(() => {
+      setText((prev) => {
+        const next = prev.trim() ? `${prev.trim()}\n${append.t}` : append.t;
+        void save(next, true);
+        return next;
+      });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [append, save]);
 
   return (
     <div className="card p-4 sm:p-5">
@@ -451,7 +473,7 @@ function NotesCard({ seller, day, today, canFill, notes, setNotes }: {
       <p className="mt-0.5 text-sm text-slate-400">Escreva o que aconteceu nas ligações {day === today ? "de hoje" : "do dia"}. {seller.role === "sdr" ? "O closer da sua loja e o gestor leem." : "O gestor lê."}</p>
       <textarea className="field mt-3 min-h-[140px] font-mono text-sm" disabled={!canFill} value={text} maxLength={8000} onChange={(e) => setText(e.target.value)}
         placeholder={"Ex.:\nMaria (85) 9 8888-1234 — notebook não liga, quer orçamento até sexta.\nSr. João — vai levar a impressora sábado de manhã."} />
-      <div className="mt-3 flex justify-end"><Button onClick={save} loading={busy} disabled={!canFill || !dirty}>Salvar notas</Button></div>
+      <div className="mt-3 flex justify-end"><Button onClick={() => void save(text)} loading={busy} disabled={!canFill || !dirty}>Salvar notas</Button></div>
     </div>
   );
 }
@@ -461,7 +483,7 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
   setSales: React.Dispatch<React.SetStateAction<TeamSale[]>>; setValues: React.Dispatch<React.SetStateAction<TeamValue[] | null>>;
   osM: TeamMetric | undefined; fatM: TeamMetric | undefined;
 }) {
-  const ws = useWorkspace();
+  const api = useTeamApi();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [osNumber, setOsNumber] = useState("");
@@ -490,13 +512,12 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
     if (val < 0) return toast.error("Valor inválido");
     if (sdrs.length && !sdr) return toast.error("Escolha de onde veio o cliente");
     setBusy(true);
-    const { data, error } = await supabaseBrowser().from("team_sales").insert({
-      organization_id: ws.orgId, seller_id: seller.id, day, value: val, os_number: osNumber.trim().slice(0, 40) || null,
-      sdr_id: sdr && sdr !== "direto" ? sdr : null, created_by: ws.userId,
-    }).select("id, seller_id, store_id, sdr_id, day, value, os_number, note, created_at").single();
+    let data: TeamSale;
+    try {
+      data = await api.insertSale({ seller_id: seller.id, day, value: val, os_number: osNumber.trim().slice(0, 40) || null, sdr_id: sdr && sdr !== "direto" ? sdr : null });
+    } catch (e) { setBusy(false); return toast.error((e as Error).message); }
     setBusy(false);
-    if (error) return toast.error(error.message);
-    setSales((s) => [{ ...(data as TeamSale), value: Number(data.value) }, ...s]);
+    setSales((s) => [data, ...s]);
     bump(1, val);
     toast.success(`OS registrada${val ? ` · ${fmtBRL(val)}` : ""}`);
     setValue(""); setOsNumber(""); setSdr(""); setOpen(false);
@@ -504,8 +525,7 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
 
   async function remove(s: TeamSale) {
     if (!confirm(`Apagar a OS${s.os_number ? ` ${s.os_number}` : ""} de ${fmtBRL(s.value)}?`)) return;
-    const { error } = await supabaseBrowser().from("team_sales").delete().eq("id", s.id);
-    if (error) return toast.error(error.message);
+    try { await api.deleteSale(s.id); } catch (e) { return toast.error((e as Error).message); }
     setSales((all) => all.filter((x) => x.id !== s.id));
     bump(-1, -s.value);
   }
