@@ -107,8 +107,9 @@ export async function saveInbound(orgId: string, origem: string, l: InLead) {
     else leadId = lead.id;
   }
   if (!leadId) throw new HttpError(500, "Não consegui criar o lead");
+  const fem = ["olx", "webmotors"].includes(origem.toLowerCase());
   const lines = [
-    isNew ? `📥 Lead do ${origem}` : `💬 ${l.fromSeller ? "Resposta enviada" : "Nova mensagem"} pelo ${origem}`,
+    isNew ? `📥 Lead ${fem ? "da" : "do"} ${origem}` : `💬 ${l.fromSeller ? "Resposta enviada" : "Nova mensagem"} ${fem ? "pela" : "pelo"} ${origem}`,
     l.ad || l.vehicle ? `Anúncio: ${[l.ad, l.vehicle].filter(Boolean).join(" — ")}${l.price ? ` · R$ ${l.price.toLocaleString("pt-BR")}` : ""}` : null,
     l.message ? `“${l.message}”` : null,
     l.adUrl ? l.adUrl : null,
