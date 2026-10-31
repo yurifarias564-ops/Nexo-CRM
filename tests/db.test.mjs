@@ -491,5 +491,15 @@ ok("dono vê o link da empresa dele", (await as(A, "select * from public.team_sh
 ok("vendedor e outra empresa não veem o link", (await as(C, "select * from public.team_share_links")).length === 0 && (await as(B, "select * from public.team_share_links where organization_id=$1", [orgA])).length === 0);
 await expectError("token curto é recusado", () => su("update public.team_share_links set token='abc' where organization_id=$1", [orgB]), "23514");
 
+console.log("\n# Reuniões e horário comercial");
+await as(A, "insert into public.business_hours (organization_id, days) values ($1, '[{}, {}, {}, {}, {}, {}, {}]'::jsonb)", [orgA]);
+ok("dono salva o horário comercial", (await as(A, "select * from public.business_hours where organization_id=$1", [orgA])).length === 1);
+await expectError("vendedor não muda o horário", async () => { const r = await as(C, "update public.business_hours set time_zone='UTC' where organization_id=$1 returning 1", [orgA]); if (!r.length) throw Object.assign(new Error("rls"), { code: "42501" }); }, "42501");
+ok("outra empresa não vê o horário", (await as(B, "select * from public.business_hours where organization_id=$1", [orgA])).length === 0);
+await as(A, "insert into public.meeting_settings (organization_id) values ($1)", [orgA]);
+ok("lembretes padrão: 6h, 12h e 30 min antes", (await su("select jsonb_array_length(reminders) n from public.meeting_settings where organization_id=$1", [orgA]))[0].n === 3);
+await expectError("vendedor não muda os lembretes", async () => { const r = await as(C, "update public.meeting_settings set send_link=false where organization_id=$1 returning 1", [orgA]); if (!r.length) throw Object.assign(new Error("rls"), { code: "42501" }); }, "42501");
+ok("espera de resposta aceita 'options'", String((await su("select pg_get_constraintdef(oid) d from pg_constraint where conname='automation_runs_waiting_for_check'"))[0]?.d).includes("options"));
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

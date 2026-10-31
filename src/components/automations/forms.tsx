@@ -1,12 +1,14 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   Bell, Bot, Clock, DollarSign, Filter, GitBranch, Hourglass, KanbanSquare, MessageCircle, MessageSquareText, Sparkles, Split, StickyNote,
-  Sun, Tag as TagIcon, UserRoundCog, Webhook, XCircle, Zap,
+  Sun, Tag as TagIcon, UserRoundCog, Webhook, XCircle, Zap, MessagesSquare, Paperclip, FileText, Image as ImageIcon, Film, Mic, Plus, Trash2,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/misc";
 import { useWorkspace } from "@/components/workspace";
 import { cn } from "@/lib/utils";
-import { COND_LABEL, TRIGGER_LABEL, VARIABLES, type CondField, type Step, type Trigger } from "@/lib/automations/schema";
+import { COND_LABEL, TRIGGER_LABEL, VARIABLES, type CondField, type Media, type ReplyOption, type Step, type Trigger } from "@/lib/automations/schema";
 
 // Formulários e resumos dos blocos da automação (usados no canvas).
 
@@ -15,7 +17,7 @@ export const ZERO = "00000000-0000-0000-0000-000000000000";
 export const STEP_ICON: Record<Step["type"], typeof Zap> = {
   send_message: MessageCircle, notify: Bell, wait: Clock, condition: Filter, move_stage: KanbanSquare, add_tag: TagIcon, remove_tag: TagIcon,
   assign: UserRoundCog, set_value: DollarSign, add_note: StickyNote, ai: Bot, webhook: Webhook,
-  wait_reply: Hourglass, split: Split, wait_business: Sun, ai_message: Sparkles,
+  wait_reply: Hourglass, split: Split, wait_business: Sun, ai_message: Sparkles, reply_options: MessagesSquare,
 };
 export const GROUP_COLOR: Record<string, string> = { Mensagens: "#22c55e", Lead: "#3b82f6", Fluxo: "#f59e0b", Integrações: "#a855f7" };
 
@@ -36,6 +38,10 @@ export function newStep(type: Step["type"], ws: ReturnType<typeof useWorkspace>)
     case "split": return { type, percent_a: 50 };
     case "wait_business": return { type };
     case "ai_message": return { type, instruction: "Retome a conversa de forma natural e pergunte se ainda tem interesse." };
+    case "reply_options": return { type, amount: 1, unit: "days", use_ai: true, options: [
+      { id: "o1", label: "Sim / quer", keywords: ["sim", "quero", "pode ser", "bora", "tenho interesse", "ok"] },
+      { id: "o2", label: "Não / sem interesse", keywords: ["não", "nao", "sem interesse", "agora não", "obrigado"] },
+    ] };
   }
 }
 
@@ -50,7 +56,7 @@ export function useNames() {
 
 export function triggerSummary(t: Trigger): string {
   switch (t.type) {
-    case "message_received": return t.keywords.length ? `Mensagem com: ${t.keywords.join(", ")}` : "Qualquer mensagem do cliente";
+    case "message_received": return `${t.keywords.length ? `Mensagem com: ${t.keywords.join(", ")}` : "Qualquer mensagem do cliente"}${t.when === "off_hours" ? " — fora do expediente" : t.when === "business_hours" ? " — no expediente" : ""}`;
     case "idle": return `Lead parado há ${t.days} dia${t.days > 1 ? "s" : ""}`;
     default: return TRIGGER_LABEL[t.type].label;
   }
@@ -59,7 +65,9 @@ export function triggerSummary(t: Trigger): string {
 export function StepSummary({ s }: { s: Step }) {
   const n = useNames();
   switch (s.type) {
-    case "send_message": case "add_note": return <>{s.text || "—"}</>;
+    case "send_message": return <>{s.media ? `📎 ${s.media.name}${s.text ? " · " : ""}` : ""}{s.text || (s.media ? "" : "—")}</>;
+    case "add_note": return <>{s.text || "—"}</>;
+    case "reply_options": return <>{s.options.map((o) => o.label).join(" · ")} · até {s.amount} {s.unit === "minutes" ? "min" : s.unit === "hours" ? "h" : "dia(s)"}</>;
     case "notify": return <>{s.phone || "escolha o número"} · {s.text}</>;
     case "wait": return <>{s.amount} {s.unit === "minutes" ? "minuto(s)" : s.unit === "hours" ? "hora(s)" : "dia(s)"}</>;
     case "condition": return <>o lead {COND_LABEL[s.field]} {s.field === "stage" ? n.stage(s.value) : s.field === "tag" || s.field === "no_tag" ? n.tag(s.value ?? "") : s.field === "assigned" ? n.member(s.value ?? "") : s.value ?? ""}</>;
@@ -71,7 +79,7 @@ export function StepSummary({ s }: { s: Step }) {
     case "webhook": return <>{s.url}</>;
     case "wait_reply": return <>até {s.amount} {s.unit === "minutes" ? "minuto(s)" : s.unit === "hours" ? "hora(s)" : "dia(s)"}</>;
     case "split": return <>A {s.percent_a}% · B {100 - s.percent_a}%</>;
-    case "wait_business": return <>seg a sáb, 8h às 18h</>;
+    case "wait_business": return <>até abrir o horário comercial</>;
     case "ai_message": return <>{s.instruction}</>;
   }
 }
@@ -137,6 +145,16 @@ export function TriggerForm({ t, onChange }: { t: Trigger; onChange: (t: Trigger
           </div>
           <input className="field mt-1.5" placeholder="Digite e aperte Enter (ex.: preço)" value={kw} onChange={(e) => setKw(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && kw.trim()) { e.preventDefault(); onChange({ ...t, keywords: [...new Set([...t.keywords, kw.trim()])].slice(0, 20) }); setKw(""); } }} />
+          <span className="mt-1 block text-[11px] text-slate-500">Entende erro de digitação (“presso” = preço) e lê áudio do cliente.</span>
+        </F>
+      )}
+      {t.type === "message_received" && (
+        <F label="Quando">
+          <select className="field" value={t.when ?? "any"} onChange={(e) => onChange({ ...t, when: e.target.value as "any" | "off_hours" | "business_hours" })}>
+            <option value="any">A qualquer hora</option>
+            <option value="off_hours">Só fora do expediente (noite, madrugada, fim de semana)</option>
+            <option value="business_hours">Só no horário comercial</option>
+          </select>
         </F>
       )}
       {t.type === "idle" && (
@@ -152,7 +170,13 @@ export function TriggerForm({ t, onChange }: { t: Trigger; onChange: (t: Trigger
 export function StepForm({ s, onChange, assinatura }: { s: Step; onChange: (s: Step) => void; assinatura?: string }) {
   const ws = useWorkspace();
   switch (s.type) {
-    case "send_message": return <F label="Mensagem para o cliente"><TextWithVars value={s.text} onChange={(text) => onChange({ ...s, text })} /></F>;
+    case "send_message": return (
+      <div className="space-y-2">
+        <MediaPick value={s.media ?? null} onChange={(media) => onChange({ ...s, media })} />
+        <F label={s.media ? "Legenda (opcional)" : "Mensagem para o cliente"}><TextWithVars value={s.text} onChange={(text) => onChange({ ...s, text })} /></F>
+      </div>
+    );
+    case "reply_options": return <ReplyOptionsForm s={s} onChange={onChange} />;
     case "add_note": return <F label="Anotação (aparece no histórico do lead)"><TextWithVars rows={2} value={s.text} onChange={(text) => onChange({ ...s, text })} /></F>;
     case "notify": return (
       <div className="space-y-2">
@@ -231,7 +255,7 @@ export function StepForm({ s, onChange, assinatura }: { s: Step; onChange: (s: S
         <p className="text-[11px] text-slate-500">Teste duas mensagens ou dois caminhos e veja nas execuções qual converte mais.</p>
       </div>
     );
-    case "wait_business": return <p className="text-xs text-slate-400">Se estiver fora do horário comercial (seg a sáb, 8h às 18h), espera abrir para continuar. Bom antes de mandar mensagem.</p>;
+    case "wait_business": return <p className="text-xs text-slate-400">Se estiver fora do horário comercial, espera abrir para continuar. Bom antes de mandar mensagem. Os horários ficam em Automações → Horário comercial.</p>;
     case "ai_message": return (
       <div className="space-y-2">
         <F label="O que a IA deve escrever">
@@ -250,3 +274,78 @@ export function StepForm({ s, onChange, assinatura }: { s: Step; onChange: (s: S
   }
 }
 
+
+const KIND_ICON = { image: ImageIcon, video: Film, audio: Mic, document: FileText } as const;
+const kindOf = (mime: string): keyof typeof KIND_ICON => (/^image\//.test(mime) ? "image" : /^video\//.test(mime) ? "video" : /^audio\//.test(mime) ? "audio" : "document");
+
+/** Foto, vídeo, áudio ou documento para mandar junto (o texto vira a legenda). */
+function MediaPick({ value, onChange }: { value: Media | null; onChange: (m: Media | null) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  async function upload(f: File) {
+    if (f.size > 16 * 1024 * 1024) return toast.error("Arquivo maior que 16 MB (limite do WhatsApp)");
+    setBusy(true);
+    const fd = new FormData();
+    fd.append("file", f);
+    const r = await fetch("/api/automations/media", { method: "POST", body: fd });
+    const j = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) return toast.error(j.error ?? "Não consegui enviar o arquivo");
+    onChange(j as Media);
+  }
+  if (value) {
+    const I = KIND_ICON[kindOf(value.mime)];
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-ink-800 px-3 py-2 text-sm">
+        <I className="h-4 w-4 shrink-0 text-emerald-300" />
+        <span className="min-w-0 flex-1 truncate text-slate-200">{value.name}</span>
+        <span className="text-[11px] text-slate-500">{(value.size / 1024 / 1024).toFixed(1)} MB</span>
+        <button type="button" onClick={() => onChange(null)} className="rounded p-1 text-slate-500 hover:text-red-300" aria-label="Tirar arquivo"><Trash2 className="h-3.5 w-3.5" /></button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <input ref={ref} type="file" hidden accept="image/jpeg,image/png,video/mp4,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />
+      <button type="button" disabled={busy} onClick={() => ref.current?.click()}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line px-3 py-2 text-xs text-slate-300 hover:border-emerald-400/50 hover:text-white disabled:opacity-60">
+        {busy ? <Spinner className="h-3.5 w-3.5" /> : <Paperclip className="h-3.5 w-3.5" />} Anexar foto, vídeo, áudio ou documento
+      </button>
+    </>
+  );
+}
+
+function ReplyOptionsForm({ s, onChange }: { s: Extract<Step, { type: "reply_options" }>; onChange: (s: Step) => void }) {
+  const [kw, setKw] = useState<Record<string, string>>({});
+  const setOpt = (id: string, p: Partial<ReplyOption>) => onChange({ ...s, options: s.options.map((o) => (o.id === id ? { ...o, ...p } : o)) });
+  const nextId = () => { for (let i = 1; i < 20; i++) if (!s.options.some((o) => o.id === `o${i}`)) return `o${i}`; return "o19"; };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-400">Espera o cliente responder e segue um caminho para cada tipo de resposta. Entende erro de digitação e lê áudio.</p>
+      {s.options.map((o) => (
+        <div key={o.id} className="space-y-1.5 rounded-lg border border-line bg-ink-900 p-2.5">
+          <div className="flex items-center gap-2">
+            <input className="field h-8 text-sm" value={o.label} maxLength={60} onChange={(e) => setOpt(o.id, { label: e.target.value })} placeholder="Nome do caminho" />
+            {s.options.length > 1 && <button type="button" onClick={() => onChange({ ...s, options: s.options.filter((x) => x.id !== o.id) })} className="rounded p-1 text-slate-500 hover:text-red-300" aria-label="Remover opção"><Trash2 className="h-3.5 w-3.5" /></button>}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {o.keywords.map((k) => <span key={k} className="inline-flex items-center gap-1 rounded-full bg-ink-700 px-2 py-0.5 text-[11px]">{k}<button onClick={() => setOpt(o.id, { keywords: o.keywords.filter((x) => x !== k) })}><XCircle className="h-3 w-3" /></button></span>)}
+          </div>
+          <input className="field h-8 text-xs" placeholder="Palavra e Enter (ex.: quero)" value={kw[o.id] ?? ""} onChange={(e) => setKw({ ...kw, [o.id]: e.target.value })}
+            onKeyDown={(e) => { const v = (kw[o.id] ?? "").trim(); if (e.key === "Enter" && v) { e.preventDefault(); setOpt(o.id, { keywords: [...new Set([...o.keywords, v])].slice(0, 20) }); setKw({ ...kw, [o.id]: "" }); } }} />
+        </div>
+      ))}
+      {s.options.length < 6 && <button type="button" onClick={() => onChange({ ...s, options: [...s.options, { id: nextId(), label: "Nova opção", keywords: [] }] })} className="flex items-center gap-1 text-xs text-brand-300 hover:underline"><Plus className="h-3 w-3" /> Adicionar opção</button>}
+      <label className="flex items-start gap-2 text-xs text-slate-300"><input type="checkbox" className="mt-0.5" checked={s.use_ai} onChange={(e) => onChange({ ...s, use_ai: e.target.checked })} />
+        Se as palavras não baterem, a IA entende o sentido (ex.: “pode marcar pra mim” = Sim)</label>
+      <div className="flex items-center gap-2 text-xs text-slate-400">Esperar até
+        <input type="number" min={1} max={365} className="field h-8 w-20" value={s.amount} onChange={(e) => onChange({ ...s, amount: Math.min(365, Math.max(1, Number(e.target.value) || 1)) })} />
+        <select className="field h-8 w-auto" value={s.unit} onChange={(e) => onChange({ ...s, unit: e.target.value as typeof s.unit })}>
+          <option value="minutes">minutos</option><option value="hours">horas</option><option value="days">dias</option>
+        </select>
+      </div>
+      <p className="text-[11px] text-slate-500">Saídas: uma por opção, <b className="text-slate-300">Outra resposta</b> e <b className="text-amber-300">Não respondeu</b>. Ligue cada uma no próximo bloco.</p>
+    </div>
+  );
+}

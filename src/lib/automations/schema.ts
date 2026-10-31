@@ -10,7 +10,9 @@ export const Trigger = z.discriminatedUnion("type", [
   z.object({ type: z.literal("won") }),
   z.object({ type: z.literal("lost") }),
   z.object({ type: z.literal("tag_added"), tag_id: id }),
-  z.object({ type: z.literal("message_received"), keywords: z.array(z.string().trim().min(1).max(60)).max(20) }),
+  z.object({ type: z.literal("message_received"), keywords: z.array(z.string().trim().min(1).max(60)).max(20),
+    /** Quando vale: sempre, só fora do horário comercial (time não está trabalhando) ou só dentro. */
+    when: z.enum(["any", "off_hours", "business_hours"]).optional() }),
   z.object({ type: z.literal("idle"), days: z.number().int().min(1).max(180), stage_id: id.nullable() }),
 ]);
 export type Trigger = z.infer<typeof Trigger>;
@@ -18,8 +20,25 @@ export type Trigger = z.infer<typeof Trigger>;
 export const CondField = z.enum(["stage", "tag", "no_tag", "value_gte", "value_lte", "source", "assigned", "unassigned", "business_hours", "last_message_contains"]);
 export type CondField = z.infer<typeof CondField>;
 
+export const Media = z.object({
+  path: z.string().regex(/^[0-9a-f-]{36}\/[\w.-]{1,160}$/, "Arquivo inválido"),
+  mime: z.string().max(120),
+  name: z.string().max(160),
+  size: z.number().int().min(1).max(16 * 1024 * 1024),
+});
+export type Media = z.infer<typeof Media>;
+
+export const ReplyOption = z.object({
+  id: z.string().regex(/^o\d{1,2}$/),
+  label: z.string().trim().min(1, "Dê um nome para a opção").max(60),
+  keywords: z.array(z.string().trim().min(1).max(60)).max(20),
+});
+export type ReplyOption = z.infer<typeof ReplyOption>;
+
 export const Step = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("send_message"), text: z.string().trim().min(1, "Escreva a mensagem").max(4000) }),
+  z.object({ type: z.literal("send_message"), text: z.string().trim().max(4000),
+    /** Foto, vídeo, áudio ou documento (o texto vira a legenda). */
+    media: Media.nullable().optional() }),
   z.object({ type: z.literal("wait"), amount: z.number().int().min(1).max(365), unit: z.enum(["minutes", "hours", "days"]) }),
   z.object({ type: z.literal("move_stage"), stage_id: id }),
   z.object({ type: z.literal("add_tag"), tag_id: id }),
@@ -36,6 +55,9 @@ export const Step = z.discriminatedUnion("type", [
   z.object({ type: z.literal("split"), percent_a: z.number().int().min(1).max(99) }),
   z.object({ type: z.literal("wait_business") }),
   z.object({ type: z.literal("ai_message"), instruction: z.string().trim().min(3, "Diga o que a IA deve escrever").max(1000) }),
+  /** Espera a resposta e segue um caminho para cada opção (entende erro de digitação e áudio). */
+  z.object({ type: z.literal("reply_options"), amount: z.number().int().min(1).max(365), unit: z.enum(["minutes", "hours", "days"]),
+    options: z.array(ReplyOption).min(1).max(6), use_ai: z.boolean() }),
 ]);
 export type Step = z.infer<typeof Step>;
 
@@ -64,7 +86,11 @@ export const PORTS: Partial<Record<Step["type"], { id: string; label: string }[]
   split: [{ id: "a", label: "A" }, { id: "b", label: "B" }],
   wait_reply: [{ id: "replied", label: "Respondeu" }, { id: "timeout", label: "Não respondeu" }],
 };
-export const portsOf = (type: Step["type"] | null) => (type ? PORTS[type] ?? [{ id: "out", label: "" }] : [{ id: "out", label: "" }]);
+export const portsOf = (step: Step | null) => {
+  if (!step) return [{ id: "out", label: "" }];
+  if (step.type === "reply_options") return [...step.options.map((o) => ({ id: o.id, label: o.label })), { id: "other", label: "Outra resposta" }, { id: "timeout", label: "Não respondeu" }];
+  return PORTS[step.type] ?? [{ id: "out", label: "" }];
+};
 
 /** Problemas do fluxo (lista vazia = ok). */
 export function graphIssues(g: Graph): string[] {
@@ -79,13 +105,17 @@ export function graphIssues(g: Graph): string[] {
     const from = byId.get(e.from), to = byId.get(e.to);
     if (!from || !to) { out.push("Conexão com bloco que não existe"); continue; }
     if (to.step === null) out.push("Nada pode ligar de volta no gatilho");
-    if (!portsOf(from.step?.type ?? null).some((p) => p.id === e.port)) out.push("Conexão numa saída inválida");
+    if (!portsOf(from.step).some((p) => p.id === e.port)) out.push("Conexão numa saída inválida");
     const k = `${e.from}:${e.port}`;
     if (seen.has(k)) out.push("Cada saída liga em um bloco só");
     seen.add(k);
   }
   // Caminho que volta (loop) só com um bloco de espera no meio — senão mandaria mensagens sem parar
-  const waits = new Set(g.nodes.filter((n) => n.step && ["wait", "wait_reply"].includes(n.step.type)).map((n) => n.id));
+  const waits = new Set(g.nodes.filter((n) => n.step && ["wait", "wait_reply", "reply_options"].includes(n.step.type)).map((n) => n.id));
+  for (const n of g.nodes) {
+    if (n.step?.type === "send_message" && !n.step.text && !n.step.media) out.push("Mensagem sem texto e sem arquivo");
+    if (n.step?.type === "reply_options" && new Set(n.step.options.map((o) => o.id)).size !== n.step.options.length) out.push("Opção de resposta repetida");
+  }
   const adj = new Map<string, string[]>();
   for (const e of g.edges) if (!waits.has(e.from) && !waits.has(e.to)) adj.set(e.from, [...(adj.get(e.from) ?? []), e.to]);
   const state = new Map<string, 1 | 2>();
@@ -112,7 +142,7 @@ export function linearToGraph(steps: Step[]): Graph {
   steps.forEach((st, i) => {
     const id = `n${i + 1}`;
     nodes.push({ id, x: (i + 1) * 300, y: 0, step: st });
-    edges.push({ from: prev, port: prev === TRIGGER_NODE ? "out" : nodes[i]!.step?.type === "condition" ? "yes" : portsOf(nodes[i]!.step?.type ?? null)[0]!.id, to: id });
+    edges.push({ from: prev, port: prev === TRIGGER_NODE ? "out" : nodes[i]!.step?.type === "condition" ? "yes" : portsOf(nodes[i]!.step ?? null)[0]!.id, to: id });
     prev = id;
   });
   return { nodes, edges };
@@ -131,6 +161,7 @@ export const AutomationBody = z.object({
     const issues = graphIssues(b.graph);
     if (issues.length) ctx.addIssue({ code: "custom", message: issues[0]!, path: ["graph"] });
   } else if (!b.steps.length) ctx.addIssue({ code: "custom", message: "Adicione pelo menos uma ação", path: ["steps"] });
+  else if (b.steps.some((s) => s.type === "send_message" && !s.text && !s.media)) ctx.addIssue({ code: "custom", message: "Mensagem sem texto e sem arquivo", path: ["steps"] });
 });
 export type AutomationBody = z.infer<typeof AutomationBody>;
 
@@ -152,7 +183,7 @@ export const STEP_LABEL: Record<Step["type"], { label: string; group: "Mensagens
   move_stage: { label: "Mover para etapa", group: "Lead" },
   add_tag: { label: "Adicionar tag", group: "Lead" },
   remove_tag: { label: "Remover tag", group: "Lead" },
-  assign: { label: "Definir responsável", group: "Lead" },
+  assign: { label: "Distribuir / transferir para vendedor", group: "Lead" },
   set_value: { label: "Definir valor", group: "Lead" },
   add_note: { label: "Anotação no lead", group: "Lead" },
   ai: { label: "Agente de IA na conversa", group: "Integrações" },
@@ -161,11 +192,12 @@ export const STEP_LABEL: Record<Step["type"], { label: string; group: "Mensagens
   split: { label: "Teste A/B (divide os leads)", group: "Fluxo" },
   wait_business: { label: "Esperar horário comercial", group: "Fluxo" },
   ai_message: { label: "IA escreve e envia a mensagem", group: "Mensagens" },
+  reply_options: { label: "Se o cliente responder… (caminhos)", group: "Fluxo" },
 };
 
 export const COND_LABEL: Record<CondField, string> = {
   stage: "está na etapa", tag: "tem a tag", no_tag: "não tem a tag", value_gte: "valor maior ou igual a", value_lte: "valor menor ou igual a",
-  source: "origem contém", assigned: "o responsável é", unassigned: "está sem responsável", business_hours: "está em horário comercial (seg–sáb, 8h–18h)",
+  source: "origem contém", assigned: "o responsável é", unassigned: "está sem responsável", business_hours: "está em horário comercial (Automações → Horário comercial)",
   last_message_contains: "a última mensagem do cliente contém",
 };
 
@@ -187,16 +219,88 @@ export function waitMs(s: { amount: number; unit: "minutes" | "hours" | "days" }
   return s.amount * (s.unit === "minutes" ? 60_000 : s.unit === "hours" ? 3_600_000 : 86_400_000);
 }
 
-/** Palavra-chave na mensagem (sem diferenciar acento e maiúscula). Sem palavras = qualquer mensagem. */
+const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/(.)\1+/g, "$1");
+const words = (s: string) => fold(s).split(/[^a-z0-9]+/).filter(Boolean);
+
+/** Distância de edição limitada (para tolerar erro de digitação). */
+function close(a: string, b: string, max: number): boolean {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]!);
+    }
+    if (best > max) return false;
+    prev = cur;
+  }
+  return prev[b.length]! <= max;
+}
+
+/**
+ * Palavra-chave na mensagem, sem diferenciar acento e maiúscula e tolerando erro de digitação
+ * ("presso" acha "preço", "kero" acha "quero", "simmm" acha "sim"). Sem palavras = qualquer mensagem.
+ */
 export function matchesKeywords(text: string, keywords: string[]): boolean {
   if (!keywords.length) return true;
-  const n = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-  const t = n(text);
-  return keywords.some((k) => t.includes(n(k)));
+  const t = fold(text);
+  const tw = words(text);
+  return keywords.some((k) => {
+    const kf = fold(k).trim();
+    if (!kf) return false;
+    if (t.includes(kf)) return true;
+    const kw = words(k);
+    if (!kw.length) return false;
+    // Cada palavra da expressão precisa aparecer (parecida) na mensagem, na ordem
+    let from = 0;
+    for (const w of kw) {
+      const tol = w.length <= 3 ? 0 : w.length <= 6 ? 1 : 2;
+      const idx = tw.findIndex((x, i) => i >= from && (x === w || (tol > 0 && close(x, w, tol)) || soundsLike(x, w)));
+      if (idx < 0) return false;
+      from = idx + 1;
+    }
+    return true;
+  });
+}
+
+/** Trocas comuns de quem escreve rápido / pelo som: k→qu, ç→ss, x→ch, z→s, w→u… */
+function soundsLike(a: string, b: string): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  const p = (s: string) => s.replace(/qu/g, "k").replace(/c(?=[ei])/g, "s").replace(/ç|ss|z/g, "s").replace(/c/g, "k").replace(/ch/g, "x").replace(/w/g, "u").replace(/y/g, "i").replace(/h/g, "").replace(/(.)\1+/g, "$1");
+  const pa = p(a), pb = p(b);
+  return pa === pb || (pb.length > 4 && close(pa, pb, 1));
+}
+
+/** Qual opção a resposta do cliente escolheu (null = nenhuma). */
+export function matchOption(text: string, options: ReplyOption[]): ReplyOption | null {
+  return options.find((o) => matchesKeywords(text, o.keywords.length ? o.keywords : [o.label])) ?? null;
 }
 
 /** Modelos prontos (como no Kommo/n8n), para começar com 1 clique. */
 export const TEMPLATES: { id: string; name: string; text: string; body: Omit<AutomationBody, "enabled"> }[] = [
+  {
+    id: "fora-do-expediente", name: "Atendimento fora do expediente (noite e madrugada)", text: "Cliente chama quando o time não está: responde na hora, pergunta se quer retorno e segue pela resposta (entende áudio e erro de digitação).",
+    body: { name: "Fora do expediente", trigger: { type: "message_received", keywords: [], when: "off_hours" }, once_per_lead: false, stop_on_reply: false, steps: [],
+      graph: {
+        nodes: [
+          { id: "trigger", x: 0, y: 0, step: null },
+          { id: "n1", x: 320, y: 0, step: { type: "send_message", text: "Oi, {{primeiro_nome}}! Nosso time está fora agora, mas já anotei sua mensagem. Quer que um consultor te chame assim que abrirmos?" } },
+          { id: "n2", x: 640, y: 0, step: { type: "reply_options", amount: 12, unit: "hours", use_ai: true, options: [
+            { id: "o1", label: "Quer retorno", keywords: ["sim", "quero", "pode", "pode ser", "por favor", "ok"] },
+            { id: "o2", label: "Não precisa", keywords: ["não", "nao", "não precisa", "depois eu chamo"] },
+          ] } },
+          { id: "n3", x: 980, y: -120, step: { type: "add_note", text: "Pediu retorno fora do expediente — chamar logo cedo." } },
+          { id: "n4", x: 980, y: 60, step: { type: "send_message", text: "Combinado, {{primeiro_nome}}! Quando quiser é só chamar aqui. 😊" } },
+          { id: "n5", x: 980, y: 220, step: { type: "send_message", text: "Recebi! Assim que o time abrir, alguém te responde por aqui. 😉" } },
+        ],
+        edges: [
+          { from: "trigger", port: "out", to: "n1" }, { from: "n1", port: "out", to: "n2" },
+          { from: "n2", port: "o1", to: "n3" }, { from: "n2", port: "o2", to: "n4" }, { from: "n2", port: "other", to: "n5" },
+        ],
+      } },
+  },
   {
     id: "follow-up-inteligente", name: "Follow-up inteligente (respondeu / não respondeu)", text: "Manda mensagem, espera a resposta e segue um caminho para cada caso.",
     body: { name: "Follow-up inteligente", trigger: { type: "idle", days: 1, stage_id: null }, once_per_lead: true, stop_on_reply: false, steps: [],

@@ -153,7 +153,7 @@ export function mediaKind(mime: string): "image" | "video" | "audio" | "document
 
 export const MAX_MEDIA_BYTES = 16 * 1024 * 1024;
 
-export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: string, t: SendTarget, file: File, caption: string, opts: { ptv?: boolean } = {}) {
+export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: string | null, t: SendTarget, file: File, caption: string, opts: { ptv?: boolean; automation?: boolean } = {}) {
   if (file.size === 0) throw new HttpError(422, "Arquivo vazio");
   if (file.size > MAX_MEDIA_BYTES) throw new HttpError(413, "Arquivo maior que 16 MB");
   const mime = (file.type || "application/octet-stream").split(";")[0]!.toLowerCase();
@@ -186,6 +186,7 @@ export async function sendMediaFile(sb: SupabaseClient, orgId: string, userId: s
   }
   const body = ptv ? null : caption || (kind === "document" ? filename : null);
   const id = await record(r, externalId, kind, body, mediaRef || null, ptv && r.channel.provider !== "meta" ? `${mime};ptv` : mime, userId);
+  if (opts.automation) await supabaseAdmin().from("messages").update({ by_automation: true }).eq("id", id);
   return { id, externalId };
 }
 

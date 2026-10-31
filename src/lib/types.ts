@@ -15,7 +15,7 @@ export interface Subscription {
   value_cents: number | null;
   current_period_end: string | null;
 }
-export interface Pipeline { id: string; organization_id: string; name: string; position: number }
+export interface Pipeline { id: string; organization_id: string; name: string; position: number; schedule_on_move?: boolean }
 export interface Stage {
   id: string; organization_id: string; pipeline_id: string; name: string; color: string; kind: StageKind; position: number;
 }

@@ -207,7 +207,9 @@ export function KanbanBoard({
       return;
     }
     // Soltou na etapa de agendamento: já abre para escolher dia e hora
-    if (toStage !== before.stage_id && norm(ws.stageById.get(toStage)?.name ?? "").includes("agend")) {
+    // (só nos funis com "abrir agendamento ao mover" ligado — Automações → Reuniões)
+    if (toStage !== before.stage_id && norm(ws.stageById.get(toStage)?.name ?? "").includes("agend")
+      && ws.pipelines.find((p) => p.id === ws.stageById.get(toStage)?.pipeline_id)?.schedule_on_move !== false) {
       setScheduleFor({ id, name: before.name });
     }
   }

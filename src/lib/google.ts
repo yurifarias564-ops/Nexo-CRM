@@ -142,21 +142,24 @@ export interface CalendarEventInput {
 }
 
 /** Cria o evento na agenda do usuário. null = usuário sem Google conectado. */
-export async function createEvent(userId: string, ev: CalendarEventInput): Promise<{ id: string; link: string | null; calendarId: string } | null> {
+export async function createEvent(userId: string, ev: CalendarEventInput & { meet?: boolean }): Promise<{ id: string; link: string | null; calendarId: string; meetLink: string | null } | null> {
   const acc = await accessFor(userId);
   if (!acc) return null;
-  const r = await calendarCall<{ id: string; htmlLink?: string }>(acc.bearer, `/calendars/${encodeURIComponent(acc.calendarId)}/events`, {
-    method: "POST",
-    body: JSON.stringify({
-      summary: ev.title,
-      description: ev.description,
-      start: { dateTime: ev.start, timeZone: ev.timeZone },
-      end: { dateTime: ev.end, timeZone: ev.timeZone },
-      reminders: { useDefault: true },
-      source: { title: "Nexo CRM", url: appUrl() },
-    }),
-  });
-  return { id: r.id, link: r.htmlLink ?? null, calendarId: acc.calendarId };
+  const r = await calendarCall<{ id: string; htmlLink?: string; hangoutLink?: string; conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] } }>(
+    acc.bearer, `/calendars/${encodeURIComponent(acc.calendarId)}/events${ev.meet ? "?conferenceDataVersion=1" : ""}`, {
+      method: "POST",
+      body: JSON.stringify({
+        summary: ev.title,
+        description: ev.description,
+        start: { dateTime: ev.start, timeZone: ev.timeZone },
+        end: { dateTime: ev.end, timeZone: ev.timeZone },
+        reminders: { useDefault: true },
+        source: { title: "Nexo CRM", url: appUrl() },
+        ...(ev.meet ? { conferenceData: { createRequest: { requestId: crypto.randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } } } } : {}),
+      }),
+    });
+  const meetLink = r.hangoutLink ?? r.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")?.uri ?? null;
+  return { id: r.id, link: r.htmlLink ?? null, calendarId: acc.calendarId, meetLink };
 }
 
 /** Cria uma reunião do Google Meet começando agora. null = usuário sem Google conectado. */

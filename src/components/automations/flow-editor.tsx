@@ -6,7 +6,7 @@ import {
   ReactFlowProvider, useEdgesState, useNodesState, useReactFlow,
   type Connection, type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
-import { ArrowLeft, CheckCircle2, Copy, LayoutGrid, MousePointerClick, Trash2, X, Zap } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, LayoutGrid, Maximize2, Minimize2, MousePointerClick, PanelLeftClose, PanelLeftOpen, Trash2, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace";
@@ -22,7 +22,10 @@ import { GROUP_COLOR, newStep, STEP_ICON, StepForm, StepSummary, TriggerForm, tr
 type NodeData = { step: Step | null; trigger: Trigger };
 type FlowNode = Node<NodeData, "block">;
 
-const PORT_COLOR: Record<string, string> = { yes: "#22c55e", no: "#ef4444", a: "#3b82f6", b: "#a855f7", replied: "#22c55e", timeout: "#f59e0b", out: "#64748b" };
+const PORT_COLOR: Record<string, string> = {
+  yes: "#22c55e", no: "#ef4444", a: "#3b82f6", b: "#a855f7", replied: "#22c55e", timeout: "#f59e0b", out: "#64748b", other: "#94a3b8",
+  o1: "#22c55e", o2: "#ef4444", o3: "#3b82f6", o4: "#a855f7", o5: "#ec4899", o6: "#14b8a6", o7: "#eab308", o8: "#f97316",
+};
 const GROUPS = ["Mensagens", "Lead", "Fluxo", "Integrações"] as const;
 const newId = () => `n${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
@@ -69,7 +72,7 @@ const Block = memo(function Block({ id, data, selected }: NodeProps<FlowNode>) {
   const meta = s ? STEP_LABEL[s.type] : null;
   const color = isTrigger ? "#f59e0b" : GROUP_COLOR[meta!.group]!;
   const Icon = isTrigger ? Zap : STEP_ICON[s!.type];
-  const ports = portsOf(s?.type ?? null);
+  const ports = portsOf(s ?? null);
   const warn = s ? JSON.stringify(s).includes(ZERO) || (s.type === "notify" && !s.phone) : data.trigger.type === "tag_added" && data.trigger.tag_id === ZERO;
   return (
     <div className={cn("relative w-[250px] rounded-2xl border bg-ink-900 shadow-card transition",
@@ -140,10 +143,18 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(start.edges);
   const [selected, setSelected] = useState<string | null>(initial.steps.length || initial.graph ? null : TRIGGER_NODE);
   const [busy, setBusy] = useState(false);
+  // Abre em tela cheia (o canvas usa a tela toda); dá para voltar ao tamanho normal
+  const [full, setFull] = useState(true);
+  const [palette, setPalette] = useState(true);
 
   const sel = nodes.find((n) => n.id === selected) ?? null;
   const setTrigger = (t: Trigger) => { setMeta((m) => ({ ...m, trigger: t })); setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, trigger: t } }))); };
-  const setStep = (id: string, step: Step) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, step } } : n)));
+  const setStep = (id: string, step: Step) => {
+    setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, step } } : n)));
+    // Saída que deixou de existir (ex.: opção de resposta removida): tira as conexões dela
+    const valid = new Set(portsOf(step).map((p) => p.id));
+    setEdges((es) => es.filter((e) => e.source !== id || valid.has(e.sourceHandle ?? "out")));
+  };
 
   const onConnect = useCallback((c: Connection) => {
     if (!c.source || !c.target || c.source === c.target || c.target === TRIGGER_NODE) return;
@@ -157,7 +168,7 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
     const id = newId();
     const step = newStep(type, ws);
     const from = nodes.find((n) => n.id === selected) ?? [...nodes].sort((a, b) => b.position.x - a.position.x)[0];
-    const free = from ? portsOf(from.data.step?.type ?? null).find((p) => !edges.some((e) => e.source === from.id && (e.sourceHandle ?? "out") === p.id)) : null;
+    const free = from ? portsOf(from.data.step ?? null).find((p) => !edges.some((e) => e.source === from.id && (e.sourceHandle ?? "out") === p.id)) : null;
     const used = edges.filter((e) => from && e.source === from.id).length;
     const position = at ?? (from ? { x: from.position.x + 320, y: from.position.y + used * 160 } : { x: 320, y: 0 });
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { id, type: "block", position, data: { step, trigger: meta.trigger }, selected: true }]);
@@ -208,7 +219,7 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className={cn("flex flex-col bg-ink-950", full ? "fixed inset-0 z-50" : "h-full")}>
       <header className="flex flex-wrap items-center gap-2 border-b border-line bg-ink-900/70 px-4 py-2.5">
         <button onClick={onClose} className="rounded-md p-1.5 text-slate-400 hover:bg-ink-800" aria-label="Voltar"><ArrowLeft className="h-4 w-4" /></button>
         <input className="field h-9 max-w-xs flex-1 font-medium" value={meta.name} maxLength={80} onChange={(e) => setMeta({ ...meta, name: e.target.value })} />
@@ -219,6 +230,7 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
           <input type="checkbox" checked={meta.stop_on_reply} onChange={(e) => setMeta({ ...meta, stop_on_reply: e.target.checked })} /> Parar se o cliente responder
         </label>
         <div className="ml-auto flex gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setFull(!full)} title={full ? "Sair da tela cheia" : "Tela cheia"}>{full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}</Button>
           <Button variant="outline" onClick={() => void save(false)} loading={busy}>Salvar desligada</Button>
           <Button onClick={() => void save(true)} loading={busy}><CheckCircle2 className="h-4 w-4" /> Salvar e ligar</Button>
         </div>
@@ -226,8 +238,11 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
 
       <div className="relative flex min-h-0 flex-1">
         {/* Blocos disponíveis */}
-        <aside className="hidden w-60 shrink-0 overflow-y-auto border-r border-line bg-ink-900/60 p-3 md:block">
-          <p className="mb-2 text-xs text-slate-500">Clique para adicionar depois do bloco selecionado, ou arraste para o canvas.</p>
+        <aside className={cn("hidden w-60 shrink-0 overflow-y-auto border-r border-line bg-ink-900/60 p-3", palette && "md:block")}>
+          <div className="mb-2 flex items-start gap-1">
+            <p className="flex-1 text-xs text-slate-500">Clique para adicionar depois do bloco selecionado, ou arraste para o canvas.</p>
+            <button onClick={() => setPalette(false)} className="rounded p-1 text-slate-500 hover:bg-ink-800 hover:text-white" title="Esconder a lista de blocos"><PanelLeftClose className="h-4 w-4" /></button>
+          </div>
           {GROUPS.map((g) => (
             <div key={g} className="mb-3">
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: GROUP_COLOR[g] }}>{g}</p>
@@ -268,7 +283,8 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
             <Controls showInteractive={false} className="!border-line !bg-ink-900 [&_button]:!border-line [&_button]:!bg-ink-900 [&_button]:!fill-slate-300" />
             <MiniMap pannable zoomable className="!bg-ink-900" maskColor="rgb(2 6 23 / .7)" nodeColor={(n) => ((n as FlowNode).data.step ? GROUP_COLOR[STEP_LABEL[(n as FlowNode).data.step!.type].group]! : "#f59e0b")} />
           </ReactFlow>
-          <div className="absolute left-3 top-3 flex gap-2">
+          <div className="absolute left-3 top-3 z-10 flex gap-2">
+            {!palette && <Button size="sm" variant="secondary" className="hidden md:inline-flex" onClick={() => setPalette(true)}><PanelLeftOpen className="h-3.5 w-3.5" /> Blocos</Button>}
             <Button size="sm" variant="secondary" onClick={() => { setNodes((ns) => autoLayout(ns, edges)); setTimeout(() => rf.fitView({ padding: 0.3, maxZoom: 1 }), 50); }}><LayoutGrid className="h-3.5 w-3.5" /> Organizar</Button>
             <select className="field h-8 w-44 text-xs md:hidden" value="" onChange={(e) => e.target.value && add(e.target.value as Step["type"])} aria-label="Adicionar bloco">
               <option value="">+ Adicionar bloco</option>
@@ -298,8 +314,8 @@ function Inner({ initial, onClose }: { initial: EditorValue; onClose: () => void
             {sel.id === TRIGGER_NODE
               ? <TriggerForm t={meta.trigger} onChange={setTrigger} />
               : <StepForm s={sel.data.step!} onChange={(st) => setStep(sel.id, st)} assinatura={initial.assinatura} />}
-            {sel.id !== TRIGGER_NODE && portsOf(sel.data.step!.type).length > 1 && (
-              <p className="mt-3 rounded-lg bg-ink-800 p-2 text-[11px] text-slate-400">Este bloco tem {portsOf(sel.data.step!.type).length} saídas. Arraste da bolinha de cada saída até o próximo bloco.</p>
+            {sel.id !== TRIGGER_NODE && portsOf(sel.data.step!).length > 1 && (
+              <p className="mt-3 rounded-lg bg-ink-800 p-2 text-[11px] text-slate-400">Este bloco tem {portsOf(sel.data.step!).length} saídas. Arraste da bolinha de cada saída até o próximo bloco.</p>
             )}
             {/* Celular: adicionar blocos */}
             <div className="mt-4 md:hidden">

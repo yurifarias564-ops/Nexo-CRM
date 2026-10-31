@@ -551,6 +551,25 @@ async function downloadMedia(channelId: string, ref: string, mime: string | null
   return r.base64 ? new Blob([Buffer.from(r.base64, "base64")], { type: r.mimetype || mime || "audio/ogg" }) : null;
 }
 
+/** Texto de uma mensagem do cliente: o próprio texto ou, se for áudio, a transcrição (feita agora se faltar). */
+export async function messageText(id: string): Promise<string> {
+  const { data: m } = await supabaseAdmin().from("messages").select("id, type, body, transcript, media_ref, media_mime, channel_id, deleted_at").eq("id", id).maybeSingle();
+  if (!m || m.deleted_at) return "";
+  if (m.type !== "audio") return (m.body ?? "").slice(0, 4000);
+  if (m.transcript) return m.transcript;
+  if (!m.media_ref || (!envOptional("GROQ_API_KEY") && !envOptional("OPENAI_API_KEY"))) return "";
+  try {
+    const blob = await downloadMedia(m.channel_id, m.media_ref, m.media_mime);
+    if (!blob || blob.size > 20 * 1024 * 1024) return "";
+    const text = (await transcribe(blob, "audio.ogg")).slice(0, 8000);
+    if (text) await supabaseAdmin().from("messages").update({ transcript: text }).eq("id", m.id);
+    return text;
+  } catch (e) {
+    console.error("[automação] transcrição", (e as Error).message);
+    return "";
+  }
+}
+
 /** Transcreve os áudios recentes do cliente que ainda não têm texto. */
 async function transcribeRecent(db: SupabaseClient, msgs: MsgRow[]) {
   if (!envOptional("GROQ_API_KEY") && !envOptional("OPENAI_API_KEY")) return;

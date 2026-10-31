@@ -16,6 +16,8 @@ const Body = z.object({
   title: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(2000).optional(),
   moveToScheduleStage: z.boolean().default(false),
+  sendLink: z.boolean().default(false),
+  reminders: z.boolean().default(false),
 });
 
 /** Cria um agendamento (e o evento no Google Agenda, se conectado). */
@@ -29,7 +31,7 @@ export async function POST(req: Request) {
     if (!start) throw new HttpError(422, "Data/hora inválida");
     const end = new Date(start.getTime() + b.durationMinutes * 60_000);
     const r = await createAppointment(await supabaseServer(), { orgId: ctx.org.id, userId: ctx.userId },
-      { leadId: b.leadId, start, end, timeZone: tz, title: b.title, notes: b.notes, moveToScheduleStage: b.moveToScheduleStage });
+      { leadId: b.leadId, start, end, timeZone: tz, title: b.title, notes: b.notes, moveToScheduleStage: b.moveToScheduleStage, sendLink: b.sendLink, reminders: b.reminders });
     return ok(r, 201);
   } catch (e) {
     return fail(e);

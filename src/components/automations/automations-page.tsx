@@ -9,6 +9,11 @@ import { cn, relativeTime } from "@/lib/utils";
 import { graphSteps, STEP_LABEL, TEMPLATES, type AutomationBody, type Step } from "@/lib/automations/schema";
 import { GROUP_COLOR, STEP_ICON, triggerSummary } from "./forms";
 import { FlowEditor } from "./flow-editor";
+import { MeetingSettingsPanel } from "./meeting-settings";
+import { HoursSettingsPanel } from "./hours-settings";
+
+type Tab = "fluxos" | "reunioes" | "horario";
+const TABS: { id: Tab; label: string }[] = [{ id: "fluxos", label: "Fluxos" }, { id: "reunioes", label: "Reuniões e lembretes" }, { id: "horario", label: "Horário comercial" }];
 
 interface Automation extends AutomationBody { id: string; created_at: string; updated_at: string }
 interface Stat { total: number; waiting: number; failed: number; last: string | null }
@@ -18,6 +23,11 @@ export function AutomationsPage() {
   const [editing, setEditing] = useState<(AutomationBody & { id?: string; assinatura?: string }) | null>(null);
   const [gallery, setGallery] = useState(false);
   const [runsOf, setRunsOf] = useState<Automation | null>(null);
+  const [tab, setTab] = useState<Tab>("fluxos");
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "reunioes" || t === "horario") { const id = setTimeout(() => setTab(t), 0); return () => clearTimeout(id); }
+  }, []);
 
   const load = useCallback(async () => {
     const r = await fetch("/api/automations");
@@ -51,10 +61,17 @@ export function AutomationsPage() {
             <h2 className="text-lg font-semibold tracking-tight text-white">Automações</h2>
             <p className="text-sm text-slate-400">Quando algo acontece no CRM, o sistema faz por você: manda mensagem, espera, move, coloca tag, distribui leads, chama o n8n…</p>
           </div>
-          <Button onClick={() => setGallery(true)}><Plus className="h-4 w-4" /> Nova automação</Button>
+          {tab === "fluxos" && <Button onClick={() => setGallery(true)}><Plus className="h-4 w-4" /> Nova automação</Button>}
         </div>
 
-        {!list ? <div className="flex justify-center py-16"><Spinner /></div> : !list.automations.length ? (
+        <div className="flex gap-1 overflow-x-auto rounded-lg border border-line bg-ink-900 p-1 text-sm" role="tablist">
+          {TABS.map((t) => (
+            <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
+              className={cn("whitespace-nowrap rounded-md px-3 py-1.5 font-medium transition", tab === t.id ? "bg-ink-700 text-white" : "text-slate-400 hover:text-slate-200")}>{t.label}</button>
+          ))}
+        </div>
+
+        {tab === "reunioes" ? <MeetingSettingsPanel /> : tab === "horario" ? <HoursSettingsPanel /> : !list ? <div className="flex justify-center py-16"><Spinner /></div> : !list.automations.length ? (
           <div className="rounded-2xl border border-dashed border-line p-10 text-center">
             <Workflow className="mx-auto h-10 w-10 text-brand-300" />
             <p className="mt-3 font-semibold text-white">Nenhuma automação ainda</p>

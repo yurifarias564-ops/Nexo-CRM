@@ -6,8 +6,11 @@ import { loadChannel, sendTextVia } from "@/lib/whatsapp";
 import { cronSecret } from "@/lib/cron";
 import { postPinned, publicTarget } from "@/lib/net/safe-post";
 import { norm } from "@/lib/utils";
-import { matchesKeywords, portsOf, renderVars, Step, Trigger, TRIGGER_NODE, waitMs, type AutomationBody, type Graph } from "./schema";
-import { apiKeyFor, loadAgent } from "@/lib/ai/agent";
+import { matchesKeywords, matchOption, portsOf, renderVars, Step, Trigger, TRIGGER_NODE, waitMs, type AutomationBody, type Graph, type ReplyOption } from "./schema";
+import { apiKeyFor, loadAgent, messageText } from "@/lib/ai/agent";
+import { BusinessHours, DEFAULT_HOURS, inHours, msUntilOpen } from "@/lib/business-hours";
+import { sendMediaFile } from "@/lib/send";
+import { envOptional } from "@/lib/env";
 import { defaultModel, runWithTools } from "@/lib/ai/llm";
 import { checkReply, rulesPrompt, stripEmojis } from "@/lib/ai/rules";
 
@@ -39,14 +42,30 @@ async function stageKind(stageId: string): Promise<string | null> {
   return data?.kind ?? null;
 }
 
-function matches(t: Trigger, ev: { type: string; data: Record<string, unknown> }, kind: string | null, source: string | null): boolean {
+/** Horário comercial da empresa (guardado por alguns minutos para não consultar a cada passo). */
+const hoursCache = new Map<string, { at: number; h: BusinessHours }>();
+async function orgHours(orgId: string): Promise<BusinessHours> {
+  const c = hoursCache.get(orgId);
+  if (c && Date.now() - c.at < 120_000) return c.h;
+  const { data } = await db().from("business_hours").select("time_zone, days").eq("organization_id", orgId).maybeSingle();
+  const p = data ? BusinessHours.safeParse(data) : null;
+  const h = p?.success ? p.data : DEFAULT_HOURS;
+  hoursCache.set(orgId, { at: Date.now(), h });
+  return h;
+}
+
+function matches(t: Trigger, ev: { type: string; data: Record<string, unknown> }, kind: string | null, source: string | null, open: boolean): boolean {
   switch (t.type) {
     case "lead_created": return ev.type === "lead_created" && (!t.source || norm(source ?? "").includes(norm(t.source)));
     case "stage_changed": return ev.type === "stage_changed" && (!t.stage_id || ev.data.to === t.stage_id);
     case "won": return ev.type === "stage_changed" && kind === "won";
     case "lost": return ev.type === "stage_changed" && kind === "lost";
     case "tag_added": return ev.type === "tag_added" && ev.data.tag_id === t.tag_id;
-    case "message_received": return ev.type === "message_received" && matchesKeywords(String(ev.data.text ?? ""), t.keywords);
+    case "message_received":
+      if (ev.type !== "message_received") return false;
+      if (t.when === "off_hours" && open) return false;
+      if (t.when === "business_hours" && !open) return false;
+      return matchesKeywords(String(ev.data.text ?? ""), t.keywords);
     default: return false;
   }
 }
@@ -98,6 +117,9 @@ async function drainEvents(limit = 300) {
         await db().from("automation_runs").update({ status: "stopped", error: "Cliente respondeu", updated_at: now() })
           .eq("lead_id", ev.lead_id).in("automation_id", stopIds).in("status", ["waiting", "running"]).is("waiting_for", null);
       }
+      // Bloco "Se o cliente responder…": acorda em alguns segundos (dá tempo de chegar o resto da resposta/áudio) para escolher o caminho
+      await db().from("automation_runs").update({ status: "running", resume_at: new Date(Date.now() + 20_000).toISOString(), replied_at: now(), updated_at: now() })
+        .eq("lead_id", ev.lead_id).eq("status", "waiting").eq("waiting_for", "options");
       // Bloco "Esperar o cliente responder": segue pela saída "Respondeu"
       const { data: waiters } = await db().from("automation_runs").select("id, reply_node").eq("lead_id", ev.lead_id).eq("status", "waiting").eq("waiting_for", "reply");
       for (const w of waiters ?? []) {
@@ -108,8 +130,16 @@ async function drainEvents(limit = 300) {
       }
     }
     const kind = ev.type === "stage_changed" && ev.data?.to ? await stageKind(String(ev.data.to)) : null;
+    const msgAutos = autos.filter((a) => a.trigger.type === "message_received");
+    if (ev.type === "message_received" && msgAutos.length) {
+      // Áudio do cliente: transcreve antes de procurar as palavras-chave
+      if (!String(ev.data.text ?? "").trim() && ev.data.msg_type === "audio" && ev.data.message_id && msgAutos.some((a) => a.trigger.type === "message_received" && a.trigger.keywords.length)) {
+        ev.data.text = await messageText(String(ev.data.message_id));
+      }
+    }
+    const open = msgAutos.some((a) => a.trigger.type === "message_received" && a.trigger.when && a.trigger.when !== "any") ? inHours(await orgHours(ev.organization_id)) : true;
     for (const a of autos) {
-      if (matches(a.trigger, ev, kind, (ev.data?.source as string | null) ?? null)) await startRun(a, ev.lead_id);
+      if (matches(a.trigger, ev, kind, (ev.data?.source as string | null) ?? null, open)) await startRun(a, ev.lead_id);
     }
   }
   return evs.length;
@@ -163,24 +193,6 @@ async function leadCtx(leadId: string) {
   return { lead, stage: st?.name ?? null, org: org?.name ?? "", seller: (seller as { full_name: string | null } | null)?.full_name ?? null, tagIds: new Set((tags ?? []).map((t) => t.tag_id as string)) };
 }
 
-/** Quanto falta para o próximo horário comercial (0 = já está). */
-function msUntilBusiness(from = new Date()) {
-  if (inBusinessHours(from)) return 0;
-  const t = new Date(from);
-  t.setUTCMinutes(Math.ceil(t.getUTCMinutes() / 15) * 15, 0, 0);
-  for (let i = 0; i < 4 * 24 * 8; i++) {
-    if (inBusinessHours(t)) return t.getTime() - from.getTime();
-    t.setTime(t.getTime() + 15 * 60_000);
-  }
-  return 0;
-}
-
-function inBusinessHours(d = new Date()) {
-  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Sao_Paulo", weekday: "short", hour: "2-digit", hourCycle: "h23" }).formatToParts(d);
-  const wd = p.find((x) => x.type === "weekday")?.value;
-  const h = Number(p.find((x) => x.type === "hour")?.value);
-  return wd !== "Sun" && h >= 8 && h < 18;
-}
 
 async function clientRepliedSince(leadId: string, since: string) {
   const { data } = await db().from("messages").select("id, conversations!inner(lead_id)").eq("conversations.lead_id", leadId).eq("direction", "in").gt("sent_at", since).limit(1).maybeSingle();
@@ -201,6 +213,14 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
       if (a.stop_on_reply && (await clientRepliedSince(lead.id, replySince(run)))) return { ok: true, stop: true, info: "cliente respondeu — parou aqui" };
       if (++run.sent_count > MAX_SENDS_PER_RUN) return { ok: false, info: `Limite de ${MAX_SENDS_PER_RUN} mensagens por execução (verifique se o fluxo não está em loop)` };
       const text = renderVars(step.text, vars);
+      if (step.media) {
+        if (!step.media.path.startsWith(`${lead.organization_id}/`)) return { ok: false, info: "Arquivo de outra empresa" };
+        const { data: blob, error } = await db().storage.from("automation-media").download(step.media.path);
+        if (error || !blob) return { ok: false, info: "O arquivo da mensagem não foi encontrado — envie de novo no bloco" };
+        const file = new File([blob], step.media.name, { type: step.media.mime });
+        await sendMediaFile(db(), lead.organization_id, null, { leadId: lead.id }, file, text, { automation: true });
+        return { ok: true, info: `${step.media.name}${text ? ` — ${text.slice(0, 80)}` : ""}` };
+      }
       await sendText(db(), lead.organization_id, null, { leadId: lead.id }, text, { automation: true });
       return { ok: true, info: text.slice(0, 120) };
     }
@@ -261,6 +281,7 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
     }
     case "condition": {
       const v = step.value ?? "";
+      const open = step.field === "business_hours" ? inHours(await orgHours(lead.organization_id)) : false;
       const pass = (() => {
         switch (step.field) {
           case "stage": return lead.stage_id === v;
@@ -271,7 +292,7 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
           case "source": return norm(lead.source ?? "").includes(norm(v));
           case "assigned": return lead.assigned_to === v;
           case "unassigned": return !lead.assigned_to;
-          case "business_hours": return inBusinessHours();
+          case "business_hours": return open;
           case "last_message_contains": return lead.last_message_dir === "in" && matchesKeywords(lead.last_message_preview ?? "", v.split(",").map((x) => x.trim()).filter(Boolean));
         }
       })();
@@ -297,9 +318,10 @@ async function runStep(a: Auto, step: Step, c: NonNullable<Awaited<ReturnType<ty
     }
     // Estes três são tratados pelo executor do fluxo (saídas e espera)
     case "wait_reply": return { ok: true, wait: waitMs(step), info: `até ${step.amount} ${step.unit === "minutes" ? "min" : step.unit === "hours" ? "h" : "dia(s)"}` };
+    case "reply_options": return { ok: true, wait: waitMs(step), info: `esperando a resposta (até ${step.amount} ${step.unit === "minutes" ? "min" : step.unit === "hours" ? "h" : "dia(s)"})` };
     case "split": return { ok: true };
     case "wait_business": {
-      const ms = msUntilBusiness();
+      const ms = msUntilOpen(await orgHours(lead.organization_id));
       return ms ? { ok: true, wait: ms, info: "fora do horário — espera até abrir" } : { ok: true, info: "já em horário comercial" };
     }
     case "ai_message": {
@@ -346,6 +368,40 @@ async function aiWrite(lead: LeadRow, org: string, instruction: string, vars: Pa
   return { ok: true, text: text.slice(0, 4000) };
 }
 
+/** Tudo o que o cliente mandou desde `since` (áudios transcritos), em um texto só. */
+async function repliesSince(leadId: string, since: string): Promise<string> {
+  const { data } = await db().from("messages").select("id, type, conversations!inner(lead_id)").eq("conversations.lead_id", leadId).eq("direction", "in").gt("sent_at", since).order("sent_at").limit(6);
+  const parts: string[] = [];
+  for (const m of data ?? []) { const t = await messageText(m.id); if (t) parts.push(t); }
+  return parts.join(" \n").slice(0, 2000);
+}
+
+/** IA escolhe a opção quando as palavras não bateram (ex.: "pode marcar pra mim" = Sim). Usa a Groq (rápida e barata). */
+async function aiPick(orgId: string, reply: string, options: ReplyOption[]): Promise<ReplyOption | null> {
+  const key = envOptional("GROQ_API_KEY");
+  if (!key) return null;
+  try {
+    const list = options.map((o, i) => `${i + 1}. ${o.label}${o.keywords.length ? ` (ex.: ${o.keywords.slice(0, 6).join(", ")})` : ""}`).join("\n");
+    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST", headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: envOptional("GROQ_CHECKLIST_MODEL", "llama-3.3-70b-versatile"), temperature: 0, max_tokens: 5,
+        messages: [
+          { role: "system", content: `Classifique a resposta de um cliente no WhatsApp (pode ter erros de digitação ou vir de áudio transcrito) em UMA das opções. Responda só o número da opção, ou 0 se nenhuma serve.\nOpções:\n${list}` },
+          { role: "user", content: reply.slice(0, 1000) },
+        ],
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const b = (await r.json().catch(() => ({}))) as { choices?: { message?: { content?: string } }[] };
+    const n = Number(String(b.choices?.[0]?.message?.content ?? "").match(/\d+/)?.[0] ?? 0);
+    return options[n - 1] ?? null;
+  } catch (e) {
+    console.error("[automação] IA das opções", orgId, (e as Error).message);
+    return null;
+  }
+}
+
 /** Fluxo em canvas: anda de bloco em bloco seguindo as conexões (Sim/Não, A/B, Respondeu…). */
 async function executeGraph(run: Run, auto: Auto & { graph: Graph }, c: NonNullable<Awaited<ReturnType<typeof leadCtx>>>, finish: (p: Record<string, unknown>) => PromiseLike<unknown>) {
   const g = auto.graph;
@@ -362,12 +418,17 @@ async function executeGraph(run: Run, auto: Auto & { graph: Graph }, c: NonNulla
     try { r = await runStep(auto, step, c, run); }
     catch (e) { r = { ok: false, info: (e as Error).message?.slice(0, 200) }; }
     // Saída do bloco
-    let port = portsOf(step.type)[0]!.id;
+    let port = portsOf(step)[0]!.id;
     if (step.type === "condition") port = r.stop ? "no" : "yes";
     if (step.type === "split") { port = Math.random() * 100 < step.percent_a ? "a" : "b"; r.info = `caminho ${port.toUpperCase()}`; }
     run.log.push({ at: now(), step: idx(nodeId), node: nodeId, type: step.type, ok: r.ok, info: r.info });
     if (!r.ok) { await finish({ status: "failed", node_id: nodeId, error: r.info ?? "Falhou" }); return; }
     if (r.stop && step.type !== "condition") { await finish({ status: "done", node_id: null, error: null, resume_at: null }); return; }
+    if (step.type === "reply_options") {
+      // Espera a resposta; quando chegar, o motor lê (e transcreve áudio) e escolhe o caminho
+      await finish({ status: "waiting", waiting_for: "options", node_id: nodeId, reply_node: null, wait_started_at: now(), replied_at: null, sent_count: run.sent_count, resume_at: new Date(Date.now() + (r.wait ?? 0)).toISOString() });
+      return;
+    }
     if (step.type === "wait_reply") {
       // Espera a resposta: se chegar, segue por "Respondeu"; se o tempo acabar, por "Não respondeu"
       await finish({ status: "waiting", waiting_for: "reply", node_id: nextOf(g, nodeId, "timeout"), reply_node: nextOf(g, nodeId, "replied"), wait_started_at: now(), sent_count: run.sent_count, resume_at: new Date(Date.now() + (r.wait ?? 0)).toISOString() });
@@ -392,6 +453,27 @@ async function execute(run: Run) {
   if (auto.graph) {
     const cg = run.lead_id ? await leadCtx(run.lead_id) : null;
     if (!cg) { await finish({ status: "stopped", error: "Lead apagado" }); return; }
+    // "Se o cliente responder…": escolhe a saída pela resposta (ou "Não respondeu")
+    if (run.waiting_for === "options") {
+      const g = (auto as Auto & { graph: Graph }).graph;
+      const node = g.nodes.find((n) => n.id === run.node_id);
+      const st = node?.step?.type === "reply_options" ? node.step : null;
+      if (!st) { await finish({ status: "stopped", waiting_for: null, error: "O bloco foi removido do fluxo" }); return; }
+      const reply = run.lead_id && run.wait_started_at ? await repliesSince(run.lead_id, run.wait_started_at) : "";
+      let port = "timeout";
+      let info = "não respondeu";
+      if (reply) {
+        const hit = matchOption(reply, st.options) ?? (st.use_ai ? await aiPick(cg.lead.organization_id, reply, st.options) : null);
+        port = hit?.id ?? "other";
+        info = `“${reply.slice(0, 80)}” → ${hit ? hit.label : "outra resposta"}`;
+      }
+      run.log.push({ at: now(), step: g.nodes.findIndex((n) => n.id === run.node_id), node: run.node_id ?? undefined, type: "reply_options", ok: true, info });
+      run.node_id = nextOf(g, run.node_id!, port);
+      run.waiting_for = null;
+      if (port !== "timeout") run.replied_at = now();
+      await db().from("automation_runs").update({ waiting_for: null, node_id: run.node_id, replied_at: run.replied_at, log: run.log.slice(-60) }).eq("id", run.id);
+      if (!run.node_id) { await finish({ status: "done", node_id: null, resume_at: null }); return; }
+    }
     // Saiu da espera de resposta pelo tempo: se o cliente respondeu nesse meio-tempo (e a resposta escapou), vai por "Respondeu"
     if (run.waiting_for) {
       if (run.reply_node && run.lead_id && run.wait_started_at && (await clientRepliedSince(run.lead_id, run.wait_started_at))) { run.node_id = run.reply_node; run.replied_at = now(); }

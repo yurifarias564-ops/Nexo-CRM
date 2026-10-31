@@ -859,9 +859,10 @@ test("crédito: resumo da manhã põe os pré-aprovados primeiro", async () => {
 // ---------------------------------------------------------------------------------------------
 test("automações: fluxo em canvas — saídas, validação e conversão das antigas", async () => {
   const { graphIssues, linearToGraph, portsOf, graphSteps, AutomationBody, TEMPLATES } = await import("@/lib/automations/schema");
-  assert.deepEqual(portsOf("condition").map((p) => p.id), ["yes", "no"]);
-  assert.deepEqual(portsOf("wait_reply").map((p) => p.id), ["replied", "timeout"]);
-  assert.deepEqual(portsOf("send_message").map((p) => p.id), ["out"]);
+  assert.deepEqual(portsOf({ type: "condition", field: "business_hours", value: null }).map((p) => p.id), ["yes", "no"]);
+  assert.deepEqual(portsOf({ type: "wait_reply", amount: 1, unit: "days" }).map((p) => p.id), ["replied", "timeout"]);
+  assert.deepEqual(portsOf({ type: "send_message", text: "x" }).map((p) => p.id), ["out"]);
+  assert.deepEqual(portsOf({ type: "reply_options", amount: 1, unit: "days", use_ai: true, options: [{ id: "o1", label: "Sim", keywords: [] }, { id: "o2", label: "Não", keywords: [] }] }).map((p) => p.id), ["o1", "o2", "other", "timeout"]);
   const g = linearToGraph([{ type: "send_message", text: "Oi" }, { type: "condition", field: "business_hours", value: null }, { type: "add_note", text: "x" }]);
   assert.equal(g.nodes.length, 4);
   assert.deepEqual(g.edges.map((e) => `${e.from}:${e.port}>${e.to}`), ["trigger:out>n1", "n1:out>n2", "n2:yes>n3"]);
@@ -905,4 +906,46 @@ test("Pix Nexo: documento da loja aparece mascarado", async () => {
   const { maskDoc } = await import("@/lib/payments/fees");
   assert.equal(maskDoc("12345678901"), "***.456.789-**");
   assert.equal(maskDoc("12.345.678/0001-95"), "12.345.678/0001-**");
+});
+
+test("Reunião: lembretes do dia (6h, 12h) e 30 min antes, pulando os que já passaram", async () => {
+  const { reminderTimes, DEFAULT_MEETING, renderMeeting } = await import("@/lib/meetings-shared");
+  const tz = "America/Sao_Paulo";
+  const start = new Date("2026-11-05T18:00:00Z"); // 15h em Brasília
+  const atNight = reminderTimes(DEFAULT_MEETING.reminders, start, tz, new Date("2026-11-04T23:00:00Z"));
+  assert.deepEqual(atNight.map((x) => x.at.toISOString()), ["2026-11-05T09:00:00.000Z", "2026-11-05T15:00:00.000Z", "2026-11-05T17:30:00.000Z"]);
+  const at13h = reminderTimes(DEFAULT_MEETING.reminders, start, tz, new Date("2026-11-05T16:00:00Z"));
+  assert.deepEqual(at13h.map((x) => x.at.toISOString()), ["2026-11-05T17:30:00.000Z"]);
+  const t = renderMeeting("Oi, {{primeiro_nome}}! Às {{hora}}: {{link}}", { name: "Ana Souza", start, tz, link: "https://meet.google.com/abc", seller: "Yuri", org: "X" });
+  assert.equal(t, "Oi, Ana! Às 15h: https://meet.google.com/abc");
+});
+
+test("Horário comercial editável: dias, sábado meio período e expediente que vira a noite", async () => {
+  const { inHours, msUntilOpen, DEFAULT_HOURS } = await import("@/lib/business-hours");
+  const h = DEFAULT_HOURS;
+  assert.equal(inHours(h, new Date("2026-11-04T13:00:00Z")), true);   // quarta 10h
+  assert.equal(inHours(h, new Date("2026-11-04T22:00:00Z")), false);  // quarta 19h
+  assert.equal(inHours(h, new Date("2026-11-07T14:00:00Z")), true);   // sábado 11h
+  assert.equal(inHours(h, new Date("2026-11-07T16:00:00Z")), false);  // sábado 13h
+  assert.equal(inHours(h, new Date("2026-11-08T13:00:00Z")), false);  // domingo
+  assert.equal(msUntilOpen(h, new Date("2026-11-04T22:00:00Z")), 13 * 3_600_000); // quarta 19h → quinta 8h
+  const night = { ...h, days: h.days.map(() => ({ on: true, start: "18:00", end: "02:00" })) };
+  assert.equal(inHours(night, new Date("2026-11-05T03:30:00Z")), true);  // 00h30
+  assert.equal(inHours(night, new Date("2026-11-05T13:00:00Z")), false); // 10h
+});
+
+test("Automações: palavra-chave entende erro de digitação e escrita pelo som", async () => {
+  const { matchesKeywords, matchOption } = await import("@/lib/automations/schema");
+  assert.equal(matchesKeywords("qual o presso?", ["preço"]), true);
+  assert.equal(matchesKeywords("kero agendar", ["quero agendar"]), true);
+  assert.equal(matchesKeywords("simmm", ["sim"]), true);
+  assert.equal(matchesKeywords("QUANTO CUSTA", ["quanto custa"]), true);
+  assert.equal(matchesKeywords("agora nao posso", ["sim"]), false);
+  assert.equal(matchesKeywords("sem interesse", ["sim"]), false);
+  assert.equal(matchesKeywords("na hora", ["não"]), false);
+  assert.equal(matchesKeywords("naum quero", ["não"]), false); // "naum" é curto demais para arriscar; a IA cobre
+  const opts = [{ id: "o1", label: "Sim", keywords: ["sim", "quero", "pode ser", "bora"] }, { id: "o2", label: "Não", keywords: ["não", "nao", "sem interesse", "agora não"] }];
+  assert.equal(matchOption("pode sr sim", opts)?.id, "o1");
+  assert.equal(matchOption("sem interese obrigado", opts)?.id, "o2");
+  assert.equal(matchOption("qual o endereço?", opts), null);
 });
