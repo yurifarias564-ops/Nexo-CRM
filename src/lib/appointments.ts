@@ -61,12 +61,15 @@ export async function createAppointment(
     `\nAgendado pelo Nexo CRM — ${appUrl()}/pipeline`,
   ].filter(Boolean).join("\n");
 
+  // Sala da videochamada: quando vai mandar o link agora ou algum lembrete usa {{link}}
+  const needsLink = Boolean(input.sendLink) || (Boolean(input.reminders) && (await loadMeetingSettings(ctx.orgId)).reminders.some((r) => r.text.includes("{{link}}")));
+
   // 1) Google Agenda (não bloqueia o agendamento no CRM se falhar)
   let google: GoogleOutcome = "not_connected";
   let googleError: string | undefined;
   let ev: Awaited<ReturnType<typeof createEvent>> = null;
   try {
-    ev = await createEvent(ctx.userId, { title, description, start: input.start.toISOString(), end: input.end.toISOString(), timeZone: input.timeZone, meet: Boolean(input.sendLink) });
+    ev = await createEvent(ctx.userId, { title, description, start: input.start.toISOString(), end: input.end.toISOString(), timeZone: input.timeZone, meet: needsLink });
     google = ev ? "created" : "not_connected";
   } catch (e) {
     google = "error";
@@ -80,7 +83,7 @@ export async function createAppointment(
     starts_at: input.start.toISOString(), ends_at: input.end.toISOString(), time_zone: input.timeZone,
     google_event_id: ev?.id ?? null, google_calendar_id: ev?.calendarId ?? null, google_link: ev?.link ?? null,
     // Sem Google Meet: sala do Jitsi (funciona no celular, sem instalar nada)
-    meet_link: input.sendLink ? ev?.meetLink ?? `https://meet.jit.si/Nexo-${randomBytes(9).toString("base64url")}` : null,
+    meet_link: needsLink ? ev?.meetLink ?? `https://meet.jit.si/Nexo-${randomBytes(9).toString("base64url")}` : null,
   }).select("id, meet_link").single();
   if (error) {
     if (ev) await cancelEvent(ctx.userId, ev.calendarId, ev.id).catch(() => undefined); // não deixa evento órfão
