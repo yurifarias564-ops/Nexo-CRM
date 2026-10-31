@@ -47,10 +47,12 @@ export function authorizeUrl(state: string) {
 }
 
 async function j<T>(res: Response): Promise<T> {
-  const body = (await res.json().catch(() => ({}))) as T & { error?: { message?: string } | string; error_message?: string };
+  const body = (await res.json().catch(() => ({}))) as T & { error?: { message?: string; type?: string; code?: number } | string; error_message?: string; error_type?: string };
   if (!res.ok) {
     const e = body.error;
-    throw new HttpError(res.status >= 500 ? 502 : 422, `Instagram: ${typeof e === "string" ? body.error_message ?? e : e?.message ?? `erro ${res.status}`}`);
+    const msg = body.error_message ?? (typeof e === "string" ? e : e?.message) ?? `erro ${res.status}`;
+    console.error("[instagram api]", res.status, JSON.stringify(body).slice(0, 400));
+    throw new HttpError(res.status >= 500 ? 502 : 422, `Instagram: ${msg}`);
   }
   return body;
 }

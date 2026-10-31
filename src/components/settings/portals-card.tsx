@@ -20,7 +20,7 @@ const IG_MSG: Record<string, [ "success" | "error" | "message", string ]> = {
   "em-uso": ["error", "Esta conta do Instagram já está conectada em outra empresa."],
   "outra-conta": ["error", "O login voltou para outro usuário. Tente de novo."],
   cancelado: ["message", "Conexão com o Instagram cancelada."],
-  erro: ["error", "Não foi possível conectar o Instagram. Use uma conta profissional (Empresa ou Criador)."],
+  erro: ["error", "Não foi possível conectar o Instagram."],
 };
 const OLX_MSG: Record<string, [ "success" | "error" | "message", string ]> = {
   ok: ["success", "OLX conectada! Os chats dos anúncios vão virar leads no funil."],
@@ -60,7 +60,8 @@ export function PortalsCard() {
     const t = setTimeout(() => {
       void load();
       const m = ig ? IG_MSG[ig] : olx ? OLX_MSG[olx] : null;
-      if (m) { toast[m[0]](m[1], { duration: 9000 }); window.history.replaceState(null, "", "/settings?tab=integrations"); }
+      const detail = q.get("igmsg");
+      if (m) { toast[m[0]](m[1], { duration: 12000, description: detail ?? undefined }); window.history.replaceState(null, "", "/settings?tab=integrations"); }
     }, 0);
     return () => clearTimeout(t);
   }, [load]);

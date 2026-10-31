@@ -41,6 +41,6 @@ export async function GET(req: Request) {
     return back("ok");
   } catch (e) {
     console.error("[instagram callback]", e);
-    return back("erro");
+    return NextResponse.redirect(`${appUrl()}/settings?tab=integrations&ig=erro&igmsg=${encodeURIComponent(((e as Error).message ?? "").slice(0, 200))}`);
   }
 }
