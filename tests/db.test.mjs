@@ -486,10 +486,10 @@ await expectError("usuário não descobre se uma empresa é da casa", () => as(A
 await expectError("saque de valor zero é recusado", () => su("insert into public.payouts (organization_id, value, key_display) values ($1, 0, 'x')", [orgA]), "23514");
 
 console.log("\n# Link do checklist");
-await su("insert into public.team_share_links (organization_id, token) values ($1, repeat('a', 40))", [orgA]);
-ok("dono vê o link da empresa dele", (await as(A, "select * from public.team_share_links")).length === 1);
-ok("vendedor e outra empresa não veem o link", (await as(C, "select * from public.team_share_links")).length === 0 && (await as(B, "select * from public.team_share_links")).length === 0);
-await expectError("token curto é recusado", () => su("insert into public.team_share_links (organization_id, token) values ($1, 'abc')", [orgB]), "23514");
+ok("empresa nova já nasce com o link do checklist", (await su("select token from public.team_share_links where organization_id=$1", [orgA]))[0]?.token.length === 40);
+ok("dono vê o link da empresa dele", (await as(A, "select * from public.team_share_links where organization_id=$1", [orgA])).length === 1);
+ok("vendedor e outra empresa não veem o link", (await as(C, "select * from public.team_share_links")).length === 0 && (await as(B, "select * from public.team_share_links where organization_id=$1", [orgA])).length === 0);
+await expectError("token curto é recusado", () => su("update public.team_share_links set token='abc' where organization_id=$1", [orgB]), "23514");
 
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

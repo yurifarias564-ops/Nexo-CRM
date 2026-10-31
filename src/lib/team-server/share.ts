@@ -5,6 +5,12 @@ import { appUrl } from "@/lib/env";
 import { HttpError } from "@/lib/http";
 
 const TOKEN = /^[a-f0-9]{40}$/;
+
+/** Nome e logo da empresa para o cabeçalho do link. */
+export async function orgBrand(orgId: string): Promise<{ logo: string | null; color: string | null; appName: string | null }> {
+  const { data } = await supabaseAdmin().from("org_branding").select("logo_url, icon_url, primary_color, app_name").eq("organization_id", orgId).maybeSingle();
+  return { logo: data?.logo_url ?? data?.icon_url ?? null, color: data?.primary_color ?? null, appName: data?.app_name ?? null };
+}
 export const shareUrl = (token: string) => `${appUrl()}/c/${token}`;
 
 /** Empresa do link (ou 404). Só o que esta empresa tem fica acessível pelo link. */

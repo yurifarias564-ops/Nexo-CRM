@@ -32,8 +32,8 @@ export const SOURCE_LABELS: Record<TeamSource, string> = {
   won_value: "Automático: faturamento do funil",
   appointments: "Automático: agendamentos marcados",
   followups_sent: "Automático: mensagens agendadas enviadas",
-  os_count: "Automático: OS fechadas registradas",
-  os_value: "Automático: faturamento das OS",
+  os_count: "Automático: vendas registradas no checklist",
+  os_value: "Automático: faturamento das vendas do checklist",
 };
 
 export const SOURCE_SHORT: Record<TeamSource, string> = {
@@ -44,8 +44,8 @@ export const SOURCE_SHORT: Record<TeamSource, string> = {
   won_value: "Auto · Faturamento funil",
   appointments: "Auto · Agendamentos",
   followups_sent: "Auto · Msgs agendadas",
-  os_count: "Auto · OS fechadas",
-  os_value: "Auto · Faturamento OS",
+  os_count: "Auto · Vendas checklist",
+  os_value: "Auto · Faturamento checklist",
 };
 
 type KitMetric = Omit<TeamMetric, "id" | "active" | "position" | "result_of" | "weekly_target"> & { results?: string[] };

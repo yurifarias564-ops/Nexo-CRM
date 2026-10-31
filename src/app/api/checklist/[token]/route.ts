@@ -2,7 +2,7 @@ import { z } from "zod";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { orgByToken } from "@/lib/team-server/share";
+import { orgBrand, orgByToken } from "@/lib/team-server/share";
 import { isValidTimeZone, DEFAULT_TZ } from "@/lib/time";
 
 export const runtime = "nodejs";
@@ -22,7 +22,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
     const from = q.get("from") ?? "", to = q.get("to") ?? "";
     if (scope !== "base" && (!DAY.test(from) || !DAY.test(to) || from > to)) throw new HttpError(422, "Período inválido");
     if (scope === "base") {
-      const [st, s, m, g, cfg] = await Promise.all([
+      const [brand, st, s, m, g, cfg] = await Promise.all([
+        orgBrand(orgId),
         db.from("team_stores").select("id, name, revenue_goal, os_daily_goal, position").eq("organization_id", orgId).order("position").order("created_at"),
         db.from("team_sellers").select("id, name, user_id, active, position, role, store_id").eq("organization_id", orgId).order("position").order("created_at"),
         db.from("team_metrics").select("id, name, unit, source:origin, role, result_of, daily_target, weekly_target, monthly_target, active, position").eq("organization_id", orgId).order("position").order("created_at"),
@@ -31,7 +32,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
       ]);
       // Não expõe quem é o login de cada pessoa: só se tem ou não
       const sellers = (s.data ?? []).map((x) => ({ ...x, user_id: x.user_id ? "login" : null }));
-      return ok({ orgName, stores: st.data ?? [], sellers, metrics: m.data ?? [], goals: g.data ?? [], settings: cfg.data ?? null });
+      return ok({ orgName, brand, stores: st.data ?? [], sellers, metrics: m.data ?? [], goals: g.data ?? [], settings: cfg.data ?? null });
     }
     if (scope === "values") {
       const tz = q.get("tz");

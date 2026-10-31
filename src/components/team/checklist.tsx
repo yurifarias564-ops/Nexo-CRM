@@ -127,7 +127,7 @@ export function Checklist({ base, reloadBase }: { base: TeamBase; reloadBase: ()
                 <span className="mt-1 text-base font-semibold uppercase tracking-wide text-white">{s.name}</span>
                 {store && <span className="font-mono text-[11px] uppercase tracking-wider text-slate-500">{store.name}</span>}
                 <span className="font-mono text-[11px] uppercase tracking-wider text-slate-400">
-                  {s.role === "closer" && osM ? `OS hoje ${get(s.id, osM.id)}/${osGoal ?? "—"}` : `Metas hoje ${done}/${items.length}`}
+                  {s.role === "closer" && osM ? `Vendas hoje ${get(s.id, osM.id)}/${osGoal ?? "—"}` : `Metas hoje ${done}/${items.length}`}
                 </span>
               </button>
             );
@@ -276,9 +276,8 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
         <div className="card space-y-2.5 p-4">
           {isCloser && osM && (
             <>
-              <div className="flex items-baseline justify-between"><span className="text-sm text-slate-300">OS fechadas {day === today ? "hoje" : "no dia"}</span><span className="font-mono text-2xl font-semibold text-white">{v(osM.id, dayT)}{osGoal ? ` / ${osGoal}` : ""}</span></div>
+              <div className="flex items-baseline justify-between"><span className="text-sm text-slate-300">Vendas {day === today ? "de hoje" : "do dia"}</span><span className="font-mono text-2xl font-semibold text-white">{v(osM.id, dayT)}{osGoal ? ` / ${osGoal}` : ""}</span></div>
               {osGoal ? <Bar value={(100 * v(osM.id, dayT)) / osGoal} /> : null}
-              {fatM && <div className="flex items-baseline justify-between text-sm"><span className="text-slate-300">Faturado {day === today ? "hoje" : "no dia"}</span><b className="font-mono text-white">{fmtBRL(v(fatM.id, dayT))}</b></div>}
             </>
           )}
           {store && (
@@ -292,12 +291,12 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
                 <div className="flex justify-between text-xs text-slate-500"><span>Falta {fmtBRL(left)}</span><span className="font-mono">{fmtBRL(Math.ceil(left / daysLeft))} por dia útil ({daysLeft} dias)</span></div>
               ) : null}
               {seller.role === "sdr" && store.os_daily_goal ? (
-                <div className="flex items-baseline justify-between text-sm"><span className="text-slate-300">OS da loja {day === today ? "hoje" : "no dia"}</span><b className="font-mono text-white">{storeOsToday} / {store.os_daily_goal}</b></div>
+                <div className="flex items-baseline justify-between text-sm"><span className="text-slate-300">Vendas da loja {day === today ? "hoje" : "no dia"}</span><b className="font-mono text-white">{storeOsToday} / {store.os_daily_goal}</b></div>
               ) : null}
             </>
           )}
           {seller.role === "sdr" && (
-            <div className="flex items-baseline justify-between pt-1 text-sm"><span className="text-slate-300">OS que vieram de você no {period.cycle ? "ciclo" : "mês"}</span><b className="font-mono text-white">{fromMe.length} · {fmtBRL(fromMe.reduce((a, s) => a + s.value, 0))}</b></div>
+            <div className="flex items-baseline justify-between pt-1 text-sm"><span className="text-slate-300">Vendas que vieram de você no {period.cycle ? "ciclo" : "mês"}</span><b className="font-mono text-white">{fromMe.length} · {fmtBRL(fromMe.reduce((a, s) => a + s.value, 0))}</b></div>
           )}
         </div>
       )}
@@ -307,7 +306,7 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
         {allDone && <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300"><Check className="h-3.5 w-3.5" /> Meta de hoje batida</span>}
         {canFill && steppers.length > 0 && <VoiceFillButton seller={seller} onFill={applyVoice} onNote={(t) => setVoiceNote((p) => ({ t, n: (p?.n ?? 0) + 1 }))} />}
         {steppers.length ? <p className="mb-3 text-xs text-slate-500">Fez muitas de uma vez? Toque no número e digite direto, ou mande um áudio contando o seu dia.</p>
-          : <p className="text-sm text-slate-400">Nenhuma atividade manual para sua função.{isCloser ? " Suas OS entram pelo card abaixo." : ""}</p>}
+          : <p className="text-sm text-slate-400">Nenhuma atividade manual para sua função.{isCloser ? " Suas vendas entram pelo card abaixo." : ""}</p>}
         <ul className="divide-y divide-line">
           {steppers.map((m) => {
             const g = goalFor(base.goals, m, seller.id);
@@ -519,12 +518,12 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
     setBusy(false);
     setSales((s) => [data, ...s]);
     bump(1, val);
-    toast.success(`OS registrada${val ? ` · ${fmtBRL(val)}` : ""}`);
+    toast.success(`Venda registrada${val ? ` · ${fmtBRL(val)}` : ""}`);
     setValue(""); setOsNumber(""); setSdr(""); setOpen(false);
   }
 
   async function remove(s: TeamSale) {
-    if (!confirm(`Apagar a OS${s.os_number ? ` ${s.os_number}` : ""} de ${fmtBRL(s.value)}?`)) return;
+    if (!confirm(`Apagar a venda${s.os_number ? ` ${s.os_number}` : ""} de ${fmtBRL(s.value)}?`)) return;
     try { await api.deleteSale(s.id); } catch (e) { return toast.error((e as Error).message); }
     setSales((all) => all.filter((x) => x.id !== s.id));
     bump(-1, -s.value);
@@ -532,21 +531,21 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
 
   return (
     <div className="card p-4 sm:p-5">
-      <h4 className="font-semibold text-white">Registrar OS fechada</h4>
+      <h4 className="font-semibold text-white">Registrar venda</h4>
       {!open ? (
         <div className="mt-3 flex items-center gap-3">
           <button type="button" disabled={!canFill} onClick={() => setOpen(true)}
             className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-1.5 pl-1.5 pr-4 text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/25"><Trophy className="h-4 w-4" /></span>
-            <span className="font-mono text-xs font-semibold uppercase tracking-wider">OS fechada</span>
+            <span className="font-mono text-xs font-semibold uppercase tracking-wider">Venda</span>
           </button>
-          <span className="text-sm text-slate-400">Fechou uma OS agora? Clica pra registrar com o valor.</span>
+          <span className="text-sm text-slate-400">Fechou uma venda agora? Clica pra registrar com o valor.</span>
         </div>
       ) : (
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <label className="block"><span className="label">Valor (R$)</span>
             <input className="field" inputMode="decimal" autoFocus placeholder="Ex.: 1.850,00" value={value} onChange={(e) => setValue(e.target.value)} /></label>
-          <label className="block"><span className="label">Nº da OS (opcional)</span>
+          <label className="block"><span className="label">Nº do pedido (opcional)</span>
             <input className="field" maxLength={40} value={osNumber} onChange={(e) => setOsNumber(e.target.value)} /></label>
           <label className="block"><span className="label">De onde veio</span>
             <select className="field" value={sdr} onChange={(e) => setSdr(e.target.value)}>
@@ -556,7 +555,7 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
             </select></label>
           <div className="flex justify-end gap-2 sm:col-span-3">
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={register} loading={busy}><Trophy className="h-4 w-4" /> Registrar OS</Button>
+            <Button onClick={register} loading={busy}><Trophy className="h-4 w-4" /> Registrar venda</Button>
           </div>
         </div>
       )}
@@ -568,7 +567,7 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
               <span className="font-semibold text-white">{fmtBRL(s.value)}</span>
               {s.os_number && <span className="font-mono text-xs text-slate-400">#{s.os_number}</span>}
               <span className="min-w-0 flex-1 truncate text-xs text-slate-400">{s.sdr_id ? `via ${base.sellers.find((x) => x.id === s.sdr_id)?.name ?? "SDR"}` : "direto"}</span>
-              {canFill && <button type="button" onClick={() => void remove(s)} className="rounded p-1 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Apagar OS"><Trash2 className="h-3.5 w-3.5" /></button>}
+              {canFill && <button type="button" onClick={() => void remove(s)} className="rounded p-1 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Apagar venda"><Trash2 className="h-3.5 w-3.5" /></button>}
             </li>
           ))}
         </ul>
