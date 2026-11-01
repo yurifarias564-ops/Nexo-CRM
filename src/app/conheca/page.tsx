@@ -1,18 +1,22 @@
 import type { Metadata } from "next";
 import { companyLine } from "@/lib/company";
+import { LeadButton, LeadFormProvider } from "./lead-form";
 
 export const metadata: Metadata = {
   title: "Nexo CRM — Pare de perder venda no WhatsApp",
   description: "O CRM que você controla falando. IA que atende 24h, funil em tempo real e um especialista que implementa junto com você. 7 dias grátis.",
 };
 
-const CTA = "/login?modo=cadastro";
-
 function Button({ children = "Começar meus 7 dias grátis" }: { children?: React.ReactNode }) {
   return (
-    <a href={CTA} className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#2563eb] px-6 text-base font-semibold text-white shadow-[0_12px_40px_-10px_rgba(37,99,235,.9)] transition hover:bg-[#3b82f6] sm:w-auto">
-      {children} →
-    </a>
+    <div className="flex flex-col gap-3 sm:flex-row">
+      <LeadButton intent="teste" className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#2563eb] px-6 text-base font-semibold text-white shadow-[0_12px_40px_-10px_rgba(37,99,235,.9)] transition hover:bg-[#3b82f6] sm:w-auto">
+        {children} →
+      </LeadButton>
+      <LeadButton intent="especialista" className="inline-flex h-14 w-full items-center justify-center rounded-2xl border border-white/20 px-6 text-base font-semibold text-white transition hover:bg-white/5 sm:w-auto">
+        Falar com um especialista
+      </LeadButton>
+    </div>
   );
 }
 
@@ -41,6 +45,7 @@ const FAQ = [
 
 export default function Conheca() {
   return (
+    <LeadFormProvider>
     <main className="min-h-dvh bg-[#060a16] text-slate-200">
       {/* Topo */}
       <section className="relative overflow-hidden px-4 pb-14 pt-10">
@@ -133,7 +138,7 @@ export default function Conheca() {
           <ul className="mt-6 space-y-2 text-left text-sm">
             {["WhatsApp oficial + funil de vendas", "Agente de IA 24h", "Comandos por voz", "Automações, ligações e campanhas", "Implantação com especialista", "Suporte durante todo o uso", "Sem fidelidade"].map((x) => <li key={x}>✓ {x}</li>)}
           </ul>
-          <div className="mt-7"><Button /></div>
+          <div className="mt-7 flex justify-center"><Button /></div>
         </div>
       </section>
 
@@ -155,15 +160,16 @@ export default function Conheca() {
       {/* Final */}
       <section className="px-4 pb-24 pt-10 text-center">
         <h2 className="text-2xl font-bold text-white sm:text-3xl">Comece hoje e pare de perder cliente.</h2>
-        <div className="mt-6"><Button /></div>
+        <div className="mt-6 flex justify-center"><Button /></div>
         <p className="mx-auto mt-10 max-w-xl text-[11px] leading-relaxed text-slate-500">{companyLine}</p>
         <p className="mt-2 flex justify-center gap-3 text-[11px] text-slate-500"><a href="/privacidade">Privacidade</a><a href="/termos">Termos</a></p>
       </section>
 
       {/* Botão fixo no celular */}
       <div className="fixed inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#060a16]/95 p-3 backdrop-blur md:hidden">
-        <a href={CTA} className="flex h-12 items-center justify-center rounded-xl bg-[#2563eb] font-semibold text-white">Testar 7 dias grátis →</a>
+        <LeadButton intent="teste" className="flex h-12 w-full items-center justify-center rounded-xl bg-[#2563eb] font-semibold text-white">Testar 7 dias grátis →</LeadButton>
       </div>
     </main>
+    </LeadFormProvider>
   );
 }

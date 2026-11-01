@@ -27,8 +27,8 @@ export function LoginForm({ brand }: { brand?: Brand }) {
   const params = useSearchParams();
   const [mode, setMode] = useState<Mode>(params.get("modo") === "cadastro" ? "signup" : "login");
   const [loading, setLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useState(params.get("nome")?.slice(0, 80) ?? "");
+  const [email, setEmail] = useState(params.get("email")?.slice(0, 160) ?? "");
   const [pass, setPass] = useState("");
 
   async function submit(e: React.FormEvent) {
