@@ -3,4 +3,5 @@ export const META_APP_ID = process.env.NEXT_PUBLIC_META_APP_ID || "1145128041279
 export const META_ES_CONFIG_ID = process.env.NEXT_PUBLIC_META_ES_CONFIG_ID || "1914198652895062";
 export const META_GRAPH_VERSION = process.env.NEXT_PUBLIC_META_GRAPH_VERSION || "v23.0";
 // "Login do Facebook para Empresas" com permissões de anúncios (ads_read, ads_management, business_management)
-export const META_ADS_CONFIG_ID = process.env.NEXT_PUBLIC_META_ADS_CONFIG_ID || "";
+// Configuração "Anuncios Meta CRM" do app NEXO CRM (ID público; a variável de ambiente, se existir, tem prioridade)
+export const META_ADS_CONFIG_ID = process.env.NEXT_PUBLIC_META_ADS_CONFIG_ID || "2226607924568089";
