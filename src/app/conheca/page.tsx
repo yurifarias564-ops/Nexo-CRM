@@ -3,12 +3,12 @@ import { companyLine } from "@/lib/company";
 
 export const metadata: Metadata = {
   title: "Nexo CRM — Pare de perder venda no WhatsApp",
-  description: "O CRM que você controla falando. IA que atende 24h, funil em tempo real e um especialista que implementa junto com você. 2 dias grátis.",
+  description: "O CRM que você controla falando. IA que atende 24h, funil em tempo real e um especialista que implementa junto com você. 7 dias grátis.",
 };
 
 const CTA = "/login?modo=cadastro";
 
-function Button({ children = "Começar meus 2 dias grátis" }: { children?: React.ReactNode }) {
+function Button({ children = "Começar meus 7 dias grátis" }: { children?: React.ReactNode }) {
   return (
     <a href={CTA} className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#2563eb] px-6 text-base font-semibold text-white shadow-[0_12px_40px_-10px_rgba(37,99,235,.9)] transition hover:bg-[#3b82f6] sm:w-auto">
       {children} →
@@ -34,7 +34,7 @@ const AFTER = ["Resposta em segundos", "Follow-up automático", "Funil organizad
 const FAQ = [
   ["Funciona com o meu número de WhatsApp?", "Sim. Conectamos o número da sua empresa pela API oficial do WhatsApp, e o especialista faz isso junto com você."],
   ["Preciso entender de tecnologia?", "Não. Um especialista implementa o Nexo com você: conecta o WhatsApp, cadastra a equipe e deixa o primeiro lead no funil."],
-  ["Como funciona o teste?", "Você usa tudo por 2 dias, sem compromisso. Se gostar, continua por R$ 299 por mês."],
+  ["Como funciona o teste?", "Você usa tudo por 7 dias, sem compromisso. Se gostar, continua por R$ 299 por mês."],
   ["Tem fidelidade?", "Não. Você cancela quando quiser."],
   ["Funciona no celular?", "Sim. Funciona no navegador do computador e do celular, inclusive os comandos por voz."],
 ];
@@ -57,7 +57,7 @@ export default function Conheca() {
             <p className="mt-4 text-lg text-slate-300">O CRM que você controla <b className="text-[#67e8f9]">falando</b>. A IA responde seus clientes na hora, o funil se organiza sozinho e um especialista implementa tudo junto com você.</p>
             <div className="mt-7 space-y-3">
               <Button />
-              <p className="text-sm text-slate-400">✓ 2 dias grátis &nbsp; ✓ Sem fidelidade &nbsp; ✓ Implantação com especialista</p>
+              <p className="text-sm text-slate-400">✓ 7 dias grátis &nbsp; ✓ Sem fidelidade &nbsp; ✓ Implantação com especialista</p>
             </div>
           </div>
           <div className="mx-auto w-full max-w-[300px]">
@@ -127,7 +127,7 @@ export default function Conheca() {
       <section id="oferta" className="px-4 py-14">
         <div className="mx-auto max-w-md rounded-[32px] border border-white/15 bg-gradient-to-b from-white/[0.07] to-white/[0.02] p-8 text-center shadow-2xl">
           <p className="text-sm font-semibold tracking-wide text-[#67e8f9]">PLANO NEXO COMPLETO</p>
-          <p className="mt-4 text-slate-400">Teste <b className="text-white">2 dias grátis</b>, depois</p>
+          <p className="mt-4 text-slate-400">Teste <b className="text-white">7 dias grátis</b>, depois</p>
           <p className="mt-1 text-5xl font-bold text-white">R$ 299<span className="text-lg font-medium text-slate-400">/mês</span></p>
           <p className="mt-2 text-sm text-slate-400">Menos de R$ 10 por dia. Uma venda salva já paga o mês.</p>
           <ul className="mt-6 space-y-2 text-left text-sm">
@@ -162,7 +162,7 @@ export default function Conheca() {
 
       {/* Botão fixo no celular */}
       <div className="fixed inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#060a16]/95 p-3 backdrop-blur md:hidden">
-        <a href={CTA} className="flex h-12 items-center justify-center rounded-xl bg-[#2563eb] font-semibold text-white">Testar 2 dias grátis →</a>
+        <a href={CTA} className="flex h-12 items-center justify-center rounded-xl bg-[#2563eb] font-semibold text-white">Testar 7 dias grátis →</a>
       </div>
     </main>
   );
