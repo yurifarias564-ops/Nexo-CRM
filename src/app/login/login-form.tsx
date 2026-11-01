@@ -25,7 +25,7 @@ export function LoginForm({ brand }: { brand?: Brand }) {
   const custom = Boolean(brand?.custom);
   const router = useRouter();
   const params = useSearchParams();
-  const [mode, setMode] = useState<Mode>("login");
+  const [mode, setMode] = useState<Mode>(params.get("modo") === "cadastro" ? "signup" : "login");
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
