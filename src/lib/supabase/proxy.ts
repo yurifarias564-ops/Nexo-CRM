@@ -2,7 +2,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL } from "./config";
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/privacidade", "/termos", "/exclusao-de-dados", "/login", "/auth", "/api/webhooks", "/api/cron", "/r/", "/api/t/", "/api/credit/callback/", "/c/", "/api/checklist/", "/api/inbound/", "/manifest.webmanifest", "/conheca", "/videos/", "/api/conheca/"];
+const PUBLIC_PREFIXES = ["/privacidade", "/termos", "/exclusao-de-dados", "/login", "/auth", "/api/webhooks", "/api/cron", "/r/", "/api/t/", "/api/credit/callback/", "/c/", "/api/checklist/", "/api/inbound/", "/manifest.webmanifest", "/conheca", "/videos/", "/api/conheca/", "/api/auth/signup"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });

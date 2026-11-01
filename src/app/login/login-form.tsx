@@ -44,19 +44,17 @@ export function LoginForm({ brand }: { brand?: Brand }) {
         router.refresh();
       } else if (mode === "signup") {
         if (pass.length < 8) throw new Error("A senha precisa ter pelo menos 8 caracteres");
-        const { data, error } = await sb.auth.signUp({
-          email,
-          options: { data: { full_name: name }, emailRedirectTo: `${location.origin}/auth/callback` },
-          password: pass,
-        });
-        if (error) throw error;
-        if (data.session) {
-          router.replace("/onboarding");
-          router.refresh();
-        } else {
-          toast.success("Conta criada! Confirme seu e-mail para entrar.");
-          setMode("login");
+        // Conta já nasce confirmada (teste grátis começa na hora) e entra em seguida
+        const res = await fetch("/api/auth/signup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, password: pass }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 409) setMode("login");
+          throw new Error(j.error ?? "Não foi possível criar a conta");
         }
+        const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+        if (error) throw new Error(error.message);
+        router.replace("/onboarding");
+        router.refresh();
       } else {
         const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/auth/callback?next=/auth/reset` });
         if (error) throw error;
