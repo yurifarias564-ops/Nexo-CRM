@@ -34,7 +34,7 @@ export function LeadFormProvider({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     setBusy(true); setErr(null);
     const utm: Record<string, string> = {};
-    new URLSearchParams(window.location.search).forEach((v, k) => { if (k.startsWith("utm_")) utm[k] = v.slice(0, 120); });
+    new URLSearchParams(window.location.search).forEach((v, k) => { if (k.startsWith("utm_") || k === "fbclid") utm[k] = v.slice(0, 120); });
     const objetivo = f.objetivo === "Outro" ? f.outro.trim() || "Outro" : f.objetivo;
     try {
       const r = await fetch("/api/conheca/lead", {

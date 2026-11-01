@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { z } from "zod";
+import { classify } from "@/lib/tracking/shared";
 import { fail, HttpError, ok, readJson } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -46,6 +47,19 @@ export async function POST(req: Request) {
       ad: campanha ? `Página de vendas (${campanha})` : "Página de vendas /conheca", adUrl: null, vehicle: null, price: null,
       chatId: null, messageId: null, listId: null, fromSeller: false,
     });
+    // Origem do lead (aba Campanhas): só grava se ainda não tem, para não sobrescrever a origem de um contato antigo
+    if (r.isNew) {
+      const u = b.utm ?? {};
+      const num = (v?: string) => (v && /^\d{6,}$/.test(v) ? v : null);
+      await db.from("lead_origins").upsert({
+        lead_id: r.leadId, organization_id: channel.organization_id,
+        channel: classify({ ...u, fbclid: u.fbclid ?? null, kind: "site" }), source_type: "site",
+        utm_source: u.utm_source ?? null, utm_medium: u.utm_medium ?? null, utm_campaign: u.utm_campaign ?? null,
+        utm_content: u.utm_content ?? null, utm_term: u.utm_term ?? null,
+        ad_id: num(u.utm_content) ?? num(u.utm_term) ?? num(u.utm_id), fbclid: u.fbclid ?? null,
+        ad_url: "/conheca",
+      }, { onConflict: "lead_id", ignoreDuplicates: true }).then(() => undefined, (e) => console.error("[conheca] origem", e));
+    }
     await db.from("leads").update({ notes: [`Nicho: ${b.nicho}`, `Objetivo: ${b.objetivo}`, `Quer: ${quer}`].join(" · ").slice(0, 500) }).eq("id", r.leadId).then(() => undefined, () => undefined);
 
     // Aviso no WhatsApp do dono (não trava o cadastro se o WhatsApp falhar)
