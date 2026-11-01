@@ -11,12 +11,13 @@ export default async function BillingPage() {
   if (!ctx) redirect("/login");
   if (!ctx.org) redirect("/onboarding");
   if (ctx.active) redirect("/pipeline");
-  const price = Number(process.env.PLAN_PRICE_CENTS ?? 19700) / 100;
+  const price = Number(process.env.PLAN_PRICE_CENTS ?? 29900) / 100;
   return (
     <BillingPanel
       orgName={ctx.org.name}
       isOwner={ctx.role === "owner"}
       status={ctx.subscription?.status ?? "pending"}
+      trialEnded={Boolean(ctx.subscription?.is_trial)}
       checkoutUrl={ctx.subscription?.checkout_url ?? null}
       price={formatBRL(price)}
       planName={process.env.PLAN_NAME ?? "Plano Profissional"}

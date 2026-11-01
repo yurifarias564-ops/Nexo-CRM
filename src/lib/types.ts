@@ -11,6 +11,7 @@ export interface Organization { id: string; name: string; created_at: string }
 export interface Subscription {
   organization_id: string;
   status: SubscriptionStatus;
+  is_trial?: boolean;
   checkout_url: string | null;
   value_cents: number | null;
   current_period_end: string | null;

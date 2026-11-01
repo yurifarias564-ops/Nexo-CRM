@@ -48,7 +48,7 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
   if (current) {
     const { data } = await supabase
       .from("subscriptions")
-      .select("organization_id, status, checkout_url, value_cents, current_period_end")
+      .select("organization_id, status, is_trial, checkout_url, value_cents, current_period_end")
       .eq("organization_id", current.id)
       .maybeSingle();
     subscription = (data as Subscription | null) ?? null;

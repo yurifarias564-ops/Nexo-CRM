@@ -24,11 +24,13 @@ export async function POST(req: Request) {
 
     const { data: sub } = await db
       .from("subscriptions")
-      .select("status, asaas_customer_id, asaas_subscription_id, checkout_url")
+      .select("status, is_trial, current_period_end, asaas_customer_id, asaas_subscription_id, checkout_url")
       .eq("organization_id", ctx.org.id)
       .single();
 
-    if (sub?.status === "active") throw new HttpError(409, "A assinatura já está ativa");
+    // No teste grátis (ou com a vigência vencida) pode assinar normalmente
+    const vigente = sub?.status === "active" && !sub.is_trial && (!sub.current_period_end || new Date(sub.current_period_end) > new Date());
+    if (vigente) throw new HttpError(409, "A assinatura já está ativa");
 
     // Reaproveita assinatura existente (evita cobrança duplicada em cliques repetidos)
     if (sub?.asaas_subscription_id) {
@@ -39,7 +41,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const valueCents = Number(envOptional("PLAN_PRICE_CENTS", "19700"));
+    const valueCents = Number(envOptional("PLAN_PRICE_CENTS", "29900"));
     if (!Number.isInteger(valueCents) || valueCents < 500) throw new Error("PLAN_PRICE_CENTS inválido");
 
     const customerId =

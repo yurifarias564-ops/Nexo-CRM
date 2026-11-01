@@ -82,7 +82,7 @@ export async function POST(req: Request) {
       const card = p?.billingType === "CREDIT_CARD" ? p.creditCard : undefined;
       const r = await db.from("subscriptions")
         .update({
-          status: "active", current_period_end: periodEnd.toISOString(), updated_at: now,
+          status: "active", is_trial: false, current_period_end: periodEnd.toISOString(), updated_at: now,
           ...(p?.billingType ? { billing_type: p.billingType } : {}),
           ...(card ? { card_brand: card.creditCardBrand ?? null, card_last4: card.creditCardNumber?.slice(-4) ?? null } : {}),
         })

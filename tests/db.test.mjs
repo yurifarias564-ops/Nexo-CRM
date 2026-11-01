@@ -61,7 +61,13 @@ ok("perfil criado automaticamente", (await su("select count(*)::int n from publi
 const orgA = (await as(A, "select public.create_organization('Empresa A') id"))[0].id;
 const orgB = (await as(B, "select public.create_organization('Empresa B') id"))[0].id;
 ok("empresa A criada com 7 etapas (inclui Agendamento)", (await su("select count(*)::int n from public.stages where organization_id=$1", [orgA]))[0].n === 7);
-ok("assinatura nasce pendente", (await su("select status from public.subscriptions where organization_id=$1", [orgA]))[0].status === "pending");
+{
+  const t = (await su("select status, is_trial, current_period_end from public.subscriptions where organization_id=$1", [orgA]))[0];
+  const dias = (new Date(t.current_period_end) - Date.now()) / 86_400_000;
+  ok("assinatura nasce com 7 dias de teste grátis", t.status === "active" && t.is_trial === true && dias > 6.9 && dias <= 7.01);
+}
+// Daqui em diante simula o teste já acabado (sem pagamento)
+await su("update public.subscriptions set status='pending', is_trial=false, current_period_end=null where organization_id in ($1,$2)", [orgA, orgB]);
 
 console.log("\n# Bloqueio sem pagamento (no banco)");
 ok("sem pagamento: não vê etapas", (await as(A, "select * from public.stages")).length === 0);

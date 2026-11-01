@@ -18,7 +18,7 @@ const FEATURES = [
 ];
 
 export function BillingPanel(props: {
-  orgName: string; isOwner: boolean; status: SubscriptionStatus; checkoutUrl: string | null; price: string; planName: string;
+  orgName: string; isOwner: boolean; status: SubscriptionStatus; trialEnded?: boolean; checkoutUrl: string | null; price: string; planName: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -53,8 +53,10 @@ export function BillingPanel(props: {
     router.replace("/login");
   }
 
-  const title = props.status === "past_due" ? "Pagamento pendente" : props.status === "canceled" ? "Assinatura cancelada" : "Ative sua conta";
-  const subtitle = props.status === "past_due"
+  const title = props.trialEnded ? "Seus 7 dias grátis acabaram" : props.status === "past_due" ? "Pagamento pendente" : props.status === "canceled" ? "Assinatura cancelada" : "Ative sua conta";
+  const subtitle = props.trialEnded
+    ? "Gostou? Assine para continuar usando o Nexo. Todos os seus leads, conversas e configurações estão guardados e voltam na hora."
+    : props.status === "past_due"
     ? "O acesso foi pausado porque a última fatura não foi paga. Seus dados estão seguros e voltam assim que o pagamento for confirmado."
     : "O acesso é liberado automaticamente assim que o pagamento for confirmado.";
 
