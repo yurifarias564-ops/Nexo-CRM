@@ -57,6 +57,16 @@ async function grantedAdAccounts(cred: string): Promise<string[]> {
   return [...ids];
 }
 
+/** Resumo das permissões da chave (para mensagem de erro). */
+async function grantedScopes(cred: string): Promise<string> {
+  const app = `${META_APP_ID}|${env("META_APP_SECRET")}`;
+  const res = await fetch(`${GRAPH}/debug_token?input_token=${encodeURIComponent(cred)}`, { headers: { authorization: `Bearer ${app}` }, signal: AbortSignal.timeout(20_000) });
+  const j = (await res.json().catch(() => ({}))) as { data?: { type?: string; scopes?: string[]; granular_scopes?: { scope: string; target_ids?: string[] }[] }; error?: { message?: string } };
+  if (j.error) return `debug falhou (${j.error.message ?? ""})`;
+  const g = (j.data?.granular_scopes ?? []).map((x) => `${x.scope}${x.target_ids?.length ? `[${x.target_ids.length}]` : ""}`).join(", ");
+  return `${j.data?.type ?? "?"}: ${g || (j.data?.scopes ?? []).join(", ") || "nenhuma"}`;
+}
+
 export interface AdAccountInfo { id: string; name: string; currency: string; status: number; pixels: { id: string; name: string }[] }
 
 /** Contas de anúncios e pixels que a chave enxerga (para escolher depois do "Conectar com o Facebook"). */
@@ -69,10 +79,14 @@ export async function listAssets(cred: string): Promise<{ accounts: AdAccountInf
       const ids = await grantedAdAccounts(cred).catch(() => [] as string[]);
       const found: A[] = [];
       for (const id of ids.slice(0, 40)) {
-        const a = await graph<A>(`act_${id}?fields=id,name,currency,account_status`, cred).catch(() => null);
-        if (a?.id) found.push(a);
+        // Se nem o detalhe da conta vier, guarda só o id: a sincronização mostra o motivo exato depois
+        const a = await graph<A>(`act_${id}?fields=id,name,currency,account_status`, cred).catch(() => ({ id: `act_${id}` } as A));
+        found.push(a);
       }
-      if (!found.length) throw e;
+      if (!found.length) {
+        const scopes = await grantedScopes(cred).catch(() => "?");
+        throw new HttpError(403, `${(e as Error).message} · permissões concedidas: ${scopes}`);
+      }
       return found;
     });
   const out: AdAccountInfo[] = [];
