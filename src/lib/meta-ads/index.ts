@@ -2,6 +2,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { HttpError } from "@/lib/http";
+import { env } from "@/lib/env";
+import { META_APP_ID } from "@/lib/meta-public";
 
 // Meta Ads: lê anúncios e investimento (Marketing API) e envia eventos de conversão (API de Conversões).
 // A credencial do Business Manager fica só no servidor (tabela meta_secrets, sem acesso pelo navegador).
@@ -42,12 +44,37 @@ async function graph<T = Record<string, unknown>>(url: string, cred: string, ini
   return data;
 }
 
+/** Contas de anúncios que a pessoa marcou na janela da Meta (permissões ads_read/ads_management). */
+async function grantedAdAccounts(cred: string): Promise<string[]> {
+  const app = `${META_APP_ID}|${env("META_APP_SECRET")}`;
+  const u = `${GRAPH}/debug_token?input_token=${encodeURIComponent(cred)}`;
+  const res = await fetch(u, { headers: { authorization: `Bearer ${app}` }, signal: AbortSignal.timeout(20_000) });
+  const j = (await res.json().catch(() => ({}))) as { data?: { granular_scopes?: { scope: string; target_ids?: string[] }[] } };
+  const ids = new Set<string>();
+  for (const g of j.data?.granular_scopes ?? []) {
+    if (g.scope === "ads_management" || g.scope === "ads_read") for (const t of g.target_ids ?? []) ids.add(t.replace(/^act_/, ""));
+  }
+  return [...ids];
+}
+
 export interface AdAccountInfo { id: string; name: string; currency: string; status: number; pixels: { id: string; name: string }[] }
 
 /** Contas de anúncios e pixels que a chave enxerga (para escolher depois do "Conectar com o Facebook"). */
 export async function listAssets(cred: string): Promise<{ accounts: AdAccountInfo[]; pages: { id: string; name: string }[] }> {
   type A = { id: string; name?: string; currency?: string; account_status?: number };
-  const accounts = await pages<A>("me/adaccounts?fields=id,name,currency,account_status&limit=100", cred, 5);
+  const accounts = await pages<A>("me/adaccounts?fields=id,name,currency,account_status&limit=100", cred, 5)
+    .catch(async (e) => {
+      // Login para Empresas: às vezes a Meta recusa a listagem, mas libera as contas marcadas na janela.
+      // Lê essas contas direto das permissões concedidas (granular_scopes).
+      const ids = await grantedAdAccounts(cred).catch(() => [] as string[]);
+      const found: A[] = [];
+      for (const id of ids.slice(0, 40)) {
+        const a = await graph<A>(`act_${id}?fields=id,name,currency,account_status`, cred).catch(() => null);
+        if (a?.id) found.push(a);
+      }
+      if (!found.length) throw e;
+      return found;
+    });
   const out: AdAccountInfo[] = [];
   for (const a of accounts.slice(0, 40)) {
     const px = await pages<{ id: string; name?: string }>(`${a.id}/adspixels?fields=id,name&limit=50`, cred, 2).catch(() => []);
