@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { trackPixel } from "@/components/meta-pixel";
 
 type Intent = "teste" | "especialista";
 const Ctx = createContext<(i: Intent) => void>(() => {});
@@ -43,6 +44,7 @@ export function LeadFormProvider({ children }: { children: React.ReactNode }) {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "Não foi possível enviar. Tente de novo.");
+      trackPixel("Lead", { content_name: intent === "teste" ? "Teste grátis 7 dias" : "Falar com especialista" }, j.eventId ?? undefined);
       if (intent === "teste") {
         const q = new URLSearchParams({ modo: "cadastro", nome: f.nome, ...(f.email ? { email: f.email } : {}) });
         router.push(`/login?${q}`);

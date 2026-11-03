@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { companyLine } from "@/lib/company";
 import { LeadButton, LeadFormProvider } from "./lead-form";
+import { MetaPixel } from "@/components/meta-pixel";
 
 export const metadata: Metadata = {
   title: "Nexo CRM — Pare de perder venda no WhatsApp",
@@ -46,6 +47,7 @@ const FAQ = [
 export default function Conheca() {
   return (
     <LeadFormProvider>
+      <MetaPixel viewContent="Página de vendas Nexo CRM" />
     <main className="min-h-dvh bg-[#060a16] text-slate-200">
       {/* Topo */}
       <section className="relative overflow-hidden px-4 pb-14 pt-10">

@@ -223,7 +223,7 @@ const plain = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerC
 export interface EventCtx {
   eventName: "Lead" | "Purchase"; eventKey: string; value: number | null; currency: string; at: Date;
   lead: { id: string; name: string; phone: string | null; email: string | null };
-  origin: { source_type: string; ctwa_clid: string | null; fbclid: string | null; clickAt: string | null } | null;
+  origin: { source_type: string; ctwa_clid: string | null; fbclid: string | null; clickAt: string | null; url?: string | null } | null;
   wabaId: string | null; pageId: string | null;
 }
 
@@ -248,6 +248,11 @@ export function buildEvent(c: EventCtx): { mode: string; event: Record<string, u
   }
   if (c.origin?.source_type === "anuncio_whatsapp" && c.pageId) {
     return { mode: "whatsapp_pagina", event: { ...base, action_source: "business_messaging", messaging_channel: "whatsapp", user_data: { ...user, page_id: c.pageId, ...(c.origin.ctwa_clid ? { ctwa_clid: c.origin.ctwa_clid } : {}) } } };
+  }
+  // Formulário do site: evento "website" (mesmo id do Lead disparado pelo pixel no navegador, a Meta deduplica)
+  if (c.origin?.source_type === "site") {
+    const url = c.origin.url && /^https?:\/\//.test(c.origin.url) ? c.origin.url : `${process.env.NEXT_PUBLIC_APP_URL || "https://nexo-crm-jet.vercel.app"}${c.origin.url?.startsWith("/") ? c.origin.url : ""}`;
+    return { mode: "site", event: { ...base, action_source: "website", event_source_url: url, user_data: user } };
   }
   return { mode: "pixel", event: { ...base, action_source: "chat", user_data: user } };
 }
@@ -284,7 +289,7 @@ export async function dispatchEvents(limit = 40) {
       }
       const [{ data: lead }, { data: origin }] = await Promise.all([
         db.from("leads").select("id, name, phone, email, value").eq("id", ev.lead_id).maybeSingle(),
-        db.from("lead_origins").select("source_type, ctwa_clid, fbclid, tracking_clicks(created_at)").eq("lead_id", ev.lead_id).maybeSingle(),
+        db.from("lead_origins").select("source_type, ctwa_clid, fbclid, ad_url, tracking_clicks(created_at)").eq("lead_id", ev.lead_id).maybeSingle(),
       ]);
       if (!lead) { await db.from("meta_events").update({ status: "skipped", error: "Lead apagado" }).eq("id", ev.id); continue; }
       const click = origin?.tracking_clicks as { created_at: string } | { created_at: string }[] | null | undefined;
@@ -292,7 +297,7 @@ export async function dispatchEvents(limit = 40) {
         eventName: ev.event_name, eventKey: ev.event_key, value: ev.event_name === "Purchase" ? Number(ev.value ?? lead.value) : null,
         currency: "BRL", at: new Date(ev.created_at), // valores do CRM são em reais; hora da venda/lead, não do envio
         lead: { id: lead.id, name: lead.name, phone: lead.phone, email: lead.email },
-        origin: origin ? { source_type: origin.source_type, ctwa_clid: origin.ctwa_clid, fbclid: origin.fbclid, clickAt: (Array.isArray(click) ? click[0]?.created_at : click?.created_at) ?? null } : null,
+        origin: origin ? { source_type: origin.source_type, ctwa_clid: origin.ctwa_clid, fbclid: origin.fbclid, url: origin.ad_url, clickAt: (Array.isArray(click) ? click[0]?.created_at : click?.created_at) ?? null } : null,
         wabaId: cc.waba, pageId: cc.conn.page_id,
       });
       await graph(`${cc.conn.pixel_id}/events`, cc.cred, { method: "POST", body: { data: [event], partner_agent: "nexocrm" } });

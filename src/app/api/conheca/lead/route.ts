@@ -83,7 +83,8 @@ export async function POST(req: Request) {
     const especialista = s.sales_notify_phone
       ? `https://wa.me/${s.sales_notify_phone}?text=${encodeURIComponent(`Olá! Sou ${b.nome}${b.empresa ? `, da ${b.empresa}` : ""}. Quero falar com um especialista do Nexo CRM. Meu objetivo: ${b.objetivo}`)}`
       : null;
-    return ok({ ok: true, especialista });
+    // Mesmo id do evento Lead que o servidor envia pela API de Conversões (a Meta conta uma vez só)
+    return ok({ ok: true, especialista, eventId: r.isNew ? `lead:${r.leadId}` : null });
   } catch (e) {
     return fail(e);
   }
