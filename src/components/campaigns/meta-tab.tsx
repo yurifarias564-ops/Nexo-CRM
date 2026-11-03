@@ -12,8 +12,8 @@ import { META_ADS_CONFIG_ID } from "@/lib/meta-public";
 
 interface Conn { ad_account_id: string | null; ad_account_name: string | null; currency: string; pixel_id: string | null; page_id: string | null; send_purchase: boolean; send_lead: boolean; last_sync_at: string | null; last_error: string | null }
 interface ConnState { conn: Conn | null; hasCred: boolean; credHint: string | null; waba: boolean }
-interface AdRow { ad_id: string; name: string; status: string | null; campaign: string | null; adset: string | null; thumbnail: string | null; spend: number; impressions: number; reach: number; clicks: number; link_clicks: number; conversations: number; leads: number; sales: number; revenue: number }
-interface Totals { spend: number; impressions: number; clicks: number; conversations: number; leads: number; sales: number; revenue: number }
+interface AdRow { ad_id: string; name: string; status: string | null; campaign: string | null; adset: string | null; thumbnail: string | null; spend: number; impressions: number; reach: number; clicks: number; link_clicks: number; conversations: number; leads: number; sales: number; revenue: number; video_views: number; video_p25: number; video_p50: number; video_p75: number; video_p95: number; video_p100: number; thruplays: number }
+interface Totals { spend: number; impressions: number; clicks: number; conversations: number; leads: number; sales: number; revenue: number; video_views: number; video_p25: number; video_p50: number; video_p75: number; video_p95: number; video_p100: number; thruplays: number }
 interface AdLead { id: string; name: string; phone: string | null; value: number; stage: string | null; won: boolean; created_at: string; conversation_id: string | null; last_message_preview: string | null }
 interface MetaEvent { id: number; event_name: string; value: number | null; status: string; mode: string | null; error: string | null; created_at: string; sent_at: string | null; leads: { name: string } | null }
 
@@ -333,6 +333,8 @@ function AdsBoard({ lastSync, onSynced }: { lastSync: string | null; onSynced: (
             <K label="Impressões" v={t!.impressions.toLocaleString("pt-BR")} />
           </div>
 
+          {t!.video_views > 0 && <VideoFunnel t={t!} />}
+
           {(best.roas || best.sales || best.cpl) && (
             <div className="grid gap-3 md:grid-cols-3">
               {best.roas && <Best icon={Crown} title="Melhor ROAS" ad={best.roas} metric={roas(best.roas)} onOpen={setOpen} />}
@@ -351,10 +353,10 @@ function AdsBoard({ lastSync, onSynced }: { lastSync: string | null; onSynced: (
             </div>
             {!rows.length ? <p className="p-6 text-center text-sm text-slate-500">Nenhum anúncio com números no período. Toque em “Atualizar do Meta”.</p> : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-sm">
+                <table className="w-full min-w-[1140px] text-sm">
                   <thead className="text-left text-xs text-slate-500">
                     <tr>
-                      <th className="px-3 py-2 font-medium">Anúncio</th><th className="px-3 py-2 text-right font-medium">Investido</th><th className="px-3 py-2 text-right font-medium">Cliques</th>
+                      <th className="px-3 py-2 font-medium">Anúncio</th><th className="px-3 py-2 text-right font-medium">Investido</th><th className="px-3 py-2 text-right font-medium" title="Assistiram até o fim">Viu 100%</th><th className="px-3 py-2 text-right font-medium" title="De quem assistiu 3s, quantos foram até o fim">Retenção</th><th className="px-3 py-2 text-right font-medium">Cliques</th>
                       <th className="px-3 py-2 text-right font-medium">Conversas</th><th className="px-3 py-2 text-right font-medium">Leads</th><th className="px-3 py-2 text-right font-medium">CPL</th>
                       <th className="px-3 py-2 text-right font-medium">Vendas</th><th className="px-3 py-2 text-right font-medium">Faturamento</th><th className="px-3 py-2 text-right font-medium">ROAS</th>
                     </tr>
@@ -373,6 +375,8 @@ function AdsBoard({ lastSync, onSynced }: { lastSync: string | null; onSynced: (
                           </div>
                         </td>
                         <td className="px-3 py-2 text-right">{money(r.spend)}</td>
+                        <td className="px-3 py-2 text-right">{r.video_p100 ? r.video_p100.toLocaleString("pt-BR") : "—"}</td>
+                        <td className="px-3 py-2 text-right">{pct(r.video_p100, r.video_views)}</td>
                         <td className="px-3 py-2 text-right">{r.link_clicks || "—"}</td>
                         <td className="px-3 py-2 text-right">{r.conversations || "—"}</td>
                         <td className="px-3 py-2 text-right text-slate-100">{r.leads || "—"}</td>
@@ -391,6 +395,44 @@ function AdsBoard({ lastSync, onSynced }: { lastSync: string | null; onSynced: (
       )}
       {open && <AdLeads ad={open} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(1).replace(".", ",")}%` : "—");
+
+/** Funil do vídeo: de quem viu o anúncio até quem comprou (porcentagem sobre a etapa de referência). */
+function VideoFunnel({ t, compact }: { t: Pick<Totals, "impressions" | "clicks" | "leads" | "sales" | "video_views" | "video_p25" | "video_p50" | "video_p75" | "video_p100" | "thruplays">; compact?: boolean }) {
+  const steps: { l: string; v: number; p: string; hint: string }[] = [
+    { l: "Impressões", v: t.impressions, p: "100%", hint: "vezes que o anúncio apareceu" },
+    { l: "Assistiu 3s", v: t.video_views, p: pct(t.video_views, t.impressions), hint: "taxa de gancho (das impressões)" },
+    { l: "Assistiu 25%", v: t.video_p25, p: pct(t.video_p25, t.video_views), hint: "de quem assistiu 3s" },
+    { l: "Assistiu 50%", v: t.video_p50, p: pct(t.video_p50, t.video_views), hint: "de quem assistiu 3s" },
+    { l: "Assistiu 75%", v: t.video_p75, p: pct(t.video_p75, t.video_views), hint: "de quem assistiu 3s" },
+    { l: "Assistiu 100%", v: t.video_p100, p: pct(t.video_p100, t.video_views), hint: "retenção até o fim" },
+    { l: "Clicou no link", v: t.clicks, p: pct(t.clicks, t.impressions), hint: "CTR (das impressões)" },
+    { l: "Virou lead", v: t.leads, p: pct(t.leads, t.clicks), hint: "dos cliques" },
+    { l: "Comprou", v: t.sales, p: pct(t.sales, t.leads), hint: "dos leads" },
+  ];
+  const max = Math.max(1, t.video_views);
+  return (
+    <section className={cn("rounded-xl border border-line bg-ink-900", compact ? "p-3" : "p-4")}>
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
+        <h3 className="text-sm font-semibold text-white">Funil do vídeo</h3>
+        <span className="text-xs text-slate-500">ThruPlay (15s ou até o fim): {t.thruplays.toLocaleString("pt-BR")} · retenção até o fim: {pct(t.video_p100, t.video_views)}</span>
+      </div>
+      <ul className="space-y-1.5">
+        {steps.map((s, i) => (
+          <li key={s.l} className="grid grid-cols-[110px_1fr_auto] items-center gap-3 text-xs sm:grid-cols-[130px_1fr_auto]">
+            <span className="text-slate-300">{s.l}</span>
+            <span className="h-5 overflow-hidden rounded bg-ink-800">
+              <span className={cn("block h-full rounded", i === 0 ? "bg-slate-600" : i <= 5 ? "bg-brand-500/70" : "bg-emerald-500/70")}
+                style={{ width: `${i === 0 ? 100 : Math.max(s.v > 0 ? 2 : 0, Math.min(100, (s.v / max) * 100))}%` }} />
+            </span>
+            <span className="text-right text-slate-400"><b className="text-white">{s.v.toLocaleString("pt-BR")}</b> · {s.p} <span className="hidden text-slate-500 sm:inline">{s.hint}</span></span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -438,6 +480,7 @@ function AdLeads({ ad, onClose }: { ad: AdRow; onClose: () => void }) {
           </div>
         </div>
         <p className="text-xs text-slate-500">{[ad.campaign, ad.adset].filter(Boolean).join(" › ")}</p>
+        {ad.video_views > 0 && <VideoFunnel t={{ ...ad, clicks: ad.link_clicks }} compact />}
         <h4 className="font-semibold text-white">Leads que vieram deste anúncio</h4>
         {leads === null ? <div className="flex justify-center py-6"><Spinner /></div> : !leads.length ? <p className="text-slate-500">Nenhum lead ligado a este anúncio ainda.</p> : (
           <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">

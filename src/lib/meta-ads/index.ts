@@ -182,14 +182,21 @@ export async function syncAds(orgId: string, since: Date, until: Date) {
       if (error) throw error;
     }
 
-    type Ins = { ad_id: string; date_start: string; spend?: string; impressions?: string; reach?: string; clicks?: string; inline_link_clicks?: string; actions?: { action_type: string; value: string }[] };
+    type Act = { action_type: string; value: string }[];
+    type Ins = { ad_id: string; date_start: string; spend?: string; impressions?: string; reach?: string; clicks?: string; inline_link_clicks?: string; actions?: Act;
+      video_p25_watched_actions?: Act; video_p50_watched_actions?: Act; video_p75_watched_actions?: Act; video_p95_watched_actions?: Act; video_p100_watched_actions?: Act; video_thruplay_watched_actions?: Act };
+    const sum = (a?: Act) => (a ?? []).reduce((t, x) => t + num(x.value), 0);
     const range = encodeURIComponent(JSON.stringify({ since: ymd(since), until: ymd(until) }));
-    const ins = await pages<Ins>(`${conn.ad_account_id}/insights?level=ad&time_increment=1&time_range=${range}&fields=ad_id,spend,impressions,reach,clicks,inline_link_clicks,actions&limit=500`, cred, 40);
+    const ins = await pages<Ins>(`${conn.ad_account_id}/insights?level=ad&time_increment=1&time_range=${range}&fields=ad_id,spend,impressions,reach,clicks,inline_link_clicks,actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions,video_p100_watched_actions,video_thruplay_watched_actions&limit=500`, cred, 40);
     const conv = (a: Ins["actions"]) => num(a?.find((x) => x.action_type === "onsite_conversion.messaging_conversation_started_7d")?.value);
     for (let i = 0; i < ins.length; i += 500) {
       const rows = ins.slice(i, i + 500).map((r) => ({
         organization_id: orgId, ad_id: r.ad_id, day: r.date_start, spend: num(r.spend), impressions: num(r.impressions), reach: num(r.reach),
-        clicks: num(r.clicks), link_clicks: num(r.inline_link_clicks), conversations: conv(r.actions), updated_at: new Date().toISOString(),
+        clicks: num(r.clicks), link_clicks: num(r.inline_link_clicks), conversations: conv(r.actions),
+        // Vídeo: 3s (video_view), quanto assistiram (25/50/75/95/100%) e ThruPlay (15s ou até o fim)
+        video_views: num(r.actions?.find((x) => x.action_type === "video_view")?.value), video_p25: sum(r.video_p25_watched_actions), video_p50: sum(r.video_p50_watched_actions),
+        video_p75: sum(r.video_p75_watched_actions), video_p95: sum(r.video_p95_watched_actions), video_p100: sum(r.video_p100_watched_actions), thruplays: sum(r.video_thruplay_watched_actions),
+        updated_at: new Date().toISOString(),
       }));
       const { error } = await db.from("meta_ad_insights").upsert(rows);
       if (error) throw error;

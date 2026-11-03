@@ -7,7 +7,9 @@ export interface AdRow {
   ad_id: string; name: string; status: string | null; campaign: string | null; adset: string | null; thumbnail: string | null;
   spend: number; impressions: number; reach: number; clicks: number; link_clicks: number; conversations: number;
   leads: number; sales: number; revenue: number;
+  video_views: number; video_p25: number; video_p50: number; video_p75: number; video_p95: number; video_p100: number; thruplays: number;
 }
+const VIDEO = ["video_views", "video_p25", "video_p50", "video_p75", "video_p95", "video_p100", "thruplays"] as const;
 
 type Origin = { lead_id: string; ad_id: string | null; utm_term: string | null; utm_content: string | null; ad_title: string | null };
 type AdMeta = { ad_id: string; name: string | null; status: string | null; campaign_name: string | null; adset_name: string | null; thumbnail_url: string | null };
@@ -44,8 +46,8 @@ export async function adsReport(orgId: string, fromIso: string, toIso: string, f
   const db = supabaseAdmin();
   const { ads, byName, known } = await context(orgId);
   const [ins, stages, origins] = await Promise.all([
-    all<{ ad_id: string; spend: number; impressions: number; reach: number; clicks: number; link_clicks: number; conversations: number }>((a, b) =>
-      db.from("meta_ad_insights").select("ad_id, spend, impressions, reach, clicks, link_clicks, conversations").eq("organization_id", orgId).gte("day", fromDay).lte("day", toDay).order("ad_id").order("day").range(a, b)),
+    all<{ ad_id: string; spend: number; impressions: number; reach: number; clicks: number; link_clicks: number; conversations: number } & Partial<Record<(typeof VIDEO)[number], number>>>((a, b) =>
+      db.from("meta_ad_insights").select("ad_id, spend, impressions, reach, clicks, link_clicks, conversations, video_views, video_p25, video_p50, video_p75, video_p95, video_p100, thruplays").eq("organization_id", orgId).gte("day", fromDay).lte("day", toDay).order("ad_id").order("day").range(a, b)),
     db.from("stages").select("id, kind").eq("organization_id", orgId).then((r) => r.data ?? []),
     all<Origin>((a, b) => db.from("lead_origins").select("lead_id, ad_id, utm_term, utm_content, ad_title").eq("organization_id", orgId).order("lead_id").range(a, b)),
   ]);
@@ -60,7 +62,8 @@ export async function adsReport(orgId: string, fromIso: string, toIso: string, f
     if (!r) {
       const m = meta.get(id);
       r = { ad_id: id, name: m?.name ?? `Anúncio ${id}`, status: m?.status ?? null, campaign: m?.campaign_name ?? null, adset: m?.adset_name ?? null, thumbnail: m?.thumbnail_url ?? null,
-        spend: 0, impressions: 0, reach: 0, clicks: 0, link_clicks: 0, conversations: 0, leads: 0, sales: 0, revenue: 0 };
+        spend: 0, impressions: 0, reach: 0, clicks: 0, link_clicks: 0, conversations: 0, leads: 0, sales: 0, revenue: 0,
+        video_views: 0, video_p25: 0, video_p50: 0, video_p75: 0, video_p95: 0, video_p100: 0, thruplays: 0 };
       rows.set(id, r);
     }
     return r;
@@ -69,6 +72,7 @@ export async function adsReport(orgId: string, fromIso: string, toIso: string, f
     const r = row(i.ad_id);
     r.spend += Number(i.spend) || 0; r.impressions += Number(i.impressions) || 0; r.reach += Number(i.reach) || 0;
     r.clicks += Number(i.clicks) || 0; r.link_clicks += Number(i.link_clicks) || 0; r.conversations += Number(i.conversations) || 0;
+    for (const k of VIDEO) r[k] += Number(i[k]) || 0;
   }
   const ids = [...leadAd.keys()];
   for (let i = 0; i < ids.length; i += 300) {
@@ -84,8 +88,9 @@ export async function adsReport(orgId: string, fromIso: string, toIso: string, f
 
   const list = [...rows.values()].filter((r) => r.spend > 0 || r.leads > 0 || r.sales > 0 || r.status === "ACTIVE")
     .sort((a, b) => b.revenue - a.revenue || b.spend - a.spend || b.leads - a.leads);
-  const totals = list.reduce((t, r) => ({ spend: t.spend + r.spend, impressions: t.impressions + r.impressions, clicks: t.clicks + r.link_clicks, conversations: t.conversations + r.conversations, leads: t.leads + r.leads, sales: t.sales + r.sales, revenue: t.revenue + r.revenue }),
-    { spend: 0, impressions: 0, clicks: 0, conversations: 0, leads: 0, sales: 0, revenue: 0 });
+  const totals = list.reduce((t, r) => ({ spend: t.spend + r.spend, impressions: t.impressions + r.impressions, clicks: t.clicks + r.link_clicks, conversations: t.conversations + r.conversations, leads: t.leads + r.leads, sales: t.sales + r.sales, revenue: t.revenue + r.revenue,
+    video_views: t.video_views + r.video_views, video_p25: t.video_p25 + r.video_p25, video_p50: t.video_p50 + r.video_p50, video_p75: t.video_p75 + r.video_p75, video_p95: t.video_p95 + r.video_p95, video_p100: t.video_p100 + r.video_p100, thruplays: t.thruplays + r.thruplays }),
+    { spend: 0, impressions: 0, clicks: 0, conversations: 0, leads: 0, sales: 0, revenue: 0, video_views: 0, video_p25: 0, video_p50: 0, video_p75: 0, video_p95: 0, video_p100: 0, thruplays: 0 });
   return { rows: list, totals };
 }
 
