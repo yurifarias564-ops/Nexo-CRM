@@ -14,8 +14,7 @@ const ip = (req: Request) => req.headers.get("x-forwarded-for")?.split(",")[0]?.
 export async function GET(req: Request, { params }: { params: Promise<{ token: string }> }) {
   try {
     const { token } = await params;
-    await rateLimit(`chk-get:${ip(req)}`, 600, 3600);
-    const { orgId, orgName } = await orgByToken(token);
+    const [, { orgId, orgName }] = await Promise.all([rateLimit(`chk-get:${ip(req)}`, 600, 3600), orgByToken(token)]);
     const db = supabaseAdmin();
     const q = new URL(req.url).searchParams;
     const scope = q.get("scope") ?? "base";
@@ -41,7 +40,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
       return ok({ values: data ?? [] });
     }
     if (scope === "sales") {
-      const { data, error } = await db.from("team_sales").select("id, seller_id, store_id, sdr_id, day, value, os_number, note, created_at")
+      const { data, error } = await db.from("team_sales").select("id, seller_id, store_id, sdr_id, day, value, os_number, channel, note, created_at")
         .eq("organization_id", orgId).gte("day", from).lte("day", to).order("created_at", { ascending: false }).limit(5000);
       if (error) throw error;
       return ok({ sales: data ?? [] });
@@ -62,7 +61,7 @@ const day = z.string().regex(DAY);
 const Body = z.discriminatedUnion("op", [
   z.object({ op: z.literal("entry"), seller_id: z.string().uuid(), metric_id: z.string().uuid(), day, value: z.number().min(0).max(1_000_000) }),
   z.object({ op: z.literal("note"), seller_id: z.string().uuid(), day, body: z.string().max(8000) }),
-  z.object({ op: z.literal("sale"), seller_id: z.string().uuid(), day, value: z.number().min(0).max(100_000_000), os_number: z.string().max(40).nullable(), sdr_id: z.string().uuid().nullable() }),
+  z.object({ op: z.literal("sale"), seller_id: z.string().uuid(), day, value: z.number().min(0).max(100_000_000), os_number: z.string().max(40).nullable(), sdr_id: z.string().uuid().nullable(), channel: z.string().trim().min(1).max(40).nullable().optional() }),
   z.object({ op: z.literal("deleteSale"), id: z.string().uuid() }),
 ]);
 
@@ -70,8 +69,7 @@ const Body = z.discriminatedUnion("op", [
 export async function POST(req: Request, { params }: { params: Promise<{ token: string }> }) {
   try {
     const { token } = await params;
-    await rateLimit(`chk-post:${token}`, 1200, 3600, "Muitas alterações seguidas. Aguarde um pouco.");
-    const { orgId } = await orgByToken(token);
+    const [, { orgId }] = await Promise.all([rateLimit(`chk-post:${token}`, 1200, 3600, "Muitas alterações seguidas. Aguarde um pouco."), orgByToken(token)]);
     const b = Body.parse(await readJson(req, 12_000));
     const db = supabaseAdmin();
     const sellerOk = async (id: string) => {
@@ -98,8 +96,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
       return ok({ note: data });
     }
     if (b.sdr_id) await sellerOk(b.sdr_id);
-    const { data, error } = await db.from("team_sales").insert({ organization_id: orgId, seller_id: b.seller_id, day: b.day, value: b.value, os_number: b.os_number, sdr_id: b.sdr_id, created_by: null })
-      .select("id, seller_id, store_id, sdr_id, day, value, os_number, note, created_at").single();
+    const { data, error } = await db.from("team_sales").insert({ organization_id: orgId, seller_id: b.seller_id, day: b.day, value: b.value, os_number: b.os_number, sdr_id: b.sdr_id, channel: b.channel ?? null, created_by: null })
+      .select("id, seller_id, store_id, sdr_id, day, value, os_number, channel, note, created_at").single();
     if (error) throw error;
     return ok({ sale: data }, 201);
   } catch (e) {

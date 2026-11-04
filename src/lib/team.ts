@@ -14,7 +14,7 @@ export interface TeamMetric {
 }
 export interface TeamSellerGoal { seller_id: string; metric_id: string; daily_target: number | null; weekly_target: number | null; monthly_target: number | null }
 export interface TeamValue { seller_id: string; metric_id: string; day: string; value: number }
-export interface TeamSale { id: string; seller_id: string; store_id: string | null; sdr_id: string | null; day: string; value: number; os_number: string | null; note: string | null; created_at: string }
+export interface TeamSale { id: string; seller_id: string; store_id: string | null; sdr_id: string | null; day: string; value: number; os_number: string | null; channel: string | null; note: string | null; created_at: string }
 export interface TeamNote { seller_id: string; day: string; body: string; updated_at: string }
 export interface TeamSettings { cycle_start: string | null; baseline: Record<string, number>; baseline_note: string | null }
 

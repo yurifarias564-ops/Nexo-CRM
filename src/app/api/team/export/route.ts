@@ -37,7 +37,7 @@ export async function GET(req: Request) {
       sb.from("team_settings").select("baseline").eq("organization_id", org).maybeSingle(),
       sb.rpc("team_values", { org, p_from: from, p_to: to, tz }),
       sb.rpc("team_values", { org, p_from: pfrom, p_to: pto, tz }),
-      sb.from("team_sales").select("id, seller_id, store_id, sdr_id, day, value, os_number, note, created_at").eq("organization_id", org).gte("day", from).lte("day", to).order("created_at"),
+      sb.from("team_sales").select("id, seller_id, store_id, sdr_id, day, value, os_number, channel, note, created_at").eq("organization_id", org).gte("day", from).lte("day", to).order("created_at"),
       sb.from("team_notes").select("seller_id, day, body, updated_at").eq("organization_id", org).gte("day", from).lte("day", to).order("day"),
     ]);
     if (cur.error) throw cur.error;
@@ -138,9 +138,9 @@ export async function GET(req: Request) {
 
     // OS registradas
     const wo = wb.addWorksheet("OS registradas");
-    wo.columns = [{ header: "Data", key: "d", width: 12 }, { header: "Hora", key: "h", width: 8 }, { header: "Closer", key: "c", width: 18 }, { header: "Loja", key: "l", width: 12 }, { header: "Nº OS", key: "n", width: 12 }, { header: "Valor", key: "v", width: 14 }, { header: "Origem (SDR)", key: "s", width: 18 }];
+    wo.columns = [{ header: "Data", key: "d", width: 12 }, { header: "Hora", key: "h", width: 8 }, { header: "Closer", key: "c", width: 18 }, { header: "Loja", key: "l", width: 12 }, { header: "Nº OS", key: "n", width: 12 }, { header: "Valor", key: "v", width: 14 }, { header: "Origem (SDR)", key: "s", width: 18 }, { header: "Canal", key: "ch", width: 16 }];
     for (const x of sales) {
-      const r = wo.addRow({ d: new Date(`${x.day}T12:00:00Z`), h: new Date(x.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: tz }), c: name(x.seller_id), l: storeName(x.store_id), n: x.os_number ?? "", v: x.value, s: x.sdr_id ? name(x.sdr_id) : "Direto" });
+      const r = wo.addRow({ d: new Date(`${x.day}T12:00:00Z`), h: new Date(x.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: tz }), c: name(x.seller_id), l: storeName(x.store_id), n: x.os_number ?? "", v: x.value, s: x.sdr_id ? name(x.sdr_id) : "Direto", ch: x.channel ?? "" });
       r.getCell("d").numFmt = "dd/mm/yyyy"; r.getCell("v").numFmt = money;
     }
     styleHeader(wo);

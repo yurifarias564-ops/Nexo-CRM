@@ -216,7 +216,7 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
   const revenueGoal = store?.revenue_goal ?? null;
   const daysLeft = weekdaysBetween(day > period.from ? day : period.from, period.to);
   const left = revenueGoal ? Math.max(0, revenueGoal - storeFat) : 0;
-  const mySalesToday = sales.filter((s) => s.seller_id === seller.id && s.day === day);
+  const mySales = sales.filter((s) => s.seller_id === seller.id && inPeriod(s.day));
   const fromMe = sales.filter((s) => s.sdr_id === seller.id && inPeriod(s.day));
   const isCloser = seller.role === "closer" || (!seller.role && !!osM);
 
@@ -339,7 +339,7 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
       <NotesCard seller={seller} day={day} today={today} canFill={canFill} notes={notes} setNotes={setNotes} append={null} />
 
       {isCloser && (osM || fatM) && (
-        <RegisterSale base={base} seller={seller} day={day} canFill={canFill} todays={mySalesToday} setSales={setSales} setValues={setValues} osM={osM} fatM={fatM} />
+        <RegisterSale base={base} seller={seller} day={day} today={today} canFill={canFill} mine={mySales} setSales={setSales} setValues={setValues} osM={osM} fatM={fatM} />
       )}
 
       {seller.role === "closer" && <SdrNotes base={base} seller={seller} day={day} notes={notes} />}
@@ -459,28 +459,33 @@ function NotesCard({ seller, day, today, canFill, notes, setNotes, append }: {
   );
 }
 
-function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues, osM, fatM }: {
-  base: TeamBase; seller: TeamSeller; day: string; canFill: boolean; todays: TeamSale[];
+const SALE_CHANNELS = ["Loja (presencial)", "WhatsApp", "Instagram", "TikTok", "Facebook", "Indicação", "Ligação", "Cliente antigo / troca", "Outro"];
+
+function RegisterSale({ base, seller, day, today, canFill, mine, setSales, setValues, osM, fatM }: {
+  base: TeamBase; seller: TeamSeller; day: string; today: string; canFill: boolean; mine: TeamSale[];
   setSales: React.Dispatch<React.SetStateAction<TeamSale[]>>; setValues: React.Dispatch<React.SetStateAction<TeamValue[] | null>>;
   osM: TeamMetric | undefined; fatM: TeamMetric | undefined;
 }) {
   const api = useTeamApi();
   const [open, setOpen] = useState(false);
+  const [saleDay, setSaleDay] = useState(day);
+  const [channel, setChannel] = useState("");
   const [value, setValue] = useState("");
   const [osNumber, setOsNumber] = useState("");
   const [sdr, setSdr] = useState("");
   const [busy, setBusy] = useState(false);
   const sdrs = base.sellers.filter((s) => s.active && s.role === "sdr");
   const storeName = (id: string | null) => base.stores.find((s) => s.id === id)?.name;
+  const withValue = !!fatM;
 
-  function bump(n: number, val: number) {
+  function bump(d: string, n: number, val: number) {
     setValues((vals) => {
       const out = [...(vals ?? [])];
       const add = (mid: string | undefined, amount: number) => {
-        if (!mid) return;
-        const i = out.findIndex((x) => x.seller_id === seller.id && x.metric_id === mid && x.day === day);
+        if (!mid || !amount) return;
+        const i = out.findIndex((x) => x.seller_id === seller.id && x.metric_id === mid && x.day === d);
         if (i >= 0) out[i] = { ...out[i]!, value: out[i]!.value + amount };
-        else out.push({ seller_id: seller.id, metric_id: mid, day, value: amount });
+        else out.push({ seller_id: seller.id, metric_id: mid, day: d, value: amount });
       };
       add(osM?.id, n);
       add(fatM?.id, val);
@@ -488,67 +493,81 @@ function RegisterSale({ base, seller, day, canFill, todays, setSales, setValues,
     });
   }
 
+  function openForm() { setSaleDay(day); setOpen(true); }
+
   async function register() {
-    const val = parseBRL(value) ?? 0;
+    const val = withValue ? parseBRL(value) ?? 0 : 0;
     if (val < 0) return toast.error("Valor inválido");
+    if (!saleDay || saleDay > today) return toast.error("Escolha a data da venda (não pode ser no futuro)");
+    if (!channel) return toast.error("Escolha o canal da venda");
     if (sdrs.length && !sdr) return toast.error("Escolha de onde veio o cliente");
     setBusy(true);
     let data: TeamSale;
     try {
-      data = await api.insertSale({ seller_id: seller.id, day, value: val, os_number: osNumber.trim().slice(0, 40) || null, sdr_id: sdr && sdr !== "direto" ? sdr : null });
+      data = await api.insertSale({ seller_id: seller.id, day: saleDay, value: val, os_number: osNumber.trim().slice(0, 40) || null, sdr_id: sdr && sdr !== "direto" ? sdr : null, channel });
     } catch (e) { setBusy(false); return toast.error((e as Error).message); }
     setBusy(false);
     setSales((s) => [data, ...s]);
-    bump(1, val);
-    toast.success(`Venda registrada${val ? ` · ${fmtBRL(val)}` : ""}`);
-    setValue(""); setOsNumber(""); setSdr(""); setOpen(false);
+    bump(saleDay, 1, val);
+    toast.success(`Venda registrada · ${fmtDayFull(saleDay)} · ${channel}`);
+    setValue(""); setOsNumber(""); setSdr(""); setChannel(""); setOpen(false);
   }
 
   async function remove(s: TeamSale) {
-    if (!confirm(`Apagar a venda${s.os_number ? ` ${s.os_number}` : ""} de ${fmtBRL(s.value)}?`)) return;
+    if (!confirm(`Apagar a venda de ${fmtDayFull(s.day)}${s.channel ? ` (${s.channel})` : ""}?`)) return;
     try { await api.deleteSale(s.id); } catch (e) { return toast.error((e as Error).message); }
     setSales((all) => all.filter((x) => x.id !== s.id));
-    bump(-1, -s.value);
+    bump(s.day, -1, -s.value);
   }
+
+  const list = [...mine].sort((x, y) => (y.day + y.created_at).localeCompare(x.day + x.created_at)).slice(0, 15);
 
   return (
     <div className="card p-4 sm:p-5">
-      <h4 className="font-semibold text-white">Registrar venda</h4>
+      <h4 className="font-semibold text-white">Vendas</h4>
       {!open ? (
-        <div className="mt-3 flex items-center gap-3">
-          <button type="button" disabled={!canFill} onClick={() => setOpen(true)}
-            className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-1.5 pl-1.5 pr-4 text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/25"><Trophy className="h-4 w-4" /></span>
-            <span className="font-mono text-xs font-semibold uppercase tracking-wider">Venda</span>
-          </button>
-          <span className="text-sm text-slate-400">Fechou uma venda agora? Clica pra registrar com o valor.</span>
-        </div>
+        <button type="button" disabled={!canFill} onClick={openForm}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-40 sm:w-auto">
+          <Trophy className="h-4 w-4" /> Registrar venda
+        </button>
       ) : (
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <label className="block"><span className="label">Valor (R$)</span>
-            <input className="field" inputMode="decimal" autoFocus placeholder="Ex.: 1.850,00" value={value} onChange={(e) => setValue(e.target.value)} /></label>
-          <label className="block"><span className="label">Nº do pedido (opcional)</span>
-            <input className="field" maxLength={40} value={osNumber} onChange={(e) => setOsNumber(e.target.value)} /></label>
-          <label className="block"><span className="label">De onde veio</span>
-            <select className="field" value={sdr} onChange={(e) => setSdr(e.target.value)}>
-              <option value="">{sdrs.length ? "Escolha…" : "Direto"}</option>
-              {sdrs.map((s) => <option key={s.id} value={s.id}>SDR: {s.name}{storeName(s.store_id) ? ` (${storeName(s.store_id)})` : ""}</option>)}
-              {sdrs.length > 0 && <option value="direto">Direto — cliente chegou sozinho</option>}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block"><span className="label">Data da venda</span>
+            <input type="date" className="field" max={today} value={saleDay} onChange={(e) => setSaleDay(e.target.value)} /></label>
+          <label className="block"><span className="label">Canal da venda</span>
+            <select className="field" value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <option value="">Escolha…</option>
+              {SALE_CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
             </select></label>
-          <div className="flex justify-end gap-2 sm:col-span-3">
+          {withValue && (
+            <>
+              <label className="block"><span className="label">Valor (R$)</span>
+                <input className="field" inputMode="decimal" placeholder="Ex.: 1.850,00" value={value} onChange={(e) => setValue(e.target.value)} /></label>
+              <label className="block"><span className="label">Nº do pedido (opcional)</span>
+                <input className="field" maxLength={40} value={osNumber} onChange={(e) => setOsNumber(e.target.value)} /></label>
+            </>
+          )}
+          {sdrs.length > 0 && (
+            <label className="block"><span className="label">De onde veio</span>
+              <select className="field" value={sdr} onChange={(e) => setSdr(e.target.value)}>
+                <option value="">Escolha…</option>
+                {sdrs.map((s) => <option key={s.id} value={s.id}>SDR: {s.name}{storeName(s.store_id) ? ` (${storeName(s.store_id)})` : ""}</option>)}
+                <option value="direto">Direto — cliente chegou sozinho</option>
+              </select></label>
+          )}
+          <div className="flex justify-end gap-2 sm:col-span-2">
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={register} loading={busy}><Trophy className="h-4 w-4" /> Registrar venda</Button>
+            <Button onClick={register} loading={busy}><Trophy className="h-4 w-4" /> Salvar venda</Button>
           </div>
         </div>
       )}
-      {todays.length > 0 && (
+      {list.length > 0 && (
         <ul className="mt-4 divide-y divide-line rounded-lg border border-line">
-          {todays.map((s) => (
+          {list.map((s) => (
             <li key={s.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-              <span className="font-mono text-xs text-slate-500">{new Date(s.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
-              <span className="font-semibold text-white">{fmtBRL(s.value)}</span>
-              {s.os_number && <span className="font-mono text-xs text-slate-400">#{s.os_number}</span>}
-              <span className="min-w-0 flex-1 truncate text-xs text-slate-400">{s.sdr_id ? `via ${base.sellers.find((x) => x.id === s.sdr_id)?.name ?? "SDR"}` : "direto"}</span>
+              <span className="font-mono text-xs text-slate-400">{fmtDayFull(s.day)}</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-white">{s.channel ?? (s.sdr_id ? `via ${base.sellers.find((x) => x.id === s.sdr_id)?.name ?? "SDR"}` : "Direto")}</span>
+              {s.value > 0 && <span className="font-mono text-xs text-slate-300">{fmtBRL(s.value)}</span>}
               {canFill && <button type="button" onClick={() => void remove(s)} className="rounded p-1 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Apagar venda"><Trash2 className="h-3.5 w-3.5" /></button>}
             </li>
           ))}

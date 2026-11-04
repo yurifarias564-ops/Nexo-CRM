@@ -70,7 +70,7 @@ export async function fetchValues(orgId: string, from: string, to: string, tz: s
 
 export async function fetchSales(orgId: string, from: string, to: string): Promise<TeamSale[]> {
   const { data, error } = await supabaseBrowser().from("team_sales")
-    .select("id, seller_id, store_id, sdr_id, day, value, os_number, note, created_at")
+    .select("id, seller_id, store_id, sdr_id, day, value, os_number, channel, note, created_at")
     .eq("organization_id", orgId).gte("day", from).lte("day", to).order("created_at", { ascending: false }).limit(5000);
   if (error) throw error;
   return ((data ?? []) as TeamSale[]).map((x) => ({ ...x, value: Number(x.value) }));
@@ -101,7 +101,7 @@ export interface TeamApi {
   notes(from: string, to: string): Promise<TeamNote[]>;
   upsertEntry(e: { seller_id: string; metric_id: string; day: string; value: number }): Promise<void>;
   upsertNote(e: { seller_id: string; day: string; body: string }): Promise<TeamNote>;
-  insertSale(e: { seller_id: string; day: string; value: number; os_number: string | null; sdr_id: string | null }): Promise<TeamSale>;
+  insertSale(e: { seller_id: string; day: string; value: number; os_number: string | null; sdr_id: string | null; channel: string | null }): Promise<TeamSale>;
   deleteSale(id: string): Promise<void>;
   voice(audio: Blob | null, sellerId: string, text: string): Promise<VoiceFill>;
   /** Avisa quando algo muda (tempo real no CRM; consulta periódica no link). */
@@ -109,7 +109,7 @@ export interface TeamApi {
 }
 
 export function loginTeamApi(orgId: string, userId: string, canManage: boolean): TeamApi {
-  const sel = "id, seller_id, store_id, sdr_id, day, value, os_number, note, created_at";
+  const sel = "id, seller_id, store_id, sdr_id, day, value, os_number, channel, note, created_at";
   return {
     key: orgId, userId, canManage, isPublic: false,
     values: (f, t, tz) => fetchValues(orgId, f, t, tz),
