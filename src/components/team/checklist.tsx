@@ -10,7 +10,6 @@ import {
   stepperMetrics, todayIn, totals, weekdaysBetween, weekStart, type TeamMetric, type TeamNote, type TeamRole, type TeamSale, type TeamSeller, type TeamValue,
 } from "@/lib/team";
 import { browserTz, useTeamApi, type TeamBase } from "./data";
-import { VoiceFillButton } from "./voice-fill";
 
 type Group = TeamRole | "todos";
 const GROUP_TITLE: Record<Group, string> = { sdr: "SDR", closer: "Closer", todos: "Equipe" };
@@ -157,7 +156,6 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
   const store = base.stores.find((s) => s.id === seller.store_id) ?? null;
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, "saving" | "ok">>({});
-  const [voiceNote, setVoiceNote] = useState<{ t: string; n: number } | null>(null);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const wk = weekStart(day);
@@ -204,21 +202,6 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
       const parent = base.metrics.find((x) => x.id === m.result_of);
       if (parent) setValue(parent, String(cur(parent.id) + 1));
     }
-  }
-
-  /** Áudio do vendedor: soma o que ele contou em cada atividade (e guarda o resto nas notas). */
-  function applyVoice(updates: { metric_id: string; add: number }[]) {
-    const byId = new Map(base.metrics.map((m) => [m.id, m]));
-    // Resultado também soma na atividade principal (igual ao +)
-    const add = new Map<string, number>();
-    for (const u of updates) {
-      const m = byId.get(u.metric_id);
-      if (!m || u.add <= 0) continue;
-      add.set(m.id, (add.get(m.id) ?? 0) + u.add);
-      if (m.result_of && !updates.some((x) => x.metric_id === m.result_of)) add.set(m.result_of, (add.get(m.result_of) ?? 0) + u.add);
-    }
-    for (const [id, n] of add) { const m = byId.get(id)!; setValue(m, String(cur(id) + n)); }
-    return [...add.keys()].map((id) => byId.get(id)!.name);
   }
 
   // Painel da loja / OS
@@ -304,8 +287,7 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
       {/* Metas do dia */}
       <div className="card p-4 sm:p-5">
         {allDone && <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300"><Check className="h-3.5 w-3.5" /> Meta de hoje batida</span>}
-        {canFill && steppers.length > 0 && <VoiceFillButton seller={seller} onFill={applyVoice} onNote={(t) => setVoiceNote((p) => ({ t, n: (p?.n ?? 0) + 1 }))} />}
-        {steppers.length ? <p className="mb-3 text-xs text-slate-500">Fez muitas de uma vez? Toque no número e digite direto, ou mande um áudio contando o seu dia.</p>
+        {steppers.length ? <p className="mb-3 text-xs text-slate-500">Fez muitas de uma vez? Toque no número e digite direto.</p>
           : <p className="text-sm text-slate-400">Nenhuma atividade manual para sua função.{isCloser ? " Suas vendas entram pelo card abaixo." : ""}</p>}
         <ul className="divide-y divide-line">
           {steppers.map((m) => {
@@ -354,7 +336,7 @@ function SellerChecklist({ base, seller, day, today, setDay, period, values, set
         </ul>
       </div>
 
-      <NotesCard seller={seller} day={day} today={today} canFill={canFill} notes={notes} setNotes={setNotes} append={voiceNote} />
+      <NotesCard seller={seller} day={day} today={today} canFill={canFill} notes={notes} setNotes={setNotes} append={null} />
 
       {isCloser && (osM || fatM) && (
         <RegisterSale base={base} seller={seller} day={day} canFill={canFill} todays={mySalesToday} setSales={setSales} setValues={setValues} osM={osM} fatM={fatM} />
