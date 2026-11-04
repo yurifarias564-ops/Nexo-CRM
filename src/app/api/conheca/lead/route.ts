@@ -15,8 +15,8 @@ const Body = z.object({
   whatsapp: z.string().trim().min(8).max(30),
   email: z.string().trim().email().max(160).optional().or(z.literal("")),
   empresa: z.string().trim().max(80).optional().or(z.literal("")),
-  nicho: z.string().trim().min(2).max(60),
-  objetivo: z.string().trim().min(2).max(300),
+  nicho: z.string().trim().max(60).optional().or(z.literal("")),
+  objetivo: z.string().trim().max(300).optional().or(z.literal("")),
   intent: z.enum(["teste", "especialista"]),
   utm: z.record(z.string(), z.string().max(120)).optional(),
   site: z.string().max(0).optional(), // armadilha anti-robô: tem que vir vazio
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     const campanha = b.utm?.utm_campaign ? `${b.utm.utm_source ?? ""} / ${b.utm.utm_campaign}`.trim() : null;
     const r = await saveInbound(channel.organization_id, "Anúncio Meta", {
       name: b.nome, phone, email: b.email || null,
-      message: [`Quer: ${quer}`, `Nicho: ${b.nicho}`, b.empresa ? `Empresa: ${b.empresa}` : null, `Objetivo com o CRM: ${b.objetivo}`].filter(Boolean).join("\n"),
+      message: [`Quer: ${quer}`, b.nicho ? `Nicho: ${b.nicho}` : null, b.empresa ? `Empresa: ${b.empresa}` : null, b.objetivo ? `Objetivo com o CRM: ${b.objetivo}` : null].filter(Boolean).join("\n"),
       ad: campanha ? `Página de vendas (${campanha})` : "Página de vendas /conheca", adUrl: null, vehicle: null, price: null,
       chatId: null, messageId: null, listId: null, fromSeller: false,
     });
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
         ad_url: "/conheca",
       }, { onConflict: "lead_id", ignoreDuplicates: true }).then(() => undefined, (e) => console.error("[conheca] origem", e));
     }
-    await db.from("leads").update({ notes: [`Nicho: ${b.nicho}`, `Objetivo: ${b.objetivo}`, `Quer: ${quer}`].join(" · ").slice(0, 500) }).eq("id", r.leadId).then(() => undefined, () => undefined);
+    await db.from("leads").update({ notes: [b.nicho ? `Nicho: ${b.nicho}` : null, b.objetivo ? `Objetivo: ${b.objetivo}` : null, `Quer: ${quer}`].filter(Boolean).join(" · ").slice(0, 500) }).eq("id", r.leadId).then(() => undefined, () => undefined);
 
     // Aviso no WhatsApp do dono (não trava o cadastro se o WhatsApp falhar)
     const aviso = [
@@ -68,8 +68,8 @@ export async function POST(req: Request) {
       "",
       `👤 *Nome:* ${b.nome}`,
       b.empresa ? `🏢 *Empresa:* ${b.empresa}` : null,
-      `🏷️ *Nicho:* ${b.nicho}`,
-      `🎯 *Objetivo:* ${b.objetivo}`,
+      b.nicho ? `🏷️ *Nicho:* ${b.nicho}` : null,
+      b.objetivo ? `🎯 *Objetivo:* ${b.objetivo}` : null,
       `📱 *WhatsApp:* https://wa.me/${phone}`,
       b.email ? `✉️ *E-mail:* ${b.email}` : null,
       campanha ? `📣 *Origem:* ${campanha}` : null,
@@ -81,7 +81,7 @@ export async function POST(req: Request) {
     if (r.isNew) after(() => processAutomations().then(() => undefined, (e) => console.error("[conheca] automações", e)));
 
     const especialista = s.sales_notify_phone
-      ? `https://wa.me/${s.sales_notify_phone}?text=${encodeURIComponent(`Olá! Sou ${b.nome}${b.empresa ? `, da ${b.empresa}` : ""}. Quero falar com um especialista do Nexo CRM. Meu objetivo: ${b.objetivo}`)}`
+      ? `https://wa.me/${s.sales_notify_phone}?text=${encodeURIComponent(`Olá! Sou ${b.nome}${b.empresa ? `, da ${b.empresa}` : ""}. Quero falar com um especialista do Nexo CRM.${b.objetivo ? ` Meu objetivo: ${b.objetivo}` : ""}`)}`
       : null;
     // Mesmo id do evento Lead que o servidor envia pela API de Conversões (a Meta conta uma vez só)
     return ok({ ok: true, especialista, eventId: r.isNew ? `lead:${r.leadId}` : null });

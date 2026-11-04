@@ -7,7 +7,25 @@ type Intent = "teste" | "especialista";
 const Ctx = createContext<(i: Intent) => void>(() => {});
 
 const NICHOS = ["Loja de veículos (carros/motos)", "Clínica / estética / saúde", "Moda e varejo", "Imobiliária", "Serviços (assistência, manutenção…)", "Educação / cursos", "Outro"];
-const OBJETIVOS = ["Responder os clientes mais rápido", "Parar de perder lead no WhatsApp", "Organizar o funil de vendas", "IA atendendo 24h", "Controlar a equipe de vendedores", "Saber qual anúncio vende"];
+
+/**
+ * Botão "Falar no WhatsApp": passa pelo link rastreado do CRM (/r/nexo-conheca), que registra o clique com as UTMs
+ * do anúncio e abre o WhatsApp com um protocolo. Quando a pessoa envia, o lead entra no funil ligado ao anúncio.
+ */
+export function WhatsAppButton({ className, children }: { className?: string; children: React.ReactNode }) {
+  // Monta o link na hora do toque (UTMs do anúncio + página de origem)
+  function go(e: React.MouseEvent<HTMLAnchorElement>) {
+    const q = new URLSearchParams();
+    new URLSearchParams(window.location.search).forEach((v, k) => { if (k.startsWith("utm_") || k === "fbclid") q.set(k, v.slice(0, 200)); });
+    q.set("page", window.location.pathname);
+    if (document.referrer) q.set("ref", document.referrer.slice(0, 300));
+    e.currentTarget.href = `/r/nexo-conheca?${q.toString()}`;
+    trackPixel("Contact", { content_name: "WhatsApp /conheca" });
+  }
+  // /r/ é uma rota do servidor que redireciona para o WhatsApp (não é página do app)
+  // eslint-disable-next-line @next/next/no-html-link-for-pages
+  return <a href="/r/nexo-conheca" onClick={go} className={className}>{children}</a>;
+}
 
 /** Botão que abre o formulário (dentro da página de vendas). */
 export function LeadButton({ intent = "teste", className, children }: { intent?: Intent; className?: string; children: React.ReactNode }) {
@@ -77,24 +95,21 @@ export function LeadFormProvider({ children }: { children: React.ReactNode }) {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-xl font-bold text-white">{intent === "teste" ? "Comece seus 7 dias grátis" : "Fale com um especialista"}</h3>
-                    <p className="mt-1 text-sm text-slate-400">{intent === "teste" ? "Leva 30 segundos. Depois é só criar sua senha." : "A gente te chama no WhatsApp e monta tudo com você."}</p>
+                    <p className="mt-1 text-sm text-slate-400">{intent === "teste" ? "Só nome e WhatsApp. Depois é só criar sua senha." : "A gente te chama no WhatsApp e monta tudo com você."}</p>
                   </div>
                   <button type="button" onClick={() => setIntent(null)} className="text-2xl leading-none text-slate-500" aria-label="Fechar">×</button>
                 </div>
                 <input className={field} placeholder="Seu nome" required minLength={2} maxLength={80} value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} autoComplete="name" />
                 <input className={field} placeholder="WhatsApp com DDD" required inputMode="tel" value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} autoComplete="tel" />
-                {intent === "teste" && <input className={field} type="email" placeholder="E-mail (para entrar no CRM)" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} autoComplete="email" />}
-                <input className={field} placeholder="Nome da empresa (opcional)" maxLength={80} value={f.empresa} onChange={(e) => setF({ ...f, empresa: e.target.value })} autoComplete="organization" />
-                <select className={field} required value={f.nicho} onChange={(e) => setF({ ...f, nicho: e.target.value })}>
-                  <option value="" disabled>Qual o seu segmento?</option>
-                  {NICHOS.map((n) => <option key={n}>{n}</option>)}
-                </select>
-                <select className={field} required value={f.objetivo} onChange={(e) => setF({ ...f, objetivo: e.target.value })}>
-                  <option value="" disabled>O que você quer resolver com o CRM?</option>
-                  {OBJETIVOS.map((n) => <option key={n}>{n}</option>)}
-                  <option>Outro</option>
-                </select>
-                {f.objetivo === "Outro" && <input className={field} placeholder="Conte em poucas palavras" maxLength={200} value={f.outro} onChange={(e) => setF({ ...f, outro: e.target.value })} />}
+                {intent === "especialista" && (
+                  <>
+                    <input className={field} placeholder="Nome da empresa (opcional)" maxLength={80} value={f.empresa} onChange={(e) => setF({ ...f, empresa: e.target.value })} autoComplete="organization" />
+                    <select className={field} value={f.nicho} onChange={(e) => setF({ ...f, nicho: e.target.value })}>
+                      <option value="">Qual o seu segmento? (opcional)</option>
+                      {NICHOS.map((n) => <option key={n}>{n}</option>)}
+                    </select>
+                  </>
+                )}
                 <input tabIndex={-1} autoComplete="off" className="hidden" value={f.site} onChange={(e) => setF({ ...f, site: e.target.value })} aria-hidden />
                 {err && <p className="rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{err}</p>}
                 <button type="submit" disabled={busy} className="flex h-13 w-full items-center justify-center rounded-xl bg-[#2563eb] py-3.5 text-base font-semibold text-white disabled:opacity-60">

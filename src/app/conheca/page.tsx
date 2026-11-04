@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { companyLine } from "@/lib/company";
-import { LeadButton, LeadFormProvider } from "./lead-form";
+import { LeadButton, LeadFormProvider, WhatsAppButton } from "./lead-form";
 import { MetaPixel } from "@/components/meta-pixel";
 
 export const metadata: Metadata = {
@@ -11,15 +11,17 @@ export const metadata: Metadata = {
 function Button({ children = "Começar meus 7 dias grátis" }: { children?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row">
-      <LeadButton intent="teste" className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#2563eb] px-6 text-base font-semibold text-white shadow-[0_12px_40px_-10px_rgba(37,99,235,.9)] transition hover:bg-[#3b82f6] sm:w-auto">
+      <WhatsAppButton className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#22c55e] px-6 text-base font-semibold text-white shadow-[0_12px_40px_-10px_rgba(34,197,94,.8)] transition hover:bg-[#16a34a] sm:w-auto">
+        <span aria-hidden>💬</span> Falar no WhatsApp agora
+      </WhatsAppButton>
+      <LeadButton intent="teste" className="inline-flex h-14 w-full items-center justify-center rounded-2xl border border-white/20 px-6 text-base font-semibold text-white transition hover:bg-white/5 sm:w-auto">
         {children} →
-      </LeadButton>
-      <LeadButton intent="especialista" className="inline-flex h-14 w-full items-center justify-center rounded-2xl border border-white/20 px-6 text-base font-semibold text-white transition hover:bg-white/5 sm:w-auto">
-        Falar com um especialista
       </LeadButton>
     </div>
   );
 }
+
+const HERO = ["A IA responde seus clientes em segundos, 24h por dia", "Nenhum lead esquecido: funil organizado sozinho", "Implantação feita por um especialista, junto com você"];
 
 const PAINS = [
   "Cliente pergunta no WhatsApp, ninguém responde e ele compra no concorrente.",
@@ -52,7 +54,7 @@ export default function Conheca() {
       {/* Topo */}
       <section className="relative overflow-hidden px-4 pb-14 pt-10">
         <div className="pointer-events-none absolute -top-40 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-[#2563eb]/25 blur-[120px]" />
-        <div className="relative mx-auto grid max-w-5xl items-center gap-10 md:grid-cols-[1.1fr_.9fr]">
+        <div className="relative mx-auto max-w-3xl">
           <div>
             <div className="mb-6 flex items-center gap-2">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#2563eb] text-lg font-bold text-white">N</span>
@@ -61,15 +63,16 @@ export default function Conheca() {
             <h1 className="text-[2.1rem] font-bold leading-tight text-white sm:text-5xl">
               Pare de perder venda <span className="text-[#f87171]">no WhatsApp.</span>
             </h1>
-            <p className="mt-4 text-lg text-slate-300">O CRM que você controla <b className="text-[#67e8f9]">falando</b>. A IA responde seus clientes na hora, o funil se organiza sozinho e um especialista implementa tudo junto com você.</p>
+            <p className="mt-4 text-lg text-slate-300">O CRM que você controla <b className="text-[#67e8f9]">falando</b>.</p>
+            <ul className="mt-5 space-y-2.5">
+              {HERO.map((h) => <li key={h} className="flex gap-2.5 text-[15px] text-slate-200"><span className="text-[#22c55e]">✓</span>{h}</li>)}
+            </ul>
             <div className="mt-7 space-y-3">
               <Button />
-              <p className="text-sm text-slate-400">✓ 7 dias grátis &nbsp; ✓ Sem fidelidade &nbsp; ✓ Implantação com especialista</p>
+              <p className="text-sm text-slate-400">Fale direto com um especialista · ou teste 7 dias grátis, sem cartão</p>
             </div>
           </div>
-          <div className="mx-auto w-full max-w-[300px]">
-            <video className="aspect-[9/16] w-full rounded-[28px] border border-white/10 shadow-2xl" src="/videos/nexo-anuncio.mp4" poster="/videos/nexo-anuncio-capa.jpg" controls playsInline preload="metadata" />
-          </div>
+
         </div>
       </section>
 
@@ -83,6 +86,16 @@ export default function Conheca() {
             ))}
           </ul>
           <p className="mt-6 text-center text-lg text-slate-300"><b className="text-white">Cliente que espera, compra do concorrente.</b> Cada minuto sem resposta é dinheiro indo embora.</p>
+        </div>
+      </section>
+
+      {/* Vídeo */}
+      <section className="px-4 py-10">
+        <div className="mx-auto max-w-3xl text-center">
+          <h2 className="text-2xl font-bold text-white sm:text-3xl">Veja o Nexo funcionando em 1 minuto</h2>
+          <div className="mx-auto mt-6 w-full max-w-[300px]">
+            <video className="aspect-[9/16] w-full rounded-[28px] border border-white/10 shadow-2xl" src="/videos/nexo-anuncio.mp4" poster="/videos/nexo-anuncio-capa.jpg" controls playsInline preload="none" />
+          </div>
         </div>
       </section>
 
@@ -169,7 +182,7 @@ export default function Conheca() {
 
       {/* Botão fixo no celular */}
       <div className="fixed inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#060a16]/95 p-3 backdrop-blur md:hidden">
-        <LeadButton intent="teste" className="flex h-12 w-full items-center justify-center rounded-xl bg-[#2563eb] font-semibold text-white">Testar 7 dias grátis →</LeadButton>
+        <WhatsAppButton className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#22c55e] font-semibold text-white">💬 Falar no WhatsApp agora</WhatsAppButton>
       </div>
     </main>
     </LeadFormProvider>
