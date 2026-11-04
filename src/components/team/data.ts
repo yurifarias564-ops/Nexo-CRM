@@ -103,7 +103,7 @@ export interface TeamApi {
   upsertNote(e: { seller_id: string; day: string; body: string }): Promise<TeamNote>;
   insertSale(e: { seller_id: string; day: string; value: number; os_number: string | null; sdr_id: string | null }): Promise<TeamSale>;
   deleteSale(id: string): Promise<void>;
-  voice(audio: Blob, sellerId: string, text: string): Promise<VoiceFill>;
+  voice(audio: Blob | null, sellerId: string, text: string): Promise<VoiceFill>;
   /** Avisa quando algo muda (tempo real no CRM; consulta periódica no link). */
   subscribe(onChange: () => void): () => void;
 }
@@ -147,9 +147,9 @@ export function loginTeamApi(orgId: string, userId: string, canManage: boolean):
   };
 }
 
-async function postVoice(url: string, audio: Blob, sellerId: string, text: string): Promise<VoiceFill> {
+async function postVoice(url: string, audio: Blob | null, sellerId: string, text: string): Promise<VoiceFill> {
   const form = new FormData();
-  form.append("audio", audio, "audio.webm");
+  if (audio) form.append("audio", audio, audio.type.includes("mp4") ? "audio.mp4" : "audio.webm");
   form.append("sellerId", sellerId);
   if (text) form.append("text", text);
   const r = await fetch(url, { method: "POST", body: form });

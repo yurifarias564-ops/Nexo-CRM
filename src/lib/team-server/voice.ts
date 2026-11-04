@@ -72,8 +72,9 @@ export async function voiceFill(orgId: string, req: Request) {
   const audio = form.get("audio");
   const sellerId = String(form.get("sellerId") ?? "");
   const hint = typeof form.get("text") === "string" ? String(form.get("text")).trim().slice(0, 1000) : "";
-  if (!(audio instanceof Blob) || audio.size === 0) throw new HttpError(422, "Áudio não recebido");
-  if (audio.size > MAX_AUDIO) throw new HttpError(413, "Áudio muito longo (máx. ~2 minutos)");
+  const hasAudio = audio instanceof Blob && audio.size > 0;
+  if (!hasAudio && !hint) throw new HttpError(422, "Áudio não recebido");
+  if (hasAudio && audio.size > MAX_AUDIO) throw new HttpError(413, "Áudio muito longo (máx. ~2 minutos)");
   const db = supabaseAdmin();
   const [{ data: seller }, { data: metrics }] = await Promise.all([
     db.from("team_sellers").select("id, name, user_id, active, position, role, store_id").eq("organization_id", orgId).eq("id", sellerId).maybeSingle(),
@@ -82,9 +83,13 @@ export async function voiceFill(orgId: string, req: Request) {
   if (!seller) throw new HttpError(404, "Pessoa não encontrada");
   const ms = ((metrics ?? []) as unknown as TeamMetric[]).filter((m) => m.source === "manual" && metricApplies(m, seller as TeamSeller));
   if (!ms.length) throw new HttpError(422, "Não há atividades para preencher nesta função");
-  const ext = audio.type.includes("mp4") ? "mp4" : audio.type.includes("ogg") ? "ogg" : "webm";
-  let heard = "";
-  try { heard = await transcribe(audio, `dia.${ext}`); } catch (e) { if (!hint) throw e; heard = hint; }
+  let heard = hint;
+  if (hasAudio) {
+    const ext = audio.type.includes("mp4") ? "mp4" : audio.type.includes("ogg") ? "ogg" : "webm";
+    try { heard = await transcribe(audio, `dia.${ext}`); } catch {
+      if (!hint) throw new HttpError(502, "Não consegui ouvir o áudio agora. Toque em “Escrever meu dia” e use o microfone do teclado para ditar.");
+    }
+  }
   if (!heard) throw new HttpError(422, "Não consegui ouvir nada. Fale mais perto do microfone.");
   const names = new Map(ms.map((m) => [m.id, m.name]));
   const r = await parseDay(heard, ms.map((m) => ({ id: m.id, name: m.name, parent: m.result_of ? names.get(m.result_of) ?? null : null })));
