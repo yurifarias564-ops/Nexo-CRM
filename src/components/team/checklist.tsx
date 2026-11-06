@@ -459,7 +459,7 @@ function NotesCard({ seller, day, today, canFill, notes, setNotes, append }: {
   );
 }
 
-const SALE_CHANNELS = ["Loja (presencial)", "WhatsApp", "Instagram", "TikTok", "Facebook", "Indicação", "Ligação", "Cliente antigo / troca", "Outro"];
+const SALE_CHANNELS = ["Tráfego pago (anúncio)", "Loja (presencial)", "WhatsApp", "Instagram", "TikTok", "Facebook", "Indicação", "Ligação", "Cliente antigo / troca", "Outro"];
 
 function RegisterSale({ base, seller, day, today, canFill, mine, setSales, setValues, osM, fatM }: {
   base: TeamBase; seller: TeamSeller; day: string; today: string; canFill: boolean; mine: TeamSale[];
