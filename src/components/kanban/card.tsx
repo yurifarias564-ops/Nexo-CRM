@@ -52,7 +52,7 @@ export const LeadCardView = memo(function LeadCardView({ lead, tagIds, dragging,
     <div
       onClick={onOpen}
       className={cn(
-        "group cursor-pointer rounded-lg border border-line bg-ink-800/90 p-3 shadow-card transition hover:border-brand-400/40 hover:bg-ink-800",
+        "nx-kcard group cursor-pointer rounded-lg border border-line bg-ink-800/90 p-3 shadow-card transition hover:border-brand-400/40 hover:bg-ink-800",
         dragging && "rotate-[1.5deg] border-brand-400/60 shadow-glow",
       )}
     >

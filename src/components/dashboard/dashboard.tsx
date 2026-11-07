@@ -7,6 +7,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
 import { Button } from "@/components/ui/button";
 import { Empty, Spinner } from "@/components/ui/misc";
+import { AreaChart, CountUp, Donut } from "@/components/ui/motion";
 import { cn, formatBRL } from "@/lib/utils";
 
 // Paleta validada (dark, superfície #0a1020): passa nas 5 checagens, incl. daltonismo.
@@ -154,8 +155,8 @@ function SalesDashboard({ switcher }: { switcher: React.ReactNode }) {
         {!stats ? (
           <div className="flex justify-center py-20"><Spinner /></div>
         ) : (
-          <>
-            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" aria-label="Indicadores">
+          <div className="nx-stagger space-y-6">
+            <section className="nx-stagger grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" aria-label="Indicadores">
               <UnansweredTile seller={seller} />
               <Tile label="Leads novos" value={stats.new_leads.toLocaleString("pt-BR")} sub="no período" />
               <Tile label="Em andamento" value={compactBRL(Number(stats.open_value))} sub={`${stats.open_count.toLocaleString("pt-BR")} leads abertos`} />
@@ -175,12 +176,26 @@ function SalesDashboard({ switcher }: { switcher: React.ReactNode }) {
                 }))} empty="Nenhuma etapa configurada" />
               </Card>
               <Card title="Origem dos leads" className="lg:col-span-2" hint="Leads novos no período">
-                <HBars rows={stats.by_source.map((s) => ({ key: s.name, label: s.name, value: s.count, detail: `${s.count.toLocaleString("pt-BR")} leads` }))} empty="Sem leads novos no período" />
+                <div className="nx-legacy-only">
+                  <HBars rows={stats.by_source.map((s) => ({ key: s.name, label: s.name, value: s.count, detail: `${s.count.toLocaleString("pt-BR")} leads` }))} empty="Sem leads novos no período" />
+                </div>
+                <div className="nx-v2-only">
+                  {stats.by_source.length
+                    ? <Donut rows={stats.by_source.map((s) => ({ label: s.name, value: s.count }))} center={stats.new_leads.toLocaleString("pt-BR")} sub="leads novos" />
+                    : <p className="py-8 text-center text-sm text-slate-500">Sem leads novos no período</p>}
+                </div>
               </Card>
             </div>
 
             <Card title="Mensagens por dia" hint="Recebidas e enviadas no WhatsApp">
-              <Columns data={stats.messages} />
+              <div className="nx-legacy-only"><Columns data={stats.messages} /></div>
+              <div className="nx-v2-only">
+                {stats.messages.some((d) => d.in + d.out > 0)
+                  ? <AreaChart points={stats.messages.map((d) => d.in)} compare={stats.messages.map((d) => d.out)}
+                      labels={stats.messages.map((d) => new Date(`${d.day}T12:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", ""))}
+                      mainLabel="Recebidas" compareLabel="Enviadas" />
+                  : <p className="py-10 text-center text-sm text-slate-500">Nenhuma mensagem no período.</p>}
+              </div>
             </Card>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -210,7 +225,7 @@ function SalesDashboard({ switcher }: { switcher: React.ReactNode }) {
                 ) : <Empty icon={<BarChart3 className="h-5 w-5" />} title="Nenhum resultado no período" text="Leads novos e vendas ganhas de cada vendedor aparecem aqui." />}
               </Card>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
@@ -303,7 +318,7 @@ function Tile({ label, value, sub, accent }: { label: string; value: string; sub
   return (
     <div className={cn("card p-5", accent && "border-brand-500/40 bg-brand-500/[.08]")}>
       <p className="text-[13px] font-medium text-slate-400">{label}</p>
-      <p className="num mt-2 truncate text-[28px] font-semibold leading-tight text-white">{value}</p>
+      <p className="num mt-2 truncate text-[28px] font-semibold leading-tight text-white"><CountUp text={value} /></p>
       {sub && <p className="mt-1 truncate text-xs text-slate-500">{sub}</p>}
     </div>
   );
@@ -334,7 +349,7 @@ function HBars({ rows, empty }: { rows: Row[]; empty: string }) {
             <span className="truncate">{r.label}</span>
           </span>
           <span className="h-2 rounded-full bg-ink-800" aria-hidden>
-            <span className="block h-full rounded-full transition-[width] duration-500 group-hover:brightness-125"
+            <span className="nx-grow block h-full rounded-full transition-[width] duration-500 group-hover:brightness-125"
               style={{ width: `${r.value === 0 ? 0 : Math.max(2, (r.value / max) * 100)}%`, background: r.dot ?? PALETTE[i % PALETTE.length] }} />
           </span>
           <span className="text-right text-xs tabular-nums text-slate-400">{r.value.toLocaleString("pt-BR")}</span>

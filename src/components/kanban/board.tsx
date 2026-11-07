@@ -298,7 +298,7 @@ export function KanbanBoard({
       </div>
 
       <DndContext id={`kanban-${pipelineId}`} sensors={sensors} collisionDetection={pointerFirst} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => { setActiveId(null); setOverStage(null); }}>
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4 md:px-6">
+        <div className="nx-stagger flex min-h-0 flex-1 gap-3 overflow-x-auto p-4 md:px-6">
           {stages.map((stage) => {
             const all = columns[stage.id] ?? [];
             const visible = hasFilter ? all.filter(matches) : all;
@@ -307,8 +307,11 @@ export function KanbanBoard({
             return (
               <Column key={stage.id} stage={stage} highlight={overStage === stage.id && activeId !== null && leads[activeId]?.stage_id !== stage.id}>
                 <div className="flex items-center gap-2 px-3 pb-2 pt-3">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: stage.color, boxShadow: `0 0 10px ${stage.color}` }} />
-                  <h3 className="flex-1 truncate text-sm font-semibold text-slate-100">{stage.name}</h3>
+                  <span className="nx-khead flex min-w-0 items-center gap-2">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: stage.color, boxShadow: `0 0 10px ${stage.color}` }} />
+                    <h3 className="truncate text-sm font-semibold text-slate-100">{stage.name}</h3>
+                  </span>
+                  <span className="flex-1" />
                   <span className="rounded-md bg-ink-700 px-1.5 py-0.5 text-xs tabular-nums text-slate-300">{count}</span>
                   <button onClick={() => setAdding(stage.id)} className="rounded-md p-1 text-slate-500 hover:bg-ink-700 hover:text-white" aria-label={`Novo lead em ${stage.name}`}>
                     <Plus className="h-4 w-4" />
@@ -316,7 +319,7 @@ export function KanbanBoard({
                 </div>
                 <p className="px-3 pb-2 text-xs tabular-nums text-slate-500">{formatBRL(total)}{all.length < count ? " (parcial)" : ""}</p>
 
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+                <div className="nx-stagger min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
                   {adding === stage.id && <QuickAdd onCancel={() => setAdding(null)} onSave={(n) => quickAdd(stage, n)} />}
                   <SortableContext items={visible.map((l) => l.id)} strategy={verticalListSortingStrategy}>
                     {visible.map((l) => (
@@ -366,7 +369,7 @@ function Column({ stage, highlight, children }: { stage: Stage; highlight: boole
   const { setNodeRef } = useDroppable({ id: `col:${stage.id}` });
   return (
     <section ref={setNodeRef}
-      className={cn("flex w-[288px] shrink-0 flex-col rounded-xl border bg-ink-900/70 transition-colors",
+      className={cn("nx-kcol flex w-[288px] shrink-0 flex-col rounded-xl border bg-ink-900/70 transition-colors",
         highlight ? "border-brand-400/60 bg-brand-500/5" : "border-line")}>
       {children}
     </section>
