@@ -14,7 +14,6 @@
   html, body { height: 100%; }
   body {
     @apply bg-ink-950 text-slate-200 antialiased;
-    letter-spacing: -0.005em;
   }
   ::selection { background: rgb(var(--brand-400) / 0.35); }
   *:focus-visible { @apply outline-none ring-2 ring-brand-400/70 ring-offset-0; }
