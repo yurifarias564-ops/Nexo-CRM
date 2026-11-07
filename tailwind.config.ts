@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: { 950: "#0a0a0c", 900: "#111214", 850: "#151619", 800: "#1b1c20", 700: "#232429", 600: "#2e3036" },
+        ink: Object.fromEntries(["950", "900", "850", "800", "700", "600"].map((k) => [k, `rgb(var(--ink-${k}) / <alpha-value>)`])),
         // Cores da marca vêm de variáveis CSS: cada empresa pode ter as suas (personalização)
         navy: { 500: "rgb(var(--navy-500) / <alpha-value>)", 400: "rgb(var(--navy-400) / <alpha-value>)" },
         brand: {
@@ -13,15 +13,15 @@ export default {
           300: "rgb(var(--brand-300) / <alpha-value>)", 400: "rgb(var(--brand-400) / <alpha-value>)", 500: "rgb(var(--brand-500) / <alpha-value>)",
           600: "rgb(var(--brand-600) / <alpha-value>)", 700: "rgb(var(--brand-700) / <alpha-value>)",
         },
-        line: "rgba(255,255,255,0.07)",
+        line: "var(--line)",
       },
       fontFamily: {
-        sans: ["\"Plus Jakarta Sans Variable\"", "var(--font-geist-sans)", "system-ui", "sans-serif"],
+        sans: ["var(--font-ui)", "system-ui", "sans-serif"],
         mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
       },
       boxShadow: {
-        glow: "0 6px 20px -8px rgb(var(--brand-500) / .55)",
-        card: "0 1px 0 0 rgba(255,255,255,.025) inset",
+        glow: "0 0 0 1px rgb(var(--brand-400) / .25), 0 8px 30px -8px rgb(var(--brand-500) / .45)",
+        card: "0 1px 0 0 rgba(255,255,255,.03) inset, 0 8px 24px -12px rgba(0,0,0,.8)",
       },
       keyframes: {
         pulseRing: { "0%": { transform: "scale(1)", opacity: ".6" }, "100%": { transform: "scale(1.9)", opacity: "0" } },

@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, Check, ChevronDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet, Megaphone } from "lucide-react";
+import { BarChart3, CalendarClock, Check, ChevronDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet, Megaphone, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -14,6 +14,9 @@ import { CallProvider } from "@/components/calls/call-provider";
 import { VoipProvider } from "@/components/calls/voip-provider";
 import { cn } from "@/lib/utils";
 import { ConnectionAlert } from "./connection-alert";
+import { SupportBar } from "./support-bar";
+import { LegacyShell } from "./legacy-shell";
+import { setUi } from "./ui-mode";
 import { AssistantButton } from "@/components/assistant/assistant-panel";
 
 const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boolean; main?: boolean }[] = [
@@ -70,7 +73,12 @@ function useWaiting(orgId: string, enabled: boolean) {
   return n;
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, ui }: { children: React.ReactNode; ui?: string }) {
+  if (ui !== "v2") return <LegacyShell>{children}</LegacyShell>;
+  return <ShellV2>{children}</ShellV2>;
+}
+
+function ShellV2({ children }: { children: React.ReactNode }) {
   const ws = useWorkspace();
   const base = ws.role === "agent" ? NAV.filter((n) => n.seller) : NAV;
   const nav = ws.isHouse && !ws.supportMode ? [...base, { href: "/parceiros", label: "Parceiros", icon: Handshake }] : base;
@@ -113,7 +121,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen flex-col overflow-hidden">
       <header className="relative z-30 shrink-0 bg-ink-950">
         <div className="flex h-16 items-center gap-3 px-4 md:px-6">
-          <Link href="/dashboard" className="shrink-0"><Logo brand={ws.brand} /></Link>
+          <Link href="/dashboard" className="shrink-0"><Logo brand={ws.brand} flat /></Link>
 
           <nav className="ml-4 hidden min-w-0 lg:flex">
             <div className="pill-group">
@@ -175,6 +183,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       </div>
                     )}
                     <div className="border-t border-line pt-1">
+                      <button onClick={() => setUi(null)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-300 hover:bg-ink-800"><Sparkles className="h-4 w-4 text-slate-500" /> Voltar ao visual antigo</button>
                       <button onClick={() => { setOrgMenu(false); replayIntro(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-300 hover:bg-ink-800"><PlayCircle className="h-4 w-4 text-slate-500" /> Ver apresentação</button>
                       <button onClick={() => void logout()} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-300 hover:bg-ink-800"><LogOut className="h-4 w-4 text-slate-500" /> Sair</button>
                     </div>
@@ -201,23 +210,3 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Faixa quando o dono da plataforma está dentro da conta de um cliente. */
-function SupportBar({ orgId, orgName }: { orgId: string; orgName: string }) {
-  const router = useRouter();
-  const [busy, setBusy] = useState(false);
-  async function leave() {
-    setBusy(true);
-    const res = await fetch(`/api/platform/partners/${orgId}/access`, { method: "DELETE" });
-    setBusy(false);
-    if (!res.ok) return toast.error((await res.json()).error);
-    router.push("/parceiros");
-    router.refresh();
-  }
-  return (
-    <div className="flex items-center gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-100">
-      <Handshake className="h-3.5 w-3.5" />
-      <span className="flex-1 truncate">Você está na conta de <b>{orgName}</b> como suporte. Tudo o que fizer aqui fica registrado.</span>
-      <button onClick={() => void leave()} disabled={busy} className="rounded-md border border-amber-400/40 px-2.5 py-1 font-medium hover:bg-amber-500/20">{busy ? "Saindo…" : "Sair e voltar para Parceiros"}</button>
-    </div>
-  );
-}

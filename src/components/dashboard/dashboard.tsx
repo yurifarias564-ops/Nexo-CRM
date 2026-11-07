@@ -130,7 +130,7 @@ function SalesDashboard({ switcher }: { switcher: React.ReactNode }) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
-        <Greeting name={ws.userName} stats={stats} />
+        <div className="nx-v2-only"><Greeting name={ws.userName} stats={stats} /></div>
         <div className="flex flex-wrap items-center gap-2">
           {switcher}
           <div className="seg" role="tablist" aria-label="Período">

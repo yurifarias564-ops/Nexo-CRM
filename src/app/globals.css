@@ -5,35 +5,64 @@
 :root {
   color-scheme: dark;
   /* Cores padrão (azul Nexo). A personalização de cada empresa sobrescreve estas variáveis. */
+  --brand-50: 239 246 255; --brand-100: 219 234 254; --brand-200: 191 219 254; --brand-300: 96 165 250;
+  --brand-400: 59 130 246; --brand-500: 37 99 235; --brand-600: 29 78 216; --brand-700: 29 64 175;
+  --navy-500: 30 58 138; --navy-400: 37 71 168;
+  --ink-950: 3 5 10; --ink-900: 6 10 20; --ink-850: 10 16 32; --ink-800: 13 21 40; --ink-700: 19 32 61; --ink-600: 27 44 82;
+  --line: rgb(var(--brand-300) / 0.12);
+  --font-ui: var(--font-geist-sans);
+}
+/* Visual novo (em teste): ligado pelo cookie nx_ui=v2 */
+:root[data-ui="v2"] {
   --brand-50: 238 242 255; --brand-100: 224 231 255; --brand-200: 199 211 255; --brand-300: 147 170 255;
   --brand-400: 104 139 255; --brand-500: 79 124 255; --brand-600: 59 99 230; --brand-700: 46 78 189;
   --navy-500: 40 44 60; --navy-400: 52 58 78;
+  --ink-950: 10 10 12; --ink-900: 17 18 20; --ink-850: 21 22 25; --ink-800: 27 28 32; --ink-700: 35 36 41; --ink-600: 46 48 54;
+  --line: rgba(255, 255, 255, 0.07);
+  --font-ui: "Plus Jakarta Sans Variable";
 }
 
 @layer base {
   html, body { height: 100%; }
   body {
     @apply bg-ink-950 text-slate-200 antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 10% -10%, rgb(var(--navy-500) / 0.22), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, rgb(var(--brand-500) / 0.10), transparent 60%);
+    background-attachment: fixed;
+    font-feature-settings: "cv11", "ss01";
   }
+  :root[data-ui="v2"] body { background-image: none; font-feature-settings: normal; }
+  :root[data-ui="v2"] .shadow-glow { box-shadow: 0 6px 20px -8px rgb(var(--brand-500) / .55); }
   ::selection { background: rgb(var(--brand-400) / 0.35); }
   *:focus-visible { @apply outline-none ring-2 ring-brand-400/70 ring-offset-0; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); background-clip: padding-box; border: 3px solid transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(96, 165, 250, 0.14); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(96, 165, 250, 0.28); background-clip: padding-box; border: 3px solid transparent; }
 }
 
 @layer components {
-  .surface { @apply bg-ink-900 border border-line; }
-  .card { @apply rounded-2xl bg-ink-900 border border-line; }
-  .label { @apply mb-1.5 block text-xs font-medium text-slate-400; }
+  .surface { @apply bg-ink-900/80 border border-line backdrop-blur-sm; }
+  .card { @apply rounded-xl bg-ink-850 border border-line shadow-card; }
+  [data-ui="v2"] .card { @apply rounded-2xl bg-ink-900 shadow-none; }
+  .label { @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-400; }
+  [data-ui="v2"] .label { @apply normal-case tracking-normal; }
   .field {
-    @apply h-10 w-full rounded-xl border border-line bg-ink-850 px-3 text-sm text-slate-100
+    @apply h-10 w-full rounded-lg border border-line bg-ink-950/60 px-3 text-sm text-slate-100
       placeholder:text-slate-500 transition focus:border-brand-400/60 focus:ring-2 focus:ring-brand-500/25;
   }
+  [data-ui="v2"] .field { @apply rounded-xl bg-ink-850; }
+  .nx-btn { @apply rounded-lg; }
+  [data-ui="v2"] .nx-btn { @apply rounded-xl; }
+  .nx-btn-secondary { @apply bg-ink-700 text-slate-100 hover:bg-ink-600 border border-line; }
+  [data-ui="v2"] .nx-btn-secondary { @apply border-0 bg-white text-[#0a0a0c] hover:bg-slate-200; }
+  .nx-v2-only { display: none; }
+  [data-ui="v2"] .nx-v2-only { display: block; }
+  [data-ui="v2"] .chat-bg { background-color: #0c0d0f; background-image: radial-gradient(rgba(255,255,255,.035) 1px, transparent 1px); }
   .chat-bg {
-    background-color: #0c0d0f;
-    background-image: radial-gradient(rgba(255,255,255,.035) 1px, transparent 1px);
+    background-color: #050912;
+    background-image: radial-gradient(rgba(59,130,246,.06) 1px, transparent 1px);
     background-size: 22px 22px;
   }
   /* Abas em pílula (estilo do topo) */

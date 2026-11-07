@@ -41,7 +41,7 @@ export function palette(hex: string): Record<string, string> {
 /** CSS que aplica a cor da empresa na tela toda. */
 export function brandCss(hex: string): string {
   if (!/^#[0-9a-fA-F]{6}$/.test(hex) || hex.toLowerCase() === DEFAULT_COLOR) return "";
-  return `:root{${Object.entries(palette(hex)).map(([k, v]) => `${k}:${v}`).join(";")}}`;
+  return `:root,:root[data-ui="v2"]{${Object.entries(palette(hex)).map(([k, v]) => `${k}:${v}`).join(";")}}`;
 }
 
 /** Domínio válido digitado pelo usuário (sem http, sem barra). */

@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { brandForOrg } from "@/lib/branding/server";
 import { brandCss } from "@/lib/branding/shared";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 
 /** Título e ícone com a marca da empresa logada. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -60,7 +61,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       }}
     >
       {css && <style id="brand-org">{css}</style>}
-      <AppShell>{children}</AppShell>
+      <AppShell ui={(await cookies()).get("nx_ui")?.value}>{children}</AppShell>
     </WorkspaceProvider>
   );
 }
