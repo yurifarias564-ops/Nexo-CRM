@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Toaster } from "sonner";
+import "@fontsource-variable/plus-jakarta-sans";
 import "./globals.css";
 import { brandForHost } from "@/lib/branding/server";
 import { brandCss } from "@/lib/branding/shared";
@@ -19,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export const viewport: Viewport = { themeColor: "#03050a", colorScheme: "dark" };
+export const viewport: Viewport = { themeColor: "#0a0a0c", colorScheme: "dark" };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { brand } = await brandForHost();
@@ -32,7 +33,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Toaster
           theme="dark"
           position="bottom-right"
-          toastOptions={{ classNames: { toast: "!bg-ink-850 !border !border-line !text-slate-100", description: "!text-slate-400" } }}
+          toastOptions={{ classNames: { toast: "!bg-ink-800 !border !border-line !text-slate-100 !rounded-2xl", description: "!text-slate-400" } }}
         />
       </body>
     </html>

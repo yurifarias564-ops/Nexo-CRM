@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet } from "lucide-react";
+import { BarChart3, CalendarClock, Check, ChevronDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet, Megaphone } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -16,17 +16,18 @@ import { cn } from "@/lib/utils";
 import { ConnectionAlert } from "./connection-alert";
 import { AssistantButton } from "@/components/assistant/assistant-panel";
 
-const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boolean }[] = [
-  { href: "/dashboard", label: "Painel", icon: BarChart3 },
-  { seller: true, href: "/pipeline", label: "Funil", icon: KanbanSquare },
-  { seller: true, href: "/inbox", label: "Conversas", icon: MessageCircle },
+const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boolean; main?: boolean }[] = [
+  { main: true, href: "/dashboard", label: "Painel", icon: BarChart3 },
+  { main: true, seller: true, href: "/pipeline", label: "Funil", icon: KanbanSquare },
+  { main: true, seller: true, href: "/inbox", label: "Conversas", icon: MessageCircle },
   { href: "/agente", label: "Agente de IA", icon: Bot },
   { href: "/automacoes", label: "Automações", icon: Workflow },
   { href: "/ligacoes", label: "Ligações", icon: PhoneCall },
-  { href: "/leads", label: "Leads", icon: Users },
+  { main: true, href: "/leads", label: "Leads", icon: Users },
+  { main: true, href: "/campanhas", label: "Campanhas", icon: Megaphone },
   { href: "/agendadas", label: "Agendadas", icon: CalendarClock },
-  { seller: true, href: "/time", label: "Time comercial", icon: UsersRound },
-  { href: "/relatorios", label: "Relatórios", icon: FileBarChart },
+  { main: true, seller: true, href: "/time", label: "Time", icon: UsersRound },
+  { main: true, href: "/relatorios", label: "Relatórios", icon: FileBarChart },
   { href: "/financas", label: "Finanças", icon: Wallet },
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
@@ -91,86 +92,111 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.replace("/login");
   }
 
+  const [more, setMore] = useState(false);
+  const mainNav = ws.role === "agent" ? nav : nav.filter((n) => n.main);
+  const moreNav = ws.role === "agent" ? [] : nav.filter((n) => !n.main);
+  const moreActive = moreNav.some((n) => path.startsWith(n.href));
+  const roleLabel = ws.role === "owner" ? "Proprietário" : ws.role === "admin" ? "Administrador" : "Vendedor";
+
+  const badge = (href: string) => (
+    <>
+      {href === "/dashboard" && waiting > 0 && (
+        <span className="nx-blink ml-1.5 rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white" title={`${waiting} cliente(s) esperando resposta`}>{waiting > 99 ? "99+" : waiting}</span>
+      )}
+      {href === "/inbox" && unread > 0 && (
+        <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-brand-300" title={`${unread} conversa(s) não lida(s)`} />
+      )}
+    </>
+  );
+
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-ink-900/70 backdrop-blur md:flex">
-        <div className="px-5 pb-4 pt-5"><Logo brand={ws.brand} /></div>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <header className="relative z-30 shrink-0 bg-ink-950">
+        <div className="flex h-16 items-center gap-3 px-4 md:px-6">
+          <Link href="/dashboard" className="shrink-0"><Logo brand={ws.brand} /></Link>
 
-        <div className="relative px-3">
-          <button onClick={() => setOrgMenu((v) => !v)} className="flex w-full items-center gap-2 rounded-lg border border-line bg-ink-850 px-3 py-2 text-left text-sm hover:border-brand-400/40">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-navy-500 text-[11px] font-bold text-white">{ws.orgName[0]?.toUpperCase()}</span>
-            <span className="flex-1 truncate font-medium text-slate-100">{ws.orgName}</span>
-            <ChevronsUpDown className="h-4 w-4 text-slate-500" />
-          </button>
-          {orgMenu && ws.orgs.length > 0 && (
-            <div className="absolute left-3 right-3 top-12 z-30 animate-fadeIn rounded-lg border border-line bg-ink-800 p-1 shadow-card">
-              {ws.orgs.map((o) => (
-                <button key={o.id} onClick={() => switchOrg(o.id)} className={cn("w-full truncate rounded-md px-3 py-2 text-left text-sm hover:bg-ink-700", o.id === ws.orgId ? "text-brand-300" : "text-slate-200")}>
-                  {o.name}
-                </button>
+          <nav className="ml-4 hidden min-w-0 lg:flex">
+            <div className="pill-group">
+              {mainNav.map(({ href, label }) => (
+                <Link key={href} href={href} prefetch className={cn("pill flex items-center", path.startsWith(href) && "pill-active")}>
+                  {label}{badge(href)}
+                </Link>
               ))}
+              {moreNav.length > 0 && (
+                <div className="relative">
+                  <button onClick={() => setMore((v) => !v)} className={cn("pill flex items-center gap-1", moreActive && "pill-active")}>
+                    {moreActive ? moreNav.find((n) => path.startsWith(n.href))?.label : "Mais"}<ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                  {more && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setMore(false)} />
+                      <div className="absolute left-0 top-11 z-40 w-56 animate-fadeIn rounded-2xl border border-line bg-ink-850 p-1.5 shadow-2xl">
+                        {moreNav.map(({ href, label, icon: I }) => (
+                          <Link key={href} href={href} onClick={() => setMore(false)}
+                            className={cn("flex items-center gap-3 rounded-xl px-3 py-2 text-sm", path.startsWith(href) ? "bg-ink-700 text-white" : "text-slate-300 hover:bg-ink-800 hover:text-white")}>
+                            <I className="h-4 w-4 text-slate-500" />{label}
+                          </Link>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </nav>
 
-        <nav className="mt-6 flex-1 space-y-1 px-3">
-          {nav.map(({ href, label, icon: I }) => {
-            const active = path.startsWith(href);
-            return (
-              <Link key={href} href={href} prefetch
-                className={cn("group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition",
-                  active ? "bg-gradient-to-r from-brand-500/20 to-transparent text-white shadow-[inset_2px_0_0_0_#3b82f6]" : "text-slate-400 hover:bg-ink-800 hover:text-slate-100")}>
-                <I className={cn("h-4 w-4", active ? "text-brand-300" : "text-slate-500 group-hover:text-slate-300")} />
-                <span className="flex-1">{label}</span>
-                {href === "/dashboard" && waiting > 0 && (
-                  <span className="nx-blink rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white" title={`${waiting} cliente(s) esperando resposta`}>{waiting > 99 ? "99+" : waiting}</span>
-                )}
-                {href === "/inbox" && unread > 0 && (
-                  <span className="rounded-full bg-brand-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{unread > 99 ? "99+" : unread}</span>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-line p-3">
-          <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-            <Avatar name={ws.userName} className="h-8 w-8" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-slate-100">{ws.userName}</p>
-              <p className="text-xs capitalize text-slate-500">{ws.role === "owner" ? "Proprietário" : ws.role === "admin" ? "Administrador" : "Vendedor"}</p>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <AssistantButton />
+            <VoiceCommand />
+            <div className="relative">
+              <button onClick={() => setOrgMenu((v) => !v)} className="flex items-center gap-2 rounded-full border border-line bg-ink-900 py-1 pl-1 pr-3 hover:bg-ink-800" aria-label="Conta">
+                <Avatar name={ws.userName} className="h-7 w-7" />
+                <span className="hidden max-w-[140px] truncate text-sm font-medium text-slate-200 sm:block">{ws.orgName}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-slate-500" />
+              </button>
+              {orgMenu && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setOrgMenu(false)} />
+                  <div className="absolute right-0 top-12 z-40 w-64 animate-fadeIn rounded-2xl border border-line bg-ink-850 p-1.5 shadow-2xl">
+                    <div className="px-3 py-2">
+                      <p className="truncate text-sm font-semibold text-white">{ws.userName}</p>
+                      <p className="text-xs text-slate-500">{roleLabel}</p>
+                    </div>
+                    {ws.orgs.length > 1 && (
+                      <div className="border-t border-line py-1">
+                        <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-slate-500">Empresas</p>
+                        {ws.orgs.map((o) => (
+                          <button key={o.id} onClick={() => void switchOrg(o.id)} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-200 hover:bg-ink-800">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-ink-700 text-[11px] font-bold text-white">{o.name[0]?.toUpperCase()}</span>
+                            <span className="flex-1 truncate">{o.name}</span>
+                            {o.id === ws.orgId && <Check className="h-4 w-4 text-brand-300" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="border-t border-line pt-1">
+                      <button onClick={() => { setOrgMenu(false); replayIntro(); }} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-300 hover:bg-ink-800"><PlayCircle className="h-4 w-4 text-slate-500" /> Ver apresentação</button>
+                      <button onClick={() => void logout()} className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-300 hover:bg-ink-800"><LogOut className="h-4 w-4 text-slate-500" /> Sair</button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            <button onClick={replayIntro} className="rounded-md p-1.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200" aria-label="Ver apresentação" title="Ver apresentação">
-              <PlayCircle className="h-4 w-4" />
-            </button>
-            <button onClick={logout} className="rounded-md p-1.5 text-slate-500 hover:bg-ink-700 hover:text-slate-200" aria-label="Sair" title="Sair">
-              <LogOut className="h-4 w-4" />
-            </button>
           </div>
         </div>
-      </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-ink-950/60 px-4 backdrop-blur md:px-6">
-          <div className="md:hidden"><Logo compact brand={ws.brand} /></div>
-          <nav className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 [scrollbar-width:none] md:hidden">
-            {nav.map(({ href, icon: I, label }) => (
-              <Link key={href} href={href} aria-label={label} className={cn("relative shrink-0 rounded-md p-2", path.startsWith(href) ? "bg-ink-800 text-brand-300" : "text-slate-400")}>
-                <I className="h-4 w-4" />
-                {href === "/dashboard" && waiting > 0 && <span className="nx-blink absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500" />}
-              </Link>
-            ))}
-          </nav>
-          <h1 className="hidden text-sm font-medium text-slate-300 md:block">
-            {NAV.find((n) => path.startsWith(n.href))?.label ?? (path.startsWith("/campanhas") ? "Campanhas" : null)}
-          </h1>
-          <div className="ml-auto flex shrink-0 items-center gap-2"><AssistantButton /><VoiceCommand /></div>
-        </header>
-        <ConnectionAlert />
-        <Intro />
-        {ws.supportMode && <SupportBar orgId={ws.orgId} orgName={ws.orgName} />}
-        <main className="min-h-0 flex-1 overflow-hidden"><CallProvider><VoipProvider>{children}</VoipProvider></CallProvider></main>
-      </div>
+        <nav className="flex gap-1 overflow-x-auto px-4 pb-3 [scrollbar-width:none] lg:hidden">
+          {nav.map(({ href, label }) => (
+            <Link key={href} href={href} className={cn("pill flex shrink-0 items-center border border-line", path.startsWith(href) && "pill-active border-transparent")}>
+              {label}{badge(href)}
+            </Link>
+          ))}
+        </nav>
+      </header>
+      <ConnectionAlert />
+      <Intro />
+      {ws.supportMode && <SupportBar orgId={ws.orgId} orgName={ws.orgName} />}
+      <main className="min-h-0 flex-1 overflow-hidden"><CallProvider><VoipProvider>{children}</VoipProvider></CallProvider></main>
     </div>
   );
 }

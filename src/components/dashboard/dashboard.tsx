@@ -12,7 +12,8 @@ import { cn, formatBRL } from "@/lib/utils";
 // Paleta validada (dark, superfície #0a1020): passa nas 5 checagens, incl. daltonismo.
 const C_IN = "#3b82f6";
 const C_OUT = "#d97706";
-const C_BAR = "#3b82f6";
+/** Paleta das barras (azul, âmbar, verde-água, coral, violeta, lima) */
+const PALETTE = ["#4f7cff", "#f5a524", "#22c3a6", "#f2665b", "#a78bfa", "#9bd34e"];
 
 type Stats = {
   new_leads: number;
@@ -78,10 +79,10 @@ export function Dashboard() {
   }, []);
   const pick = (v: "vendas" | "campanhas") => { setView(v); try { localStorage.setItem("nexo:painel-view", v); } catch { /* ok */ } };
   const switcher = (
-    <div className="flex rounded-lg border border-line bg-ink-900 p-1" role="tablist" aria-label="O que ver no painel">
+    <div className="pill-group" role="tablist" aria-label="O que ver no painel">
       {([["vendas", "Métricas de vendas", BarChart3], ["campanhas", "Campanhas", Target]] as const).map(([id, label, I]) => (
         <button key={id} role="tab" aria-selected={view === id} onClick={() => pick(id)}
-          className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition", view === id ? "bg-brand-500/20 text-white" : "text-slate-400 hover:text-slate-200")}>
+          className={cn("pill flex items-center gap-1.5", view === id && "pill-active")}>
           <I className="h-4 w-4" /> {label}
         </button>
       ))}
@@ -129,12 +130,13 @@ function SalesDashboard({ switcher }: { switcher: React.ReactNode }) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+        <Greeting name={ws.userName} stats={stats} />
         <div className="flex flex-wrap items-center gap-2">
           {switcher}
-          <div className="flex rounded-lg border border-line bg-ink-900 p-1" role="tablist" aria-label="Período">
+          <div className="seg" role="tablist" aria-label="Período">
             {PERIODS.map((p) => (
               <button key={p.id} role="tab" aria-selected={period === p.id} onClick={() => setPeriod(p.id)}
-                className={cn("rounded-md px-3 py-1.5 text-sm font-medium transition", period === p.id ? "bg-ink-700 text-white" : "text-slate-400 hover:text-slate-200")}>
+                className={cn("transition hover:text-slate-200", period === p.id && "on")}>
                 {p.label}
               </button>
             ))}
@@ -271,11 +273,37 @@ function Delta({ cur, prev, points }: { cur: number | null; prev: number | null;
   );
 }
 
+/** Saudação no topo do painel ("Bom dia, Yuri") com o resumo do momento. */
+function Greeting({ name, stats }: { name: string | null; stats: Stats | null }) {
+  const h = new Date().getHours();
+  const hello = h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
+  const first = (name ?? "").trim().split(/\s+/)[0];
+  const items = stats ? [
+    `${stats.open_count.toLocaleString("pt-BR")} leads em andamento`,
+    `${stats.new_leads.toLocaleString("pt-BR")} leads novos no período`,
+    `${stats.won_count.toLocaleString("pt-BR")} vendas fechadas`,
+  ] : [];
+  return (
+    <div>
+      <h1 className="text-[28px] font-semibold tracking-tight text-white md:text-[34px]">{hello}{first ? `, ${first}` : ""}</h1>
+      {items.length > 0 && (
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-400">
+          {items.map((t, i) => (
+            <span key={t} className="inline-flex items-center gap-2">
+              {i === 0 ? <span className="h-2 w-2 rounded-full bg-emerald-400" /> : <span className="h-1 w-1 rounded-full bg-slate-600" />}{t}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Tile({ label, value, sub, accent }: { label: string; value: string; sub?: React.ReactNode; accent?: boolean }) {
   return (
-    <div className={cn("card p-4", accent && "border-brand-400/30 bg-gradient-to-br from-brand-500/10 to-transparent")}>
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-2 truncate text-2xl font-semibold tabular-nums tracking-tight text-white">{value}</p>
+    <div className={cn("card p-5", accent && "border-brand-500/40 bg-brand-500/[.08]")}>
+      <p className="text-[13px] font-medium text-slate-400">{label}</p>
+      <p className="num mt-2 truncate text-[28px] font-semibold leading-tight text-white">{value}</p>
       {sub && <p className="mt-1 truncate text-xs text-slate-500">{sub}</p>}
     </div>
   );
@@ -284,7 +312,7 @@ function Tile({ label, value, sub, accent }: { label: string; value: string; sub
 function Card({ title, hint, className, children }: { title: string; hint?: string; className?: string; children: React.ReactNode }) {
   return (
     <section className={cn("card p-5", className)}>
-      <h2 className="font-semibold text-white">{title}</h2>
+      <h2 className="text-[15px] font-semibold text-white">{title}</h2>
       {hint && <p className="mt-0.5 text-xs text-slate-500">{hint}</p>}
       <div className="mt-4">{children}</div>
     </section>
@@ -299,15 +327,15 @@ function HBars({ rows, empty }: { rows: Row[]; empty: string }) {
   if (!rows.length) return <p className="py-8 text-center text-sm text-slate-500">{empty}</p>;
   return (
     <ul className="space-y-2.5">
-      {rows.map((r) => (
+      {rows.map((r, i) => (
         <li key={r.key} className="group grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 rounded-md" title={`${r.label}: ${r.detail}`}>
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-slate-300">
             {r.dot && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: r.dot }} aria-hidden />}
             <span className="truncate">{r.label}</span>
           </span>
-          <span className="h-3 rounded-r-[4px] bg-ink-800" aria-hidden>
-            <span className="block h-full rounded-r-[4px] transition-[width] duration-500 group-hover:brightness-125"
-              style={{ width: `${r.value === 0 ? 0 : Math.max(2, (r.value / max) * 100)}%`, background: C_BAR }} />
+          <span className="h-2 rounded-full bg-ink-800" aria-hidden>
+            <span className="block h-full rounded-full transition-[width] duration-500 group-hover:brightness-125"
+              style={{ width: `${r.value === 0 ? 0 : Math.max(2, (r.value / max) * 100)}%`, background: r.dot ?? PALETTE[i % PALETTE.length] }} />
           </span>
           <span className="text-right text-xs tabular-nums text-slate-400">{r.value.toLocaleString("pt-BR")}</span>
         </li>
