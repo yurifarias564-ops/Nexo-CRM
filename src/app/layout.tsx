@@ -2,9 +2,11 @@ import type { Metadata, Viewport } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Toaster } from "sonner";
+import "@fontsource-variable/plus-jakarta-sans";
 import "./globals.css";
 import { brandForHost } from "@/lib/branding/server";
 import { brandCss } from "@/lib/branding/shared";
+import { cookies } from "next/headers";
 
 /** Título, ícone e app instalável conforme o domínio acessado (domínio próprio do cliente = marca dele). */
 export async function generateMetadata(): Promise<Metadata> {
@@ -24,8 +26,9 @@ export const viewport: Viewport = { themeColor: "#03050a", colorScheme: "dark" }
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const { brand } = await brandForHost();
   const css = brandCss(brand.primaryColor);
+  const ui = (await cookies()).get("nx_ui")?.value === "v2" ? "v2" : undefined;
   return (
-    <html lang="pt-BR" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="pt-BR" data-ui={ui} className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="font-sans">
         {css && <style id="brand-host">{css}</style>}
         {children}

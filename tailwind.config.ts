@@ -5,7 +5,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: { 950: "#03050a", 900: "#060a14", 850: "#0a1020", 800: "#0d1528", 700: "#13203d", 600: "#1b2c52" },
+        ink: Object.fromEntries(["950", "900", "850", "800", "700", "600"].map((k) => [k, `rgb(var(--ink-${k}) / <alpha-value>)`])),
         // Cores da marca vêm de variáveis CSS: cada empresa pode ter as suas (personalização)
         navy: { 500: "rgb(var(--navy-500) / <alpha-value>)", 400: "rgb(var(--navy-400) / <alpha-value>)" },
         brand: {
@@ -13,10 +13,10 @@ export default {
           300: "rgb(var(--brand-300) / <alpha-value>)", 400: "rgb(var(--brand-400) / <alpha-value>)", 500: "rgb(var(--brand-500) / <alpha-value>)",
           600: "rgb(var(--brand-600) / <alpha-value>)", 700: "rgb(var(--brand-700) / <alpha-value>)",
         },
-        line: "rgb(var(--brand-300) / 0.12)",
+        line: "var(--line)",
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
+        sans: ["var(--font-ui)", "system-ui", "sans-serif"],
         mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
       },
       boxShadow: {
