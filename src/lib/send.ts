@@ -309,3 +309,25 @@ export async function sendTemplateMessage(sb: SupabaseClient, orgId: string, use
   const id = await record(r, externalId, "text", meta.renderTemplate(tpl.body, clean), null, null, userId);
   return { id, externalId };
 }
+
+/** Disparo pela API oficial: envia o modelo (com mídia no cabeçalho, se houver) e registra na conversa como automação. */
+export async function sendBroadcastTemplate(orgId: string, t: SendTarget, name: string, language: string, params: string[], renderedBody: string,
+  header?: { type: "image" | "video" | "document"; mediaId: string; filename?: string }) {
+  const db = supabaseAdmin();
+  const r = await resolveTarget(db, orgId, t);
+  if (r.channel.provider !== "meta") throw new HttpError(422, "Modelos só existem na API oficial");
+  const { auth, pid } = metaAuth(r);
+  const clean = params.map((p) => p.replace(/[\n\t]+/g, " ").replace(/ {5,}/g, "    ").trim() || "-");
+  const externalId = await meta.sendTemplateFull(pid, auth, r.sendTo, name, language, clean, header);
+  const id = await record(r, externalId, "text", renderedBody, null, null, null);
+  await db.from("messages").update({ by_automation: true }).eq("id", id);
+  return { id, externalId };
+}
+
+/** Sobe a mídia do cabeçalho do modelo para o número oficial (id vale 30 dias). */
+export async function uploadMetaMediaFor(channel: ChannelWithSecrets, file: Blob, mime: string, filename: string) {
+  const auth = channel.secrets.meta_access_token;
+  const pid = channel.meta_phone_number_id;
+  if (!auth || !pid) throw new HttpError(409, "Canal oficial sem credenciais");
+  return meta.uploadMedia(pid, auth, file, mime, filename);
+}

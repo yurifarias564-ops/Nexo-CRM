@@ -288,3 +288,125 @@ export function parseWebhook(payload: unknown): MetaBatch[] {
   }
   return out;
 }
+
+// ===================== Disparos: modelos completos =====================
+
+export type TemplateStatus = "APPROVED" | "PENDING" | "REJECTED" | "PAUSED" | "DISABLED" | "IN_APPEAL" | string;
+export interface FullTemplate {
+  id: string;
+  name: string;
+  language: string;
+  category: string;
+  status: TemplateStatus;
+  rejectedReason: string | null;
+  header: { format: "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT"; text?: string } | null;
+  body: string;
+  footer: string | null;
+  buttons: { type: string; text: string }[];
+  params: number;
+  /** Dá para enviar em disparo (sem variáveis em cabeçalho de texto, botões de link dinâmico ou parâmetros nomeados). */
+  sendable: boolean;
+}
+
+/** Todos os modelos da conta (aprovados, em análise e recusados), com o que é preciso para enviar. */
+export async function listAllTemplates(wabaId: string, token: string): Promise<FullTemplate[]> {
+  const out: FullTemplate[] = [];
+  let next: string | null = `/${encodeURIComponent(wabaId)}/message_templates?fields=id,name,language,status,category,components,rejected_reason&limit=200`;
+  for (let page = 0; next && page < 10; page++) {
+    const r: { data?: { id: string; name: string; language: string; status: string; category: string; rejected_reason?: string; components?: RawComponent[] }[]; paging?: { next?: string } } =
+      await call(next, token);
+    for (const t of r.data ?? []) {
+      const comps = t.components ?? [];
+      const h = comps.find((c) => c.type === "HEADER");
+      const body = comps.find((c) => c.type === "BODY")?.text ?? "";
+      const footer = comps.find((c) => c.type === "FOOTER")?.text ?? null;
+      const btns = comps.find((c) => c.type === "BUTTONS")?.buttons ?? [];
+      const nums = [...body.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]));
+      const headerText = h?.format === "TEXT" ? h.text ?? "" : "";
+      const sendable = !/\{\{/.test(headerText) && !btns.some((b) => b.type === "URL" && /\{\{/.test(b.url ?? "")) && !/\{\{[^0-9}]+\}\}/.test(body)
+        && (!h || ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"].includes(h.format ?? "TEXT"));
+      out.push({
+        id: t.id, name: t.name, language: t.language, category: t.category, status: t.status,
+        rejectedReason: t.rejected_reason && t.rejected_reason !== "NONE" ? t.rejected_reason : null,
+        header: h ? { format: (h.format ?? "TEXT") as "TEXT", text: h.text } : null,
+        body, footer, buttons: btns.map((b) => ({ type: b.type, text: (b as { text?: string }).text ?? "" })),
+        params: nums.length ? Math.max(...nums) : 0, sendable,
+      });
+    }
+    const n: string | undefined = r.paging?.next;
+    next = n ? n.replace(/^https:\/\/graph\.facebook\.com\/v[\d.]+/, "") : null;
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Envia um modelo com parâmetros no corpo e, se houver, a mídia do cabeçalho (id já enviado ao WhatsApp). */
+export async function sendTemplateFull(phoneNumberId: string, token: string, to: string, name: string, language: string, params: string[],
+  header?: { type: "image" | "video" | "document"; mediaId: string; filename?: string }): Promise<string> {
+  const components: unknown[] = [];
+  if (header) {
+    const media: Record<string, string> = { id: header.mediaId };
+    if (header.type === "document" && header.filename) media.filename = header.filename;
+    components.push({ type: "header", parameters: [{ type: header.type, [header.type]: media }] });
+  }
+  if (params.length) components.push({ type: "body", parameters: params.map((text) => ({ type: "text", text })) });
+  const r = await call<{ messages?: { id: string }[] }>(`/${encodeURIComponent(phoneNumberId)}/messages`, token, {
+    method: "POST",
+    body: JSON.stringify({ messaging_product: "whatsapp", to, type: "template", template: { name, language: { code: language }, components } }),
+  });
+  const id = r.messages?.[0]?.id;
+  if (!id) throw new HttpError(502, "WhatsApp não retornou o id da mensagem");
+  return id;
+}
+
+/** Moeda em que a conta do WhatsApp é cobrada pela Meta (BRL, USD…). */
+export async function wabaCurrency(wabaId: string, token: string): Promise<string | null> {
+  try {
+    const r = await call<{ currency?: string }>(`/${encodeURIComponent(wabaId)}?fields=currency`, token);
+    return r.currency ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Sobe um arquivo de exemplo para o cabeçalho do modelo (upload retomável da Meta) e devolve o identificador. */
+export async function uploadTemplateSample(appId: string, token: string, data: ArrayBuffer, mime: string): Promise<string> {
+  const start = await call<{ id?: string }>(`/${encodeURIComponent(appId)}/uploads?file_length=${data.byteLength}&file_type=${encodeURIComponent(mime)}`, token, { method: "POST" });
+  if (!start.id) throw new HttpError(502, "A Meta não abriu o envio do arquivo de exemplo");
+  const res = await fetch(`${graph()}/${start.id}`, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${token}`, file_offset: "0", "Content-Type": mime },
+    body: data,
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as { h?: string; error?: { message?: string } };
+  if (!res.ok || !body.h) throw new HttpError(422, `WhatsApp: ${body.error?.message ?? "não aceitou o arquivo de exemplo"}`);
+  return body.h;
+}
+
+export interface NewTemplate {
+  name: string;
+  language: string;
+  category: "MARKETING" | "UTILITY";
+  header: { format: "TEXT"; text: string } | { format: "IMAGE" | "VIDEO" | "DOCUMENT"; handle: string } | null;
+  body: string;
+  examples: string[];
+  footer: string | null;
+  quickReplies: string[];
+}
+
+/** Cria o modelo e manda para a Meta aprovar. Devolve o id e o status inicial. */
+export async function createTemplate(wabaId: string, token: string, t: NewTemplate): Promise<{ id: string; status: string }> {
+  const components: unknown[] = [];
+  if (t.header?.format === "TEXT") components.push({ type: "HEADER", format: "TEXT", text: t.header.text });
+  else if (t.header) components.push({ type: "HEADER", format: t.header.format, example: { header_handle: [t.header.handle] } });
+  components.push({ type: "BODY", text: t.body, ...(t.examples.length ? { example: { body_text: [t.examples] } } : {}) });
+  if (t.footer) components.push({ type: "FOOTER", text: t.footer });
+  if (t.quickReplies.length) components.push({ type: "BUTTONS", buttons: t.quickReplies.map((text) => ({ type: "QUICK_REPLY", text })) });
+  const r = await call<{ id?: string; status?: string }>(`/${encodeURIComponent(wabaId)}/message_templates`, token, {
+    method: "POST",
+    body: JSON.stringify({ name: t.name, language: t.language, category: t.category, components }),
+  });
+  if (!r.id) throw new HttpError(502, "A Meta não retornou o modelo criado");
+  return { id: r.id, status: r.status ?? "PENDING" };
+}

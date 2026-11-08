@@ -959,3 +959,52 @@ test("Portais: lê o lead da OLX (chat), da Webmotors e de formulários", async 
   assert.equal(normPhone("12345"), null);
   assert.equal(parseInbound({}).name, "Lead do portal");
 });
+
+// ---------------- Disparos ----------------
+import { durationLabel, estimateCost, idleBefore, jitter, planSteps, renderVars as bcRender, templateParamValues } from "../src/lib/broadcasts";
+
+test("Disparo: custo de marketing em reais pela tabela da Meta (Brasil)", () => {
+  const c = estimateCost(["5585999990000", "5511988887777", "14155550100"], "MARKETING", "BRL");
+  assert.equal(c.brazil, 2);
+  assert.equal(c.otherCountry, 1);
+  assert.equal(c.unit, 0.3217);
+  assert.equal(c.total, 0.64);
+});
+
+test("Disparo: custo em dólar e utilidade", () => {
+  const c = estimateCost(Array.from({ length: 1000 }, () => "5585999990000"), "UTILITY", "USD");
+  assert.equal(c.total, 6.8);
+});
+
+test("Disparo: moeda desconhecida não inventa valor", () => {
+  const c = estimateCost(["5585999990000"], "MARKETING", null);
+  assert.equal(c.total, null);
+  assert.equal(c.currency, null);
+});
+
+test("Disparo: variáveis de nome", () => {
+  assert.equal(bcRender("Oi {{primeiro_nome}}, tudo bem? {{nome}}", "Maria Clara Souza"), "Oi Maria, tudo bem? Maria Clara Souza");
+  assert.equal(bcRender("Oi {{ nome }}!", null), "Oi!");
+  assert.deepEqual(templateParamValues([{ kind: "first_name" }, { kind: "text", value: "20%" }], "João Pedro"), ["João", "20%"]);
+  assert.deepEqual(templateParamValues([{ kind: "name" }], null), ["cliente"]);
+});
+
+test("Disparo: texto vira legenda da primeira foto/vídeo", () => {
+  assert.deepEqual(planSteps(true, [{ kind: "audio" }, { kind: "image" }]), [{ kind: "media", index: 0, withText: false }, { kind: "media", index: 1, withText: true }]);
+  assert.deepEqual(planSteps(true, [{ kind: "audio" }]), [{ kind: "media", index: 0, withText: false }, { kind: "text" }]);
+  assert.deepEqual(planSteps(true, []), [{ kind: "text" }]);
+  assert.deepEqual(planSteps(false, [{ kind: "video" }]), [{ kind: "media", index: 0, withText: false }]);
+});
+
+test("Disparo: ritmo com variação e previsão de duração", () => {
+  assert.equal(jitter(30, 0), 18);
+  assert.equal(jitter(30, 1), 42);
+  assert.equal(jitter(0, 0.5), 0);
+  assert.equal(durationLabel(120, 30), "cerca de 1h");
+  assert.equal(durationLabel(10, 0), "cerca de 1 minuto");
+});
+
+test("Disparo: parado há N meses", () => {
+  assert.equal(idleBefore(null), null);
+  assert.equal(idleBefore(2, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-09-08");
+});

@@ -517,5 +517,48 @@ ok("finalizar atendimento tira da lista", !(await as(A, "select id from public.u
 await su("update public.leads set last_message_at=now() + interval '1 minute' where id=$1", [wl]);
 ok("cliente mandou de novo: volta para a lista", (await as(A, "select id from public.unanswered_leads($1)", [orgA])).some((r) => r.id === wl));
 
+console.log("\n# Disparos");
+const bch = (await su("insert into public.whatsapp_channels (organization_id,provider,name,status) values ($1,'zapi','Disparo','connected') returning id", [orgA]))[0].id;
+const st2 = (await su("select id from public.stages where organization_id=$1 order by position offset 1 limit 1", [orgA]))[0].id;
+const tg = (await su("insert into public.tags (organization_id,name,color) values ($1,'Disparo VIP','#22c3a6') returning id", [orgA]))[0].id;
+const mk = async (name, phone, stage, extra = "") => (await su(`insert into public.leads (organization_id,pipeline_id,stage_id,name,phone${extra ? ",created_at,last_message_at" : ""}) values ($1,$2,$3,$4,$5${extra}) returning id`, [orgA, pipeA, stage, name, phone]))[0].id;
+const b1 = await mk("Disp Um", "5585988880001", stageA);
+const b2 = await mk("Disp Dois", "5585988880002", st2);
+const b3 = await mk("Disp Tres", "5585988880003", stageA, ",now() - interval '70 days',now() - interval '65 days'");
+const b4 = await mk("Disp Sem Fone", null, stageA);
+await su("update public.leads set stage_changed_at=now() - interval '70 days' where id=$1", [b3]);
+await su("insert into public.lead_tags (lead_id,tag_id,organization_id) values ($1,$2,$3),($4,$2,$3)", [b1, tg, orgA, b4]);
+const aud = (tags, stages, idle, leads, ex = []) => su("select * from public.broadcast_audience($1,$2::uuid[],$3::uuid[],$4,$5::uuid[],$6::uuid[])", [orgA, tags, stages, idle, leads, ex]);
+ok("por tag: só quem tem a tag e telefone", (await aud([tg], [], null, [])).map((r) => r.lead_id).join() === b1);
+ok("telefone sai só com números", (await aud([tg], [], null, []))[0].phone === "5585988880001");
+ok("por coluna: só quem está na etapa", (await aud([], [st2], null, [])).length === 1);
+ok("parado há 2 meses: só o lead sem movimento", (await aud([], [], new Date(Date.now() - 60 * 864e5).toISOString(), [])).map((r) => r.lead_id).join() === b3);
+ok("critérios somam com E", (await aud([tg], [st2], null, [])).length === 0);
+ok("leads avulsos entram junto", (await aud([tg], [], null, [b3])).length === 2);
+ok("sem critério nenhum: ninguém", (await aud([], [], null, [])).length === 0);
+ok("excluídos ficam de fora", (await aud([tg], [], null, [b3], [b3])).length === 1);
+ok("outra empresa não usa o público", await (async () => { try { await as(A, "select * from public.broadcast_audience($1,'{}','{}',null,'{}','{}')", [orgA]); return false; } catch { return true; } })());
+
+const bc = (await su("insert into public.broadcasts (organization_id,name,channel_id,provider,body,send_at,total) values ($1,'Black Friday',$2,'zapi','Oi {{nome}}',now(),3) returning id", [orgA, bch]))[0].id;
+await su("insert into public.broadcast_recipients (broadcast_id,organization_id,lead_id,phone,name) values ($1,$2,$3,'1','a'),($1,$2,$4,'2','b'),($1,$2,$5,'3','c')", [bc, orgA, b1, b2, b3]);
+await expectError("destinatário de outra empresa é recusado", () => su("insert into public.broadcast_recipients (broadcast_id,organization_id,lead_id,phone) values ($1,$2,$3,'9')", [bc, orgB, leadA]), "42501");
+await expectError("canal de outra empresa é recusado", async () => { const c = (await su("insert into public.whatsapp_channels (organization_id,provider,name,status) values ($1,'zapi','B2','connected') returning id", [orgB]))[0].id; await su("insert into public.broadcasts (organization_id,name,channel_id,provider,body,send_at) values ($1,'x',$2,'zapi','oi',now())", [orgA, c]); }, "42501");
+await expectError("API oficial exige modelo", () => su("insert into public.broadcasts (organization_id,name,channel_id,provider,body,send_at) values ($1,'x',$2,'meta','oi',now())", [orgA, bch]), "23514");
+ok("agendado não entrega ninguém ainda", (await su("select * from public.claim_broadcast_recipients($1, 5)", [bc])).length === 0);
+await su("update public.broadcasts set status='sending' where id=$1", [bc]);
+const bq1 = await su("select * from public.claim_broadcast_recipients($1, 1)", [bc]);
+ok("em andamento: reserva um por vez, na ordem", bq1.length === 1 && bq1[0].status === "sending");
+await su("update public.broadcast_recipients set status='sent', sent_at=now() where id=$1", [bq1[0].id]);
+ok("contadores atualizam", (await su("select (public.refresh_broadcast($1)).sent n", [bc]))[0].n === 1);
+ok("dono vê o disparo", (await as(A, "select id from public.broadcasts where id=$1", [bc])).length === 1);
+ok("vendedor e outra empresa não veem", (await as(C, "select id from public.broadcasts")).length === 0 && (await as(B, "select id from public.broadcasts")).length === 0);
+await expectError("usuário não muda disparo direto", () => as(A, "update public.broadcasts set status='done' where id=$1", [bc]), "42501");
+const cx = (await su("select (public.cancel_broadcast($1,$2)).status s", [bc, A]))[0].s;
+ok("cancelar para na hora", cx === "canceled" && (await su("select * from public.claim_broadcast_recipients($1, 5)", [bc])).length === 0);
+ok("quem não recebeu fica cancelado", (await su("select count(*)::int n from public.broadcast_recipients where broadcast_id=$1 and status='canceled'", [bc]))[0].n === 2);
+const bd = (await su("insert into public.broadcasts (organization_id,name,channel_id,provider,body,send_at,status) values ($1,'Fim',$2,'zapi','oi',now(),'sending') returning id", [orgA, bch]))[0].id;
+await su("insert into public.broadcast_recipients (broadcast_id,organization_id,lead_id,phone,status) values ($1,$2,$3,'1','sent')", [bd, orgA, b1]);
+ok("sem fila: disparo termina sozinho", (await su("select (public.refresh_broadcast($1)).status s", [bd]))[0].s === "done");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

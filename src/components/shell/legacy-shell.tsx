@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Sparkles, BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet } from "lucide-react";
+import { Sparkles, BarChart3, CalendarClock, ChevronsUpDown, KanbanSquare, LogOut, MessageCircle, Settings, Users, FileBarChart, UsersRound, PhoneCall, Bot, Handshake, PlayCircle, Workflow, Wallet, Send } from "lucide-react";
 import { toast } from "sonner";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useWorkspace } from "@/components/workspace";
@@ -26,6 +26,7 @@ const NAV: { href: string; label: string; icon: typeof BarChart3; seller?: boole
   { href: "/automacoes", label: "Automações", icon: Workflow },
   { href: "/ligacoes", label: "Ligações", icon: PhoneCall },
   { href: "/leads", label: "Leads", icon: Users },
+  { href: "/disparos", label: "Disparos", icon: Send },
   { href: "/agendadas", label: "Agendadas", icon: CalendarClock },
   { seller: true, href: "/time", label: "Time comercial", icon: UsersRound },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart },
