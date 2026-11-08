@@ -1006,5 +1006,7 @@ test("Disparo: ritmo com variação e previsão de duração", () => {
 
 test("Disparo: parado há N meses", () => {
   assert.equal(idleBefore(null), null);
-  assert.equal(idleBefore(2, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-09-08");
+  assert.equal(idleBefore({ amount: 2, unit: "month" }, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-09-08");
+  assert.equal(idleBefore({ amount: 2, unit: "week" }, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-10-25");
+  assert.equal(idleBefore({ amount: 5, unit: "day" }, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-11-03");
 });

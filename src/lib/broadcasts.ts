@@ -9,10 +9,21 @@ export type TemplateCategory = "MARKETING" | "UTILITY" | "AUTHENTICATION";
 export interface Audience {
   tagIds: string[];
   stageIds: string[];
-  /** Sem movimento há pelo menos N meses (mensagem, mudança de etapa ou criação). */
-  idleMonths: number | null;
+  /** Sem interação há pelo menos N dias/semanas/meses (mensagem, mudança de etapa ou criação). */
+  idle: Idle | null;
   leadIds: string[];
   excludeLeadIds: string[];
+}
+
+export type IdleUnit = "day" | "week" | "month";
+export interface Idle { amount: number; unit: IdleUnit }
+export const IDLE_MAX: Record<IdleUnit, number> = { day: 730, week: 104, month: 24 };
+
+export function idleLabel(i: Idle | null) {
+  if (!i) return "";
+  const n = i.amount;
+  const u = i.unit === "day" ? (n === 1 ? "dia" : "dias") : i.unit === "week" ? (n === 1 ? "semana" : "semanas") : n === 1 ? "mês" : "meses";
+  return `${n} ${u}`;
 }
 
 export interface MediaItem { path: string; mime: string; kind: "image" | "video" | "audio" | "document"; name: string; size: number }
@@ -132,10 +143,11 @@ export function durationLabel(total: number, intervalSeconds: number) {
   return `cerca de ${h}h${m ? ` ${m}min` : ""}`;
 }
 
-export function idleBefore(months: number | null, now = new Date()) {
-  if (!months || months <= 0) return null;
+export function idleBefore(idle: Idle | null, now = new Date()) {
+  if (!idle || idle.amount <= 0) return null;
   const d = new Date(now);
-  d.setMonth(d.getMonth() - months);
+  if (idle.unit === "month") d.setMonth(d.getMonth() - idle.amount);
+  else d.setDate(d.getDate() - idle.amount * (idle.unit === "week" ? 7 : 1));
   return d.toISOString();
 }
 

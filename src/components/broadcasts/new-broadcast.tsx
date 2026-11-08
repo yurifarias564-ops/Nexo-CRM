@@ -1,15 +1,16 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Clock3, FileText, Image as ImageIcon, Mic, Paperclip, Plus, Search, Tag, Users, Video, X, KanbanSquare, Hourglass, AlertTriangle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Check, Clock3, FileText, Image as ImageIcon, Mic, Paperclip, Plus, Video, X, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Spinner, TagPill } from "@/components/ui/misc";
+import { Spinner } from "@/components/ui/misc";
 import { useWorkspace } from "@/components/workspace";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { DEFAULT_TZ } from "@/lib/time";
-import { durationLabel, formatMoney, META_BR_RATES, PACES, renderVars, type Audience, type CostEstimate, type TemplateParam } from "@/lib/broadcasts";
+import { durationLabel, formatMoney, idleLabel, META_BR_RATES, PACES, renderVars, type Audience, type CostEstimate, type TemplateParam } from "@/lib/broadcasts";
 import { NewTemplateModal } from "./new-template";
+import { AudienceBuilder, type PickedLead } from "./audience-builder";
 
 type Channel = { id: string; name: string; provider: "meta" | "zapi" | "evolution"; status: string; phone_number: string | null };
 export type Tpl = {
@@ -20,7 +21,6 @@ export type Tpl = {
 type Preview = { provider: string; count: number; overLimit: boolean; sample: { id: string; name: string | null; phone: string }[]; cost: CostEstimate | null; category: string | null };
 
 const STEPS = ["Público", "Mensagem", "Quando", "Revisar"] as const;
-const IDLE = [1, 2, 3, 6, 12];
 const MAX_MB = 16;
 
 function kindOf(f: File) {
@@ -42,8 +42,8 @@ export function NewBroadcast({ onCancel, onCreated }: { onCancel: () => void; on
   const [step, setStep] = useState(0);
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [channelId, setChannelId] = useState("");
-  const [aud, setAud] = useState<Audience>({ tagIds: [], stageIds: [], idleMonths: null, leadIds: [], excludeLeadIds: [] });
-  const [picked, setPicked] = useState<{ id: string; name: string; phone: string | null }[]>([]);
+  const [aud, setAud] = useState<Audience>({ tagIds: [], stageIds: [], idle: null, leadIds: [], excludeLeadIds: [] });
+  const [picked, setPicked] = useState<PickedLead[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loadingPrev, setLoadingPrev] = useState(false);
   const [body, setBody] = useState("");
@@ -64,8 +64,7 @@ export function NewBroadcast({ onCancel, onCreated }: { onCancel: () => void; on
   const ch = channels?.find((c) => c.id === channelId) ?? null;
   const isMeta = ch?.provider === "meta";
   const tpl = templates?.find((t) => `${t.name}|${t.language}` === tplKey) ?? null;
-  const stagesByPipe = useMemo(() => ws.pipelines.map((p) => ({ p, stages: ws.stages.filter((s) => s.pipeline_id === p.id) })), [ws.pipelines, ws.stages]);
-  const hasCriteria = aud.tagIds.length + aud.stageIds.length + aud.leadIds.length > 0 || aud.idleMonths !== null;
+  const hasCriteria = aud.tagIds.length + aud.stageIds.length + aud.leadIds.length > 0 || aud.idle !== null;
 
   useEffect(() => {
     void (async () => {
@@ -113,9 +112,6 @@ export function NewBroadcast({ onCancel, onCreated }: { onCancel: () => void; on
   }, [prevKey, hasCriteria]);
   const shownPreview = hasCriteria ? preview : null;
 
-  function toggle(list: "tagIds" | "stageIds", id: string) {
-    setAud((a) => ({ ...a, [list]: a[list].includes(id) ? a[list].filter((x) => x !== id) : [...a[list], id] }));
-  }
   function pickTemplate(key: string) {
     setTplKey(key);
     const t = templates?.find((x) => `${x.name}|${x.language}` === key);
@@ -155,7 +151,7 @@ export function NewBroadcast({ onCancel, onCreated }: { onCancel: () => void; on
     const label = [
       aud.tagIds.length ? `Tags: ${aud.tagIds.map((id) => ws.tagById.get(id)?.name).filter(Boolean).join(", ")}` : null,
       aud.stageIds.length ? `Colunas: ${aud.stageIds.map((id) => ws.stageById.get(id)?.name).filter(Boolean).join(", ")}` : null,
-      aud.idleMonths ? `Parados há ${aud.idleMonths} ${aud.idleMonths === 1 ? "mês" : "meses"}` : null,
+      aud.idle ? `Sem interação há + de ${idleLabel(aud.idle)}` : null,
       aud.leadIds.length ? `${aud.leadIds.length} lead(s) escolhido(s)` : null,
     ].filter(Boolean).join(" · ");
     const fd = new FormData();
@@ -217,61 +213,7 @@ export function NewBroadcast({ onCancel, onCreated }: { onCancel: () => void; on
                   )}
                 </section>
 
-                <section>
-                  <p className="label flex items-center gap-1.5"><Tag className="h-3.5 w-3.5" /> Por tag</p>
-                  {ws.tags.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {ws.tags.map((t) => (
-                        <button key={t.id} onClick={() => toggle("tagIds", t.id)} className={cn("rounded-full border px-2.5 py-1 text-xs transition", aud.tagIds.includes(t.id) ? "border-transparent text-white" : "border-line text-slate-300 hover:bg-ink-800")}
-                          style={aud.tagIds.includes(t.id) ? { background: `${t.color}40`, boxShadow: `inset 0 0 0 1px ${t.color}` } : undefined}>
-                          <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: t.color }} />{t.name}
-                        </button>
-                      ))}
-                    </div>
-                  ) : <p className="text-xs text-slate-500">Nenhuma tag criada.</p>}
-                </section>
-
-                <section>
-                  <p className="label flex items-center gap-1.5"><KanbanSquare className="h-3.5 w-3.5" /> Por coluna do funil</p>
-                  <div className="space-y-2">
-                    {stagesByPipe.map(({ p, stages }) => (
-                      <div key={p.id}>
-                        {ws.pipelines.length > 1 && <p className="mb-1 text-xs text-slate-500">{p.name}</p>}
-                        <div className="flex flex-wrap gap-1.5">
-                          {stages.map((s) => (
-                            <button key={s.id} onClick={() => toggle("stageIds", s.id)} className={cn("rounded-full border px-2.5 py-1 text-xs transition", aud.stageIds.includes(s.id) ? "border-brand-400/60 bg-brand-500/15 text-white" : "border-line text-slate-300 hover:bg-ink-800")}>
-                              <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: s.color }} />{s.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <section>
-                  <p className="label flex items-center gap-1.5"><Hourglass className="h-3.5 w-3.5" /> Parados na base há</p>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button onClick={() => setAud((a) => ({ ...a, idleMonths: null }))} className={cn("rounded-full border px-2.5 py-1 text-xs", aud.idleMonths === null ? "border-brand-400/60 bg-brand-500/15 text-white" : "border-line text-slate-300 hover:bg-ink-800")}>Qualquer tempo</button>
-                    {IDLE.map((m) => (
-                      <button key={m} onClick={() => setAud((a) => ({ ...a, idleMonths: m }))} className={cn("rounded-full border px-2.5 py-1 text-xs", aud.idleMonths === m ? "border-brand-400/60 bg-brand-500/15 text-white" : "border-line text-slate-300 hover:bg-ink-800")}>
-                        {m === 1 ? "1 mês" : `${m} meses`}
-                      </button>
-                    ))}
-                    <label className="flex items-center gap-1.5 text-xs text-slate-400">ou
-                      <input type="number" min={1} max={60} className="field h-7 w-16 px-2 text-xs" value={aud.idleMonths && !IDLE.includes(aud.idleMonths) ? aud.idleMonths : ""}
-                        onChange={(e) => { const n = Number(e.target.value); setAud((a) => ({ ...a, idleMonths: n >= 1 && n <= 60 ? Math.floor(n) : null })); }} placeholder="nº" /> meses
-                    </label>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">Sem mensagem e sem mudar de coluna nesse período.</p>
-                </section>
-
-                <section>
-                  <p className="label flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> Leads específicos</p>
-                  <LeadPicker orgId={ws.orgId} selected={picked} onAdd={(l) => { setPicked((p) => [...p, l]); setAud((a) => ({ ...a, leadIds: [...a.leadIds, l.id] })); }}
-                    onRemove={(id) => { setPicked((p) => p.filter((x) => x.id !== id)); setAud((a) => ({ ...a, leadIds: a.leadIds.filter((x) => x !== id) })); }} />
-                </section>
-                <p className="text-xs text-slate-500">Os filtros se somam: com tag e coluna marcadas, entra quem tem a tag <b>e</b> está na coluna. Leads específicos entram sempre.</p>
+                <AudienceBuilder aud={aud} setAud={setAud} picked={picked} setPicked={setPicked} />
               </>
             )}
 
@@ -438,7 +380,7 @@ export function NewBroadcast({ onCancel, onCreated }: { onCancel: () => void; on
           <aside className="space-y-4">
             <div className="card p-4">
               <p className="text-xs text-slate-400">Público</p>
-              {!hasCriteria ? <p className="mt-1 text-sm text-slate-500">Escolha tag, coluna, tempo parado ou leads.</p> : loadingPrev && !shownPreview ? <Spinner className="mt-2 h-5 w-5" /> : shownPreview && (
+              {!hasCriteria ? <p className="mt-1 text-sm text-slate-500">Use pelo menos um filtro para ver quem recebe.</p> : loadingPrev && !shownPreview ? <Spinner className="mt-2 h-5 w-5" /> : shownPreview && (
                 <>
                   <p className="num mt-1 text-3xl font-semibold text-white">{shownPreview.count.toLocaleString("pt-BR")}<span className="ml-1.5 text-sm font-normal text-slate-400">pessoas</span>{loadingPrev && <Spinner className="ml-2 inline h-4 w-4" />}</p>
                   {shownPreview.overLimit && <p className="mt-1 text-xs text-red-300">Passa do limite de 5.000 por disparo. Filtre mais.</p>}
@@ -525,42 +467,3 @@ function CostBox({ cost, category, count, agree, setAgree }: { cost: CostEstimat
   );
 }
 
-function LeadPicker({ orgId, selected, onAdd, onRemove }: {
-  orgId: string; selected: { id: string; name: string; phone: string | null }[];
-  onAdd: (l: { id: string; name: string; phone: string | null }) => void; onRemove: (id: string) => void;
-}) {
-  const [q, setQ] = useState("");
-  const [res, setRes] = useState<{ id: string; name: string; phone: string | null }[]>([]);
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) return;
-    let alive = true;
-    const t = setTimeout(async () => {
-      const digits = term.replace(/\D/g, "");
-      let query = supabaseBrowser().from("leads").select("id, name, phone").eq("organization_id", orgId).not("phone", "is", null).limit(8);
-      query = digits.length >= 4 ? query.ilike("phone", `%${digits}%`) : query.ilike("name", `%${term.replace(/[%_]/g, "")}%`);
-      const { data } = await query;
-      if (alive) setRes((data ?? []) as typeof res);
-    }, 250);
-    return () => { alive = false; clearTimeout(t); };
-  }, [q, orgId]);
-  const shown = q.trim().length >= 2 ? res.filter((r) => !selected.some((s) => s.id === r.id)) : [];
-  return (
-    <div>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-        <input className="field pl-9" placeholder="Buscar por nome ou telefone" value={q} onChange={(e) => setQ(e.target.value)} />
-        {shown.length > 0 && (
-          <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-line bg-ink-800 shadow-2xl">
-            {shown.map((r) => (
-              <li key={r.id}><button onClick={() => { onAdd(r); setQ(""); }} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-200 hover:bg-ink-700">
-                <span className="truncate">{r.name}</span><span className="text-xs text-slate-500">+{r.phone}</span>
-              </button></li>
-            ))}
-          </ul>
-        )}
-      </div>
-      {selected.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{selected.map((s) => <TagPill key={s.id} name={s.name} color="#4f7cff" onRemove={() => onRemove(s.id)} />)}</div>}
-    </div>
-  );
-}

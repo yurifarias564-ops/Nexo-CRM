@@ -23,7 +23,7 @@ export async function channelFor(orgId: string, channelId: string): Promise<Chan
 
 export async function resolveAudience(orgId: string, a: Audience) {
   const { data, error } = await supabaseAdmin().rpc("broadcast_audience", {
-    p_org: orgId, p_tag_ids: a.tagIds, p_stage_ids: a.stageIds, p_idle_before: idleBefore(a.idleMonths),
+    p_org: orgId, p_tag_ids: a.tagIds, p_stage_ids: a.stageIds, p_idle_before: idleBefore(a.idle),
     p_lead_ids: a.leadIds, p_exclude: a.excludeLeadIds,
   }).limit(MAX_RECIPIENTS + 1);
   if (error) throw error;
