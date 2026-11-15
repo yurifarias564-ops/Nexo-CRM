@@ -1010,3 +1010,38 @@ test("Disparo: parado há N meses", () => {
   assert.equal(idleBefore({ amount: 2, unit: "week" }, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-10-25");
   assert.equal(idleBefore({ amount: 5, unit: "day" }, new Date("2026-11-08T12:00:00Z"))?.slice(0, 10), "2026-11-03");
 });
+
+// ---------- Automações do Instagram ----------
+import { buttonPayload, flowProblems, matchesKeywords as igMatch, normalizeText, parsePayload } from "@/lib/ig-flows";
+
+test("Instagram: palavra do comentário ignora maiúscula, acento e pontuação", () => {
+  assert.equal(normalizeText("  Séguir!!  "), "seguir");
+  assert.ok(igMatch("eu QUERO muito!!!", ["quero"]));
+  assert.ok(igMatch("Séguir 🙌", ["SEGUIR"]));
+  assert.ok(igMatch("quero o link", ["o link"]));
+  assert.ok(!igMatch("queroooo", ["quero"]), "palavra inteira, não pedaço");
+  assert.ok(!igMatch("não tenho interesse", ["quero", "link"]));
+  assert.ok(igMatch("qualquer coisa", []), "sem palavra, todo comentário dispara");
+  assert.ok(igMatch("", []));
+});
+
+test("Instagram: carga do botão vai e volta, e lixo é recusado", () => {
+  const id = "3f2b6c1e-8a4d-4c2b-9f10-7e6d5c4b3a21";
+  assert.deepEqual(parsePayload(buttonPayload(id, 3)), { runId: id, step: 3 });
+  assert.equal(parsePayload("igf:abc:1"), null);
+  assert.equal(parsePayload(`igf:${id}:999`), null);
+  assert.equal(parsePayload(undefined), null);
+  assert.equal(parsePayload("COMECAR"), null);
+});
+
+test("Instagram: o que falta para ligar o fluxo", () => {
+  const base = { post_mode: "any" as const, post_media: null, post_at: null, post_media_id: null, post_status: "none" as const,
+    steps: [{ text: "Oi", button: "Quero", requireFollow: false }], final_text: "Aqui", final_button: "Abrir", final_url: "https://exemplo.com/p" };
+  assert.deepEqual(flowProblems(base), []);
+  assert.ok(flowProblems({ ...base, final_url: "http://exemplo.com" }).length === 1, "link precisa ser https");
+  assert.ok(flowProblems({ ...base, steps: [] }).some((p) => p.includes("pelo menos uma")));
+  assert.ok(flowProblems({ ...base, steps: [{ text: "Oi", button: " ", requireFollow: false }] }).some((p) => p.includes("botão")));
+  assert.equal(flowProblems({ ...base, post_mode: "schedule" }).length, 2, "agendar exige arquivo e data");
+  assert.deepEqual(flowProblems({ ...base, post_mode: "schedule", post_status: "published" }), [], "já publicada não exige mais nada");
+  assert.ok(flowProblems({ ...base, post_mode: "existing" }).some((p) => p.includes("Escolha a publicação")));
+});

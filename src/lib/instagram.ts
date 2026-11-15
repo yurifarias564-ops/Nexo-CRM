@@ -20,28 +20,34 @@ export const igRedirectUri = () => `${appUrl()}/api/instagram/callback`;
 export const igVerifyToken = () => envOptional("INSTAGRAM_VERIFY_TOKEN") || createHmac("sha256", `${cronSecret()}:ig-verify`).update("v1").digest("hex").slice(0, 32);
 
 /** "state" assinado do login: diz para qual empresa a conta vai (e expira em 15 min). */
-export function signState(orgId: string, userId: string) {
-  const payload = Buffer.from(JSON.stringify({ o: orgId, u: userId, t: Date.now() })).toString("base64url");
+export function signState(orgId: string, userId: string, full = false) {
+  const payload = Buffer.from(JSON.stringify({ o: orgId, u: userId, t: Date.now(), f: full ? 1 : 0 })).toString("base64url");
   const sig = createHmac("sha256", `${cronSecret()}:ig-state`).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
-export function readState(state: string): { orgId: string; userId: string } {
+export function readState(state: string): { orgId: string; userId: string; full: boolean } {
   const [payload, sig] = state.split(".");
   if (!payload || !sig) throw new HttpError(400, "Login inválido");
   const want = createHmac("sha256", `${cronSecret()}:ig-state`).update(payload).digest("base64url");
   const a = Buffer.from(sig), b = Buffer.from(want);
   if (a.length !== b.length || !timingSafeEqual(a, b)) throw new HttpError(400, "Login inválido");
-  const j = JSON.parse(Buffer.from(payload, "base64url").toString()) as { o: string; u: string; t: number };
+  const j = JSON.parse(Buffer.from(payload, "base64url").toString()) as { o: string; u: string; t: number; f?: number };
   if (Date.now() - j.t > 15 * 60_000) throw new HttpError(400, "O login expirou. Tente de novo.");
-  return { orgId: j.o, userId: j.u };
+  return { orgId: j.o, userId: j.u, full: j.f === 1 };
 }
 
-export function authorizeUrl(state: string) {
+/** Permissões: as básicas (Direct) e as de automação (publicar e ler comentários). */
+export const IG_SCOPES_BASE = "instagram_business_basic,instagram_business_manage_messages";
+export const IG_SCOPES_FULL = `${IG_SCOPES_BASE},instagram_business_manage_comments,instagram_business_content_publish`;
+export const hasIgScope = (scopes: string | null | undefined, s: "comments" | "publish") =>
+  (scopes ?? "").split(",").includes(s === "comments" ? "instagram_business_manage_comments" : "instagram_business_content_publish");
+
+export function authorizeUrl(state: string, full = false) {
   const c = igConfig();
   if (!c) throw new HttpError(409, "A integração com o Instagram ainda não foi ativada na plataforma");
   const q = new URLSearchParams({
     client_id: c.appId, redirect_uri: igRedirectUri(), response_type: "code", state,
-    scope: "instagram_business_basic,instagram_business_manage_messages", enable_fb_login: "0",
+    scope: full ? IG_SCOPES_FULL : IG_SCOPES_BASE, enable_fb_login: "0",
   });
   return `https://www.instagram.com/oauth/authorize?${q}`;
 }
@@ -61,10 +67,11 @@ async function j<T>(res: Response): Promise<T> {
 export async function exchangeCode(code: string) {
   const c = igConfig()!;
   const form = new URLSearchParams({ client_id: c.appId, client_secret: c.secret, grant_type: "authorization_code", redirect_uri: igRedirectUri(), code });
-  const short = await j<{ access_token: string; user_id: number | string }>(await fetch("https://api.instagram.com/oauth/access_token", { method: "POST", body: form, signal: AbortSignal.timeout(20_000) }));
+  const short = await j<{ access_token: string; user_id: number | string; permissions?: string[] | string }>(await fetch("https://api.instagram.com/oauth/access_token", { method: "POST", body: form, signal: AbortSignal.timeout(20_000) }));
   const long = await j<{ access_token: string; expires_in: number }>(await fetch(`https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${encodeURIComponent(c.secret)}&access_token=${encodeURIComponent(short.access_token)}`, { signal: AbortSignal.timeout(20_000) }));
   const me = await j<{ user_id: string; username: string; name?: string }>(await fetch(`${GRAPH}/me?fields=user_id,username,name&access_token=${encodeURIComponent(long.access_token)}`, { signal: AbortSignal.timeout(20_000) }));
-  return { token: long.access_token, expiresAt: new Date(Date.now() + long.expires_in * 1000), userId: String(me.user_id), username: me.username, name: me.name ?? null };
+  const scopes = Array.isArray(short.permissions) ? short.permissions.join(",") : typeof short.permissions === "string" ? short.permissions : null;
+  return { token: long.access_token, expiresAt: new Date(Date.now() + long.expires_in * 1000), userId: String(me.user_id), username: me.username, name: me.name ?? null, scopes };
 }
 
 /** Renova o token (vale mais 60 dias). */
@@ -74,8 +81,9 @@ export async function refreshToken(token: string) {
 }
 
 /** Liga o aviso de mensagens novas desta conta para o nosso webhook. */
-export async function subscribe(token: string) {
-  await j(await fetch(`${GRAPH}/me/subscribed_apps?subscribed_fields=messages,messaging_seen&access_token=${encodeURIComponent(token)}`, { method: "POST", signal: AbortSignal.timeout(20_000) }));
+export async function subscribe(token: string, withComments = false) {
+  const fields = withComments ? "messages,messaging_seen,messaging_postbacks,comments" : "messages,messaging_seen,messaging_postbacks";
+  await j(await fetch(`${GRAPH}/me/subscribed_apps?subscribed_fields=${fields}&access_token=${encodeURIComponent(token)}`, { method: "POST", signal: AbortSignal.timeout(20_000) }));
 }
 
 /** Nome e @ de quem mandou a mensagem. */
@@ -121,4 +129,71 @@ export function isIgMediaUrl(u: string) {
     const h = new URL(u);
     return h.protocol === "https:" && /(^|\.)(cdninstagram\.com|fbcdn\.net|fbsbx\.com)$/.test(h.hostname);
   } catch { return false; }
+}
+
+// ---------- Automações: botões no Direct, comentários e publicação ----------
+
+const post = (token: string, path: string, body: unknown, timeout = 20_000) =>
+  fetch(`${GRAPH}/${path}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeout) });
+const get = (token: string, path: string, timeout = 15_000) => fetch(`${GRAPH}/${path}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeout) });
+
+export type IgButton = { title: string; payload: string } | { title: string; url: string };
+/** Para quem vai a mensagem: o autor de um comentário (resposta privada) ou alguém que já está no Direct. */
+export type IgRecipient = { comment_id: string } | { id: string };
+
+/** Mensagem com botões (até 3). Botão com `payload` volta para o CRM no clique; botão com `url` abre a página. */
+export async function sendButtons(token: string, to: IgRecipient, text: string, buttons: IgButton[]): Promise<string> {
+  const r = await j<{ message_id: string }>(await post(token, "me/messages", {
+    recipient: to,
+    message: { attachment: { type: "template", payload: { template_type: "button", text: text.slice(0, 640), buttons: buttons.slice(0, 3).map((b) => ("url" in b ? { type: "web_url", url: b.url, title: b.title.slice(0, 20) } : { type: "postback", title: b.title.slice(0, 20), payload: b.payload })) } } },
+  }));
+  return r.message_id;
+}
+
+/** Texto simples para o autor de um comentário ou para alguém do Direct. */
+export async function sendTextTo(token: string, to: IgRecipient, text: string): Promise<string> {
+  const r = await j<{ message_id: string }>(await post(token, "me/messages", { recipient: to, message: { text: text.slice(0, 1000) } }));
+  return r.message_id;
+}
+
+/** Resposta pública embaixo do comentário. */
+export async function replyToComment(token: string, commentId: string, message: string) {
+  await j(await post(token, `${encodeURIComponent(commentId)}/replies`, { message: message.slice(0, 300) }));
+}
+
+/** A pessoa segue a conta? `null` quando o Instagram não informa (ela ainda não interagiu no Direct). */
+export async function followsBusiness(token: string, igsid: string): Promise<boolean | null> {
+  try {
+    const p = await j<{ is_user_follow_business?: boolean }>(await get(token, `${encodeURIComponent(igsid)}?fields=is_user_follow_business`, 10_000));
+    return typeof p.is_user_follow_business === "boolean" ? p.is_user_follow_business : null;
+  } catch { return null; }
+}
+
+/** 1º passo da publicação: o Instagram baixa o arquivo pelo link e prepara. Devolve o id do preparo. */
+export async function createPostContainer(token: string, igUserId: string, m: { kind: "video" | "image"; url: string; caption: string | null }): Promise<string> {
+  const body = m.kind === "video" ? { media_type: "REELS", video_url: m.url, share_to_feed: true, caption: m.caption ?? "" } : { image_url: m.url, caption: m.caption ?? "" };
+  const r = await j<{ id: string }>(await post(token, `${encodeURIComponent(igUserId)}/media`, body, 45_000));
+  return r.id;
+}
+
+/** O preparo terminou? FINISHED = pode publicar; IN_PROGRESS = ainda processando; ERROR/EXPIRED = falhou. */
+export async function postContainerStatus(token: string, containerId: string): Promise<{ code: string; detail: string | null }> {
+  const r = await j<{ status_code?: string; status?: string }>(await get(token, `${encodeURIComponent(containerId)}?fields=status_code,status`));
+  return { code: r.status_code ?? "IN_PROGRESS", detail: r.status ?? null };
+}
+
+/** 2º passo: publica de fato. Devolve o id e o link da publicação. */
+export async function publishPostContainer(token: string, igUserId: string, containerId: string): Promise<{ id: string; permalink: string | null }> {
+  const r = await j<{ id: string }>(await post(token, `${encodeURIComponent(igUserId)}/media_publish`, { creation_id: containerId }, 45_000));
+  let permalink: string | null = null;
+  try { permalink = (await j<{ permalink?: string }>(await get(token, `${encodeURIComponent(r.id)}?fields=permalink`))).permalink ?? null; } catch { /* o link é só para mostrar */ }
+  return { id: r.id, permalink };
+}
+
+export interface IgMediaItem { id: string; caption: string | null; type: string; thumb: string | null; permalink: string | null; timestamp: string | null }
+/** Publicações recentes da conta (para escolher qual dispara o fluxo). */
+export async function listRecentMedia(token: string, limit = 12): Promise<IgMediaItem[]> {
+  const r = await j<{ data?: { id: string; caption?: string; media_type?: string; media_url?: string; thumbnail_url?: string; permalink?: string; timestamp?: string }[] }>(
+    await get(token, `me/media?fields=id,caption,media_type,media_url,thumbnail_url,permalink,timestamp&limit=${limit}`));
+  return (r.data ?? []).map((m) => ({ id: m.id, caption: m.caption ?? null, type: m.media_type ?? "IMAGE", thumb: m.thumbnail_url ?? (m.media_type === "VIDEO" ? null : m.media_url ?? null), permalink: m.permalink ?? null, timestamp: m.timestamp ?? null }));
 }

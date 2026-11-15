@@ -3,11 +3,11 @@ import { randomBytes } from "node:crypto";
 import { requireApiContext } from "@/lib/auth";
 import { appUrl } from "@/lib/env";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { exchangeCode, readState, subscribe } from "@/lib/instagram";
+import { exchangeCode, hasIgScope, readState, subscribe } from "@/lib/instagram";
 
 export const runtime = "nodejs";
 
-const back = (msg: string) => NextResponse.redirect(`${appUrl()}/settings?tab=integrations&ig=${encodeURIComponent(msg)}`);
+const back = (msg: string, full = false) => NextResponse.redirect(full ? `${appUrl()}/automacoes?tab=instagram&ig=${encodeURIComponent(msg)}` : `${appUrl()}/settings?tab=integrations&ig=${encodeURIComponent(msg)}`);
 
 /** Volta do login do Instagram: guarda a conta como canal e liga o recebimento das mensagens. */
 export async function GET(req: Request) {
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     const { data: existing } = await db.from("whatsapp_channels").select("id, organization_id").eq("ig_user_id", acc.userId).maybeSingle();
     if (existing && existing.organization_id !== ctx.org.id) return back("em-uso");
     let id = existing?.id as string | undefined;
-    const fields = { name: `Instagram @${acc.username}`.slice(0, 80), status: "connected" as const, ig_username: acc.username, ig_token_expires_at: acc.expiresAt.toISOString(), last_error: null };
+    const fields = { name: `Instagram @${acc.username}`.slice(0, 80), status: "connected" as const, ig_username: acc.username, ig_token_expires_at: acc.expiresAt.toISOString(), last_error: null, ...(acc.scopes ? { ig_scopes: acc.scopes } : {}) };
     if (id) {
       await db.from("whatsapp_channels").update(fields).eq("id", id);
       await db.from("whatsapp_channel_secrets").update({ meta_access_token: acc.token, updated_at: new Date().toISOString() }).eq("channel_id", id);
@@ -34,12 +34,15 @@ export async function GET(req: Request) {
       id = ch.id;
       await db.from("whatsapp_channel_secrets").insert({ channel_id: id, meta_access_token: acc.token, webhook_secret: randomBytes(24).toString("hex") });
     }
-    try { await subscribe(acc.token); } catch (e) {
+    const withComments = hasIgScope(acc.scopes, "comments");
+    try {
+      try { await subscribe(acc.token, withComments); } catch (e) { if (!withComments) throw e; await subscribe(acc.token, false); }
+    } catch (e) {
       await db.from("whatsapp_channels").update({ last_error: `Recebimento de mensagens: ${(e as Error).message}`.slice(0, 300) }).eq("id", id!);
-      return back("sem-webhook");
+      return back("sem-webhook", st.full);
     }
     await db.from("instagram_access_requests").upsert({ organization_id: ctx.org.id, username: acc.username.toLowerCase(), status: "connected" });
-    return back("ok");
+    return back("ok", st.full);
   } catch (e) {
     console.error("[instagram callback]", e);
     return NextResponse.redirect(`${appUrl()}/settings?tab=integrations&ig=erro&igmsg=${encodeURIComponent(((e as Error).message ?? "").slice(0, 200))}`);

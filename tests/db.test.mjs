@@ -560,5 +560,26 @@ const bd = (await su("insert into public.broadcasts (organization_id,name,channe
 await su("insert into public.broadcast_recipients (broadcast_id,organization_id,lead_id,phone,status) values ($1,$2,$3,'1','sent')", [bd, orgA, b1]);
 ok("sem fila: disparo termina sozinho", (await su("select (public.refresh_broadcast($1)).status s", [bd]))[0].s === "done");
 
+// # Automações do Instagram
+const igc = (await su("insert into public.whatsapp_channels (organization_id,provider,name,status,ig_user_id) values ($1,'instagram','IG A','connected','1789') returning id", [orgA]))[0].id;
+const igf = (await su("insert into public.ig_flows (organization_id,channel_id,name,post_mode,steps,final_text,final_button,final_url) values ($1,$2,'Reels','any','[{\"text\":\"oi\",\"button\":\"quero\",\"requireFollow\":false}]','fim','Abrir','https://x.com/p') returning id", [orgA, igc]))[0].id;
+await expectError("fluxo do Instagram só em conta do Instagram", () => su("insert into public.ig_flows (organization_id,channel_id,name) values ($1,$2,'x')", [orgA, bch]), "42501");
+await expectError("fluxo não usa Instagram de outra empresa", () => su("insert into public.ig_flows (organization_id,channel_id,name) values ($1,$2,'x')", [orgB, igc]), "42501");
+await expectError("link final precisa ser https", () => su("update public.ig_flows set final_url='http://x.com' where id=$1", [igf]), "23514");
+await expectError("agendada exige arquivo e data", () => su("update public.ig_flows set post_status='scheduled' where id=$1", [igf]), "23514");
+ok("sem publicação vencida, nada é reservado", (await su("select * from public.claim_ig_posts(3)")).length === 0);
+await su("update public.ig_flows set post_mode='schedule', post_media='{\"path\":\"a/b.mp4\",\"kind\":\"video\"}', post_at=now() - interval '1 minute', post_status='scheduled' where id=$1", [igf]);
+const igq = await su("select * from public.claim_ig_posts(3)");
+ok("publicação vencida é reservada e conta a tentativa", igq.length === 1 && igq[0].post_attempts === 1);
+await su("update public.ig_flows set post_at=now() + interval '1 day' where id=$1", [igf]);
+ok("publicação futura espera a hora", (await su("select * from public.claim_ig_posts(3)")).length === 0);
+await su("insert into public.ig_flow_runs (flow_id,organization_id,igsid) values ($1,$2,'555')", [igf, orgA]);
+await expectError("a mesma pessoa não entra duas vezes no mesmo fluxo", () => su("insert into public.ig_flow_runs (flow_id,organization_id,igsid) values ($1,$2,'555')", [igf, orgA]), "23505");
+await expectError("execução de outra empresa é recusada", () => su("insert into public.ig_flow_runs (flow_id,organization_id,igsid) values ($1,$2,'777')", [igf, orgB]), "42501");
+ok("dono vê o fluxo e quem entrou", (await as(A, "select id from public.ig_flows")).length === 1 && (await as(A, "select id from public.ig_flow_runs")).length === 1);
+ok("vendedor e outra empresa não veem", (await as(C, "select id from public.ig_flows")).length === 0 && (await as(B, "select id from public.ig_flows")).length === 0 && (await as(B, "select id from public.ig_flow_runs")).length === 0);
+await expectError("usuário não liga fluxo direto no banco", () => as(A, "update public.ig_flows set enabled=true where id=$1", [igf]), "42501");
+await expectError("usuário não chama a reserva de publicação", () => as(A, "select * from public.claim_ig_posts(1)"), "42501");
+
 console.log(`\n${pass} passaram, ${failN} falharam`);
 process.exit(failN ? 1 : 0);

@@ -11,9 +11,10 @@ import { GROUP_COLOR, STEP_ICON, triggerSummary } from "./forms";
 import { FlowEditor } from "./flow-editor";
 import { MeetingSettingsPanel } from "./meeting-settings";
 import { HoursSettingsPanel } from "./hours-settings";
+import { InstagramFlows } from "./instagram-flows";
 
-type Tab = "fluxos" | "reunioes" | "horario";
-const TABS: { id: Tab; label: string }[] = [{ id: "fluxos", label: "Fluxos" }, { id: "reunioes", label: "Reuniões e lembretes" }, { id: "horario", label: "Horário comercial" }];
+type Tab = "fluxos" | "instagram" | "reunioes" | "horario";
+const TABS: { id: Tab; label: string }[] = [{ id: "fluxos", label: "Fluxos" }, { id: "instagram", label: "Instagram" }, { id: "reunioes", label: "Reuniões e lembretes" }, { id: "horario", label: "Horário comercial" }];
 
 interface Automation extends AutomationBody { id: string; created_at: string; updated_at: string }
 interface Stat { total: number; waiting: number; failed: number; last: string | null }
@@ -26,7 +27,7 @@ export function AutomationsPage() {
   const [tab, setTab] = useState<Tab>("fluxos");
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t === "reunioes" || t === "horario") { const id = setTimeout(() => setTab(t), 0); return () => clearTimeout(id); }
+    if (t === "reunioes" || t === "horario" || t === "instagram") { const id = setTimeout(() => setTab(t), 0); return () => clearTimeout(id); }
   }, []);
 
   const load = useCallback(async () => {
@@ -71,7 +72,7 @@ export function AutomationsPage() {
           ))}
         </div>
 
-        {tab === "reunioes" ? <MeetingSettingsPanel /> : tab === "horario" ? <HoursSettingsPanel /> : !list ? <div className="flex justify-center py-16"><Spinner /></div> : !list.automations.length ? (
+        {tab === "instagram" ? <InstagramFlows /> : tab === "reunioes" ? <MeetingSettingsPanel /> : tab === "horario" ? <HoursSettingsPanel /> : !list ? <div className="flex justify-center py-16"><Spinner /></div> : !list.automations.length ? (
           <div className="rounded-2xl border border-dashed border-line p-10 text-center">
             <Workflow className="mx-auto h-10 w-10 text-brand-300" />
             <p className="mt-3 font-semibold text-white">Nenhuma automação ainda</p>
